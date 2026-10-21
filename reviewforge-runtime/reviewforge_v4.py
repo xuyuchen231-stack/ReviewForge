@@ -151,7 +151,7 @@ def client_chat(api,system,payload,role='writer'):
 
 def write_section(api,whole,section_head,section_body,papers,feedback=''):
  sources=[{'key':p['key'],'title':p['title'],'year':p['year'],'doi':p['doi'],'metadata_status':p['metadata_status']} for p in papers[:180]]
- sysmsg='''You are a senior reviewer-author in biochemical engineering. Rewrite ONLY the provided LaTeX section body.\nReturn plain LaTeX body without fences or the \\section header, preamble or bibliography. Preserve ALL figures, tables, TikZ, equations, labels, user citation commands and technical accuracy.\nCite supplied keys only when actually relevant from title/metadata; do NOT attribute findings, numerical results or detailed methods based on titles alone.\nYou may rename subsection, subsubsection and paragraph headings to improve clarity, brevity and scholarly organization. Preserve their count and hierarchy within this block; do not remove covered content. Make synthesis deep, arguments coherent, terms precise. Avoid defensive self-justifying prose. Do not replace equations with generic prose.\nIf evidence is insufficient, preserve existing supported statements and avoid inventing new ones. No full document output.\n'''
+ sysmsg='''You are a senior reviewer-author in biochemical engineering. Rewrite ONLY the provided LaTeX section body.\nReturn plain LaTeX body without fences or the \\section header, preamble or bibliography. Preserve ALL figures, tables, TikZ, equations, labels, user citation commands and technical accuracy.\nCite supplied keys only when actually relevant from title/metadata; do NOT attribute findings, numerical results or detailed methods based on titles alone.\nYou may rename subsection, subsubsection and paragraph headings to improve clarity, brevity and scholarly organization. You may merge, split, or reorganize subheadings within this block when justified, but never omit substantive content, citations, figures, equations, tables, or labels. Make synthesis deep, arguments coherent, terms precise. Avoid defensive self-justifying prose. Do not replace equations with generic prose.\nIf evidence is insufficient, preserve existing supported statements and avoid inventing new ones. No full document output.\n'''
  return client_chat(api,sysmsg,{'brief':BRIEF,'section':section_head,'body':section_body,'reference_catalogue':sources,'reviewer_feedback':feedback})
 
 def split_safe_blocks(body, limit=3200):
@@ -190,7 +190,10 @@ def gate_block(old,new):
   return False,'Output empty or likely truncated'
  if cite_keys(old)-cite_keys(new):return False,'Existing citations removed'
  if heading_inventory(old)!=heading_inventory(new):
-  return False,'Subheading count or hierarchy changed; requires separate restructuring review'
+  # Structural reorganization is allowed only after independent scientific review.
+  # All protected LaTeX, citations, labels and cross-references are still gated below.
+  if len(heading_inventory(new))>max(20,3*max(1,len(heading_inventory(old)))):
+   return False,'Excessive new headings; possible model-generated outline instead of revision'
  if re.findall(r'\\(?:ref|eqref)\{[^}]+\}',old)!=re.findall(r'\\(?:ref|eqref)\{[^}]+\}',new):
   return False,'Cross-references changed'
  for env in ('figure','figure*','table','table*','equation','equation*','align','align*','gather','gather*','tikzpicture'):
@@ -239,7 +242,7 @@ def review_blocks(api,tex,head,body,papers,ws,index,state,state_path):
     verdict=review_section(api,head,original,candidate) if ok else {'accept':False,'issues':[why],'reason':'Structural gate'}
     if ok:state['calls']+=1
     if ok and verdict.get('accept') is True:
-     atomic_json(record_path,{'source_sha256':fingerprint,'accepted':True,'candidate':candidate,'review':verdict,'attempt':attempt,'heading_changes':heading_change_log(original,candidate)})
+     atomic_json(record_path,{'source_sha256':fingerprint,'accepted':True,'candidate':candidate,'review':verdict,'attempt':attempt,'heading_changes':heading_change_log(original,candidate),'heading_structure_before':heading_inventory(original),'heading_structure_after':heading_inventory(candidate)})
      output.append(candidate);accepted=True
      state['heartbeat_utc']=datetime.datetime.now(datetime.timezone.utc).isoformat()
      atomic_json(state_path,state)
