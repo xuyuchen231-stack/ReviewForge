@@ -154,39 +154,110 @@ def write_section(api,whole,section_head,section_body,papers,feedback=''):
  sysmsg='''You are a senior reviewer-author in biochemical engineering. Rewrite ONLY the provided LaTeX section body.\nReturn plain LaTeX body without fences or the \\section header, preamble or bibliography. Preserve ALL figures, tables, TikZ, equations, labels, user citation commands and technical accuracy.\nCite supplied keys only when actually relevant from title/metadata; do NOT attribute findings, numerical results or detailed methods based on titles alone.\nMake synthesis deep, arguments coherent, terms precise. Avoid defensive self-justifying prose. Do not replace equations with generic prose.\nIf evidence is insufficient, preserve existing supported statements and avoid inventing new ones. No full document output.\n'''
  return client_chat(api,sysmsg,{'brief':BRIEF,'section':section_head,'body':section_body,'reference_catalogue':sources,'reviewer_feedback':feedback})
 
-def rewrite_in_blocks(api,whole,head,body,papers,feedback=''):
- """Bound each model output and keep protected LaTeX unchanged."""
- starts=[m.start() for m in re.finditer(r'(?m)^\\(?:subsection|subsubsection)\*?(?:\[[^\]]*\])?\{[^\n]*\}',body)]
- cuts=sorted(set([0]+starts+[len(body)]))
- pieces=[body[cuts[i]:cuts[i+1]] for i in range(len(cuts)-1)]
- chunks=[]
- for piece in pieces:
-  if len(piece)<=3800:
-   chunks.append(piece)
-  else:
-   paragraphs=re.split(r'(\n\s*\n)',piece)
-   current=''
-   for part in paragraphs:
-    if current and len(current)+len(part)>3800:
-     chunks.append(current);current=''
-    current+=part
-   if current:chunks.append(current)
+def split_safe_blocks(body, limit=3200):
+ """Split at headings and blank lines, never within LaTeX environments."""
+ headings=list(re.finditer(r'(?m)^\\(?:subsection|subsubsection|paragraph)\*?(?:\[[^\]]*\])?\{[^\n]*\}',body))
+ boundaries=sorted(set([0,len(body)]+[m.start() for m in headings]))
+ units=[]
+ for a,b in zip(boundaries,boundaries[1:]):
+  section=body[a:b]
+  # Avoid splitting within a protected environment; accumulate paragraphs with environment depth.
+  parts=re.split(r'(\n[ \t]*\n)',section)
+  current=''
+  for part in parts:
+   if current and len(current)+len(part)>limit and current.count(r'\begin{')==current.count(r'\end{'):
+    units.append(current);current=''
+   current+=part
+  if current:units.append(current)
+ return [x for x in units if x]
+
+
+def gate_block(old,new):
+ if not new.strip() or len(new)<max(80,int(len(old)*.72)):
+  return False,'Output empty or likely truncated'
+ if cite_keys(old)-cite_keys(new):return False,'Existing citations removed'
+ if re.findall(r'\\(?:subsection|subsubsection|paragraph)\*?(?:\[[^\]]*\])?\{[^\n]*\}',old)!=re.findall(r'\\(?:subsection|subsubsection|paragraph)\*?(?:\[[^\]]*\])?\{[^\n]*\}',new):
+  return False,'Subheadings changed'
+ if re.findall(r'\\(?:ref|eqref)\{[^}]+\}',old)!=re.findall(r'\\(?:ref|eqref)\{[^}]+\}',new):
+  return False,'Cross-references changed'
+ for env in ('figure','figure*','table','table*','equation','equation*','align','align*','gather','gather*','tikzpicture'):
+  p=r'\\begin\{'+re.escape(env)+r'\}.*?\\end\{'+re.escape(env)+r'\}'
+  if re.findall(p,old,re.S)!=re.findall(p,new,re.S):return False,'Protected environment changed: '+env
+ return protect_tex(old,new)
+
+
+def review_blocks(api,tex,head,body,papers,ws,index,state,state_path):
+ """Persist each accepted, independently reviewed block before moving on."""
+ blocks=split_safe_blocks(body)
+ directory=ws/'revisions'/('section_%02d_blocks'%(index+1))
+ directory.mkdir(parents=True,exist_ok=True)
  output=[]
- for i,part in enumerate(chunks):
-  # Keep blocks with structural material intact rather than risk loss.
-  if re.search(r'\\begin\{(?:equation|align|gather|figure|table|tikzpicture)\*?\}|\\includegraphics|\\label\{',part):
-   output.append(part);continue
-  candidate=write_section(api,whole,head,part,papers,feedback=feedback).strip()
-  if len(candidate)<max(100,int(len(part)*0.7)):
-   raise ValueError('Truncated block '+str(i+1)+'/'+str(len(chunks)))
-  ok,why=protect_tex(part,candidate)
-  if not ok or not cite_keys(part).issubset(cite_keys(candidate)):
-   raise ValueError('Block '+str(i+1)+' structural gate: '+why)
-  oldheads=re.findall(r'(?m)^\\(?:subsection|subsubsection)\*?(?:\[[^\]]*\])?\{[^\n]*\}',part)
-  newheads=re.findall(r'(?m)^\\(?:subsection|subsubsection)\*?(?:\[[^\]]*\])?\{[^\n]*\}',candidate)
-  if oldheads!=newheads:raise ValueError('Subsection headings changed in block '+str(i+1))
-  output.append(candidate)
- return '\n'.join(output)
+ for number,original in enumerate(blocks,1):
+  fingerprint=hashlib.sha256(original.encode('utf-8')).hexdigest()
+  record_path=directory/('block_%03d.json'%number)
+  if record_path.exists():
+   try:
+    saved=json.loads(record_path.read_text(encoding='utf-8'))
+    if saved.get('source_sha256')==fingerprint and saved.get('accepted') and gate_block(original,saved.get('candidate',''))[0]:
+     output.append(saved['candidate'])
+     state['active_block']=number
+     atomic_json(state_path,state)
+     continue
+   except (OSError,ValueError,TypeError):pass
+  if time.time()>=state['deadline']:
+   state['status']='paused_deadline';atomic_json(state_path,state)
+   return None
+  # Never send a block containing structural environments for destructive rewriting.
+  if re.search(r'\\begin\{(?:figure|table|equation|align|gather|tikzpicture)\*?\}|\\includegraphics',original):
+   atomic_json(record_path,{'source_sha256':fingerprint,'accepted':True,'candidate':original,'mode':'protected_original'})
+   output.append(original)
+   continue
+  feedback=''
+  accepted=False
+  attempt=1
+  rate_count=0
+  while attempt<=3 and time.time()<state['deadline']:
+   state.update({'active_section':index+1,'active_block':number,'total_blocks':len(blocks),'active_attempt':attempt,'status':'requesting','heartbeat_utc':datetime.datetime.now(datetime.timezone.utc).isoformat()})
+   atomic_json(state_path,state)
+   try:
+    candidate=write_section(api,tex,head,original,papers,feedback=feedback).strip()
+    state['calls']+=1
+    ok,why=gate_block(original,candidate)
+    verdict=review_section(api,head,original,candidate) if ok else {'accept':False,'issues':[why],'reason':'Structural gate'}
+    if ok:state['calls']+=1
+    if ok and verdict.get('accept') is True:
+     atomic_json(record_path,{'source_sha256':fingerprint,'accepted':True,'candidate':candidate,'review':verdict,'attempt':attempt})
+     output.append(candidate);accepted=True
+     state['heartbeat_utc']=datetime.datetime.now(datetime.timezone.utc).isoformat()
+     atomic_json(state_path,state)
+     print(f'Accepted section {index+1} block {number}/{len(blocks)}; API calls {state["calls"]}',flush=True)
+     break
+    feedback='Correct the following review findings without deleting evidence or TeX: '+json.dumps(verdict.get('issues',[]),ensure_ascii=False)
+    atomic_json(record_path,{'source_sha256':fingerprint,'accepted':False,'last_review':verdict,'attempt':attempt})
+    attempt+=1
+   except Exception as e:
+    message=type(e).__name__+': '+str(e)[:300]
+    if '429' in str(e):
+     rate_count+=1
+     delay=min(1800,60*2**min(rate_count-1,4))
+     if time.time()+delay>=state['deadline']:
+      state['status']='paused_rate_limit';state['last_error']=message;atomic_json(state_path,state)
+      return None
+     state['status']='rate_limited';state['last_error']=message;atomic_json(state_path,state)
+     until=time.time()+delay
+     while time.time()<until:
+      time.sleep(min(30,max(.1,until-time.time())))
+      state['heartbeat_utc']=datetime.datetime.now(datetime.timezone.utc).isoformat()
+      atomic_json(state_path,state)
+     continue
+    atomic_json(record_path,{'source_sha256':fingerprint,'accepted':False,'last_error':message,'attempt':attempt})
+    attempt+=1
+  if not accepted:
+   state['status']='blocked_block';state['last_error']=f'Section {index+1}, block {number} failed; accepted earlier blocks retained'
+   atomic_json(ws/'reports/blocked_block.json',{'section':index+1,'block':number,'total_blocks':len(blocks),'reason':state['last_error']})
+   atomic_json(state_path,state)
+   return None
+ return ''.join(output)
 
 
 def analyze_structure(text):
@@ -350,94 +421,41 @@ def run_v4(ws=WORK,hours=9,resume=False,minimum=60,skip_search=False,skip_transl
   while state['section']<len(sections):
    if time.time()>=state['deadline']:break
    index=state['section']
-   head,start,end=sections[index];chunk=tex[start:end];body=chunk[len(head):]
-   if len(body)>30000:
-    state['history'].append({'section':index,'accepted':False,'error':'Section exceeds 30000 characters'})
-    atomic_json(state_path,state);break
-   accepted=False
-   feedback=''
-   attempt=1
-   rate_limit_count=0
-   while attempt<=3 and time.time()<state['deadline']:
-    state['heartbeat_utc']=datetime.datetime.now(datetime.timezone.utc).isoformat()
-    state['active_section']=index+1
-    state['active_attempt']=attempt
-    state['status']='requesting'
-    atomic_json(state_path,state)
-    try:
-     candidate=rewrite_in_blocks(api,tex,head,body,papers,feedback=feedback).strip();state['calls']+=1
-     ok,why=protect_tex(body,candidate)
-     if ok and not cite_keys(body).issubset(cite_keys(candidate)):ok=False;why='Existing citekeys removed'
-     if ok:
-      proposed=tex[:start]+head+'\n'+candidate+'\n'+tex[end:]
-      proposed_sections=extract_sections(proposed)
-      if [h for h,_,_ in proposed_sections]!=[h for h,_,_ in sections]:
-       ok=False;why='Top-level section headings changed or removed'
-     verdict=review_section(api,head,body,candidate) if ok else {'accept':False,'issues':[why],'reason':'Structural gate'}
-     if ok:state['calls']+=1
-     accepted=ok and verdict.get('accept') is True
-     if accepted:
-      tex=tex[:start]+head+'\n'+candidate+'\n'+tex[end:]
-      (ws/'revisions'/f'section_{index+1:02}.tex').write_text(candidate,encoding='utf-8')
-      state['history'].append({'section':index,'accepted':True,'review':verdict,'attempt':attempt})
-      break
-     state['history'].append({'section':index,'accepted':False,'review':verdict,'attempt':attempt})
-     feedback='Previous candidate was rejected. Fix these exact problems while preserving every protected LaTeX equation, align block, figure, table, label and citekey verbatim: '+json.dumps(verdict.get('issues',[]),ensure_ascii=False)
-     attempt+=1
-    except Exception as e:
-     message=type(e).__name__+': '+str(e)[:300]
-     if '429' in str(e) and 'rate limit' in str(e).lower():
-      import email.utils
-      import re as _re
-      rate_limit_count+=1
-      m=_re.search(r'Retry-After:\\s*([^;\\n]+)',str(e))
-      delay=60
-      if m:
-       try:delay=max(1,int(float(m.group(1).strip())))
-       except ValueError:
-        try:delay=max(1,int((email.utils.parsedate_to_datetime(m.group(1).strip())-datetime.datetime.now(datetime.timezone.utc)).total_seconds()))
-        except (ValueError,TypeError,OverflowError):pass
-      delay=min(3600,max(delay,min(1800,60*2**min(rate_limit_count-1,5))))
-      remaining=state['deadline']-time.time()
-      if remaining<=delay:
-       state['status']='paused_deadline'
-       state['last_error']='Rate limited; insufficient time before deadline'
-       atomic_json(state_path,state)
-       break
-      state['status']='rate_limited'
-      state['rate_limit_count']=rate_limit_count
-      state['retry_after_utc']=datetime.datetime.fromtimestamp(time.time()+delay,datetime.timezone.utc).isoformat()
-      state['heartbeat_utc']=datetime.datetime.now(datetime.timezone.utc).isoformat()
-      atomic_json(state_path,state)
-      print(f'Rate limited (429): waiting {delay}s; content attempt {attempt}/3 unchanged',flush=True)
-      # Sleep in short intervals so the checkpoint remains visibly alive.
-      until=time.time()+delay
-      while time.time()<until:
-       time.sleep(min(30,max(0.1,until-time.time())))
-       state['heartbeat_utc']=datetime.datetime.now(datetime.timezone.utc).isoformat()
-       atomic_json(state_path,state)
-      continue
-     state['history'].append({'section':index,'accepted':False,'error':message,'attempt':attempt})
-     state['last_error']=message
-     attempt+=1
-    atomic_json(state_path,state)
-   # A successful revision must not silently change the chapter inventory.
-   if accepted and [h for h,_,_ in extract_sections(tex)]!=[h for h,_,_ in sections]:
-    raise GateError('Section inventory changed unexpectedly; inspect checkpoint and revision')
-   (ws/'review_en.tex').write_text(tex,encoding='utf-8')
-   if not accepted:
-    state['stage']='writing'
-    state['last_error']='Section failed all attempts; resume to retry with feedback'
-    atomic_json(state_path,state)
-    print(f'Section {index+1} not accepted; checkpoint preserved for resume',flush=True)
+   head,start,end=sections[index]
+   body=tex[start+len(head):end]
+   candidate=review_blocks(api,tex,head,body,papers,ws,index,state,state_path)
+   if candidate is None:
+    print(f'Section {index+1} paused; accepted blocks saved for resume',flush=True)
     break
+   ok,why=gate_block(body,candidate)
+   if not ok:
+    state['status']='blocked_section';state['last_error']=why;atomic_json(state_path,state)
+    break
+   proposed=tex[:start]+head+candidate+tex[end:]
+   if [h for h,_,_ in extract_sections(proposed)]!=expected:
+    state['status']='blocked_section';state['last_error']='Section inventory changed';atomic_json(state_path,state)
+    break
+   # Check both the complete section and all protected structural material.
+   if not cite_keys(body).issubset(cite_keys(candidate)):
+    state['status']='blocked_section';state['last_error']='Section citations removed';atomic_json(state_path,state)
+    break
+   (ws/'revisions'/f'section_{index+1:02}.tex').write_text(candidate,encoding='utf-8')
+   tex=proposed
+   (ws/'review_en.tex').write_text(tex,encoding='utf-8')
    state['section']=index+1
-   state['history']=[h for h in state['history'] if h.get('section')!=index or h.get('accepted')]
+   state['status']='section_complete'
+   state['history']=[h for h in state.get('history',[]) if h.get('section')!=index or h.get('accepted')]
+   state['history'].append({'section':index,'accepted':True,'blocks':len(split_safe_blocks(body))})
    atomic_json(state_path,state)
    print(f'Accepted section {index+1}/{len(sections)}; API calls {state["calls"]}',flush=True)
    sections=extract_sections(tex)
   if state['section']>=len(sections):
-   state['stage']='translation';atomic_json(state_path,state)
+   state['stage']='consistency';atomic_json(state_path,state)
+ if state['stage']=='consistency':
+  report={'sections':len(extract_sections(tex)),'expected_sections':len(extract_sections(raw)),'missing_original_citations':sorted(cite_keys(raw)-cite_keys(tex)),'figure_count_original':raw.count(r'\begin{figure'),'figure_count_current':tex.count(r'\begin{figure'),'table_count_original':raw.count(r'\begin{table'),'table_count_current':tex.count(r'\begin{table'),'duplicate_section_titles':len(set(h for h,_,_ in extract_sections(tex)))!=len(extract_sections(tex)),'scientific_claim_verification':'REQUIRES_PRIMARY_SOURCE_REVIEW'}
+  report['passed']=report['sections']==report['expected_sections'] and not report['missing_original_citations'] and report['figure_count_current']>=report['figure_count_original'] and report['table_count_current']>=report['table_count_original'] and not report['duplicate_section_titles']
+  atomic_json(ws/'reports/full_manuscript_consistency.json',report)
+  state['stage']='translation' if report['passed'] else 'consistency_blocked';atomic_json(state_path,state)
  if state['stage']=='translation' and not skip_translation and time.time()<state['deadline']:
   # Avoid creating a misleading partial Chinese file: translate when API and time budget permit.
   try:
