@@ -337,7 +337,7 @@ def run_v4(ws=WORK,hours=9,resume=False,minimum=60,skip_search=False,skip_transl
      if ok:state['calls']+=1
      accepted=ok and verdict.get('accept') is True
      if accepted:
-      tex=tex[:start]+head+'\\n'+candidate+'\\n'+tex[end:]
+      tex=tex[:start]+head+'\n'+candidate+'\n'+tex[end:]
       (ws/'revisions'/f'section_{index+1:02}.tex').write_text(candidate,encoding='utf-8')
       state['history'].append({'section':index,'accepted':True,'review':verdict,'attempt':attempt})
       break
