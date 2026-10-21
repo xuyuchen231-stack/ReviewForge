@@ -305,6 +305,11 @@ def run_v4(ws=WORK,hours=9,resume=False,minimum=60,skip_search=False,skip_transl
  api=CompatibleAPI()
  tex=raw if not (ws/'review_en.tex').exists() else (ws/'review_en.tex').read_text(encoding='utf-8')
  if state['stage']=='writing':
+  expected=[h for h,_,_ in extract_sections(raw)]
+  actual=[h for h,_,_ in extract_sections(tex)]
+  if actual!=expected:
+   atomic_json(ws/'reports/section_integrity_error.json',{'original_count':len(expected),'current_count':len(actual),'original_headings':expected,'current_headings':actual,'action':'Restore from original and audit accepted revisions before resuming'})
+   raise GateError('Section inventory differs from original; resume blocked to prevent manuscript loss. See reports/section_integrity_error.json')
   sections=extract_sections(tex)
   if not sections:raise GateError('No \\section blocks detected')
   while state['section']<len(sections):
