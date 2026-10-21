@@ -315,11 +315,13 @@ def run_v4(ws=WORK,hours=9,resume=False,minimum=60,skip_search=False,skip_transl
     atomic_json(state_path,state);break
    accepted=False
    feedback=''
-   for attempt in range(1,4):
-    if time.time()>=state['deadline']:break
+   attempt=1
+   rate_limit_count=0
+   while attempt<=3 and time.time()<state['deadline']:
     state['heartbeat_utc']=datetime.datetime.now(datetime.timezone.utc).isoformat()
     state['active_section']=index+1
     state['active_attempt']=attempt
+    state['status']='requesting'
     atomic_json(state_path,state)
     try:
      candidate=write_section(api,tex,head,body,papers,feedback=feedback).strip();state['calls']+=1
@@ -335,12 +337,13 @@ def run_v4(ws=WORK,hours=9,resume=False,minimum=60,skip_search=False,skip_transl
       break
      state['history'].append({'section':index,'accepted':False,'review':verdict,'attempt':attempt})
      feedback='Previous candidate was rejected. Fix these exact problems while preserving every protected LaTeX equation, align block, figure, table, label and citekey verbatim: '+json.dumps(verdict.get('issues',[]),ensure_ascii=False)
+     attempt+=1
     except Exception as e:
      message=type(e).__name__+': '+str(e)[:300]
-     state['history'].append({'section':index,'accepted':False,'error':message,'attempt':attempt})
      if '429' in str(e) and 'rate limit' in str(e).lower():
       import email.utils
       import re as _re
+      rate_limit_count+=1
       m=_re.search(r'Retry-After:\\s*([^;\\n]+)',str(e))
       delay=60
       if m:
@@ -348,13 +351,29 @@ def run_v4(ws=WORK,hours=9,resume=False,minimum=60,skip_search=False,skip_transl
        except ValueError:
         try:delay=max(1,int((email.utils.parsedate_to_datetime(m.group(1).strip())-datetime.datetime.now(datetime.timezone.utc)).total_seconds()))
         except (ValueError,TypeError,OverflowError):pass
-      delay=min(delay,3600)
+      delay=min(3600,max(delay,min(1800,60*2**min(rate_limit_count-1,5))))
+      remaining=state['deadline']-time.time()
+      if remaining<=delay:
+       state['status']='paused_deadline'
+       state['last_error']='Rate limited; insufficient time before deadline'
+       atomic_json(state_path,state)
+       break
+      state['status']='rate_limited'
+      state['rate_limit_count']=rate_limit_count
+      state['retry_after_utc']=datetime.datetime.fromtimestamp(time.time()+delay,datetime.timezone.utc).isoformat()
+      state['heartbeat_utc']=datetime.datetime.now(datetime.timezone.utc).isoformat()
       atomic_json(state_path,state)
-      print(f'Rate limited (429): waiting {delay}s before retry {attempt}/3',flush=True)
-      if time.time()+delay>=state['deadline']:break
-      time.sleep(delay)
-     else:
-      atomic_json(state_path,state)
+      print(f'Rate limited (429): waiting {delay}s; content attempt {attempt}/3 unchanged',flush=True)
+      # Sleep in short intervals so the checkpoint remains visibly alive.
+      until=time.time()+delay
+      while time.time()<until:
+       time.sleep(min(30,max(0.1,until-time.time())))
+       state['heartbeat_utc']=datetime.datetime.now(datetime.timezone.utc).isoformat()
+       atomic_json(state_path,state)
+      continue
+     state['history'].append({'section':index,'accepted':False,'error':message,'attempt':attempt})
+     state['last_error']=message
+     attempt+=1
     atomic_json(state_path,state)
    (ws/'review_en.tex').write_text(tex,encoding='utf-8')
    if not accepted:
