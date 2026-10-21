@@ -46,7 +46,19 @@ def main():
             print('Your key was not printed.')
             return
 
-    secret = getpass('Token Harbor API key (hidden): ').strip()
+    print('For multiple authorized keys, enter each separately. Leave blank to finish.')
+    secrets = []
+    while True:
+        secret = getpass('Token Harbor API key ' + str(len(secrets) + 1) + ' (hidden; blank to finish): ').strip()
+        if not secret:
+            break
+        if not valid_key(secret) or ',' in secret:
+            raise SystemExit('Invalid API key; commas and newlines are not supported.')
+        if secret not in secrets:
+            secrets.append(secret)
+    if not secrets:
+        raise SystemExit('At least one API key is required.')
+    secret = secrets[0]
     if not valid_key(secret):
         raise SystemExit('A nonempty single-line API key is required.')
 
@@ -62,6 +74,9 @@ def main():
             found = True
     if not found:
         lines.append('RF_API_KEY=' + secret)
+    if len(secrets) > 1:
+        lines.append('RF_API_KEYS=' + ','.join(secrets))
+        print('Multiple API keys configured:', len(secrets))
     TARGET.write_text('\n'.join(lines) + '\n', encoding='utf-8')
     if os.name == 'posix':
         TARGET.chmod(0o600)
