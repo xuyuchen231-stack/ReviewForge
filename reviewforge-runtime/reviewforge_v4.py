@@ -307,8 +307,9 @@ def run_v4(ws=WORK,hours=9,resume=False,minimum=60,skip_search=False,skip_transl
  if state['stage']=='writing':
   sections=extract_sections(tex)
   if not sections:raise GateError('No \\section blocks detected')
-  for index in range(state['section'],len(sections)):
+  while state['section']<len(sections):
    if time.time()>=state['deadline']:break
+   index=state['section']
    head,start,end=sections[index];chunk=tex[start:end];body=chunk[len(head):]
    if len(body)>30000:
     state['history'].append({'section':index,'accepted':False,'error':'Section exceeds 30000 characters'})
@@ -327,6 +328,11 @@ def run_v4(ws=WORK,hours=9,resume=False,minimum=60,skip_search=False,skip_transl
      candidate=write_section(api,tex,head,body,papers,feedback=feedback).strip();state['calls']+=1
      ok,why=protect_tex(body,candidate)
      if ok and not cite_keys(body).issubset(cite_keys(candidate)):ok=False;why='Existing citekeys removed'
+     if ok:
+      proposed=tex[:start]+head+'\n'+candidate+'\n'+tex[end:]
+      proposed_sections=extract_sections(proposed)
+      if [h for h,_,_ in proposed_sections]!=[h for h,_,_ in sections]:
+       ok=False;why='Top-level section headings changed or removed'
      verdict=review_section(api,head,body,candidate) if ok else {'accept':False,'issues':[why],'reason':'Structural gate'}
      if ok:state['calls']+=1
      accepted=ok and verdict.get('accept') is True
@@ -375,6 +381,9 @@ def run_v4(ws=WORK,hours=9,resume=False,minimum=60,skip_search=False,skip_transl
      state['last_error']=message
      attempt+=1
     atomic_json(state_path,state)
+   # A successful revision must not silently change the chapter inventory.
+   if accepted and [h for h,_,_ in extract_sections(tex)]!=[h for h,_,_ in sections]:
+    raise GateError('Section inventory changed unexpectedly; inspect checkpoint and revision')
    (ws/'review_en.tex').write_text(tex,encoding='utf-8')
    if not accepted:
     state['stage']='writing'
