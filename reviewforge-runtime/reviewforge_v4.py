@@ -202,42 +202,45 @@ def generate_chinese_body(api,tex,papers,workspace):
  return result
 
 def compile_tex(ws,basename):
-  """Deterministic offline build; never invokes a language-model API."""
-  ws=Path(ws).resolve()
-  cmd=shutil.which('latexmk')
-  engine=shutil.which('xelatex')
-  if not cmd or not engine:
-   return {'status':'UNAVAILABLE','reason':'latexmk or xelatex not installed','pdf':None}
-  texfile=ws/(basename+'.tex')
-  if not texfile.is_file():
-   return {'status':'FAILED','reason':'missing source','pdf':None}
-  output=ws/'output'
-  output.mkdir(parents=True,exist_ok=True)
-  pdf=output/(basename+'.pdf')
-  # An existing PDF must never be mistaken for a successful new build.
-  old_pdf_mtime=pdf.stat().st_mtime_ns if pdf.exists() else None
+ """Compile without any LLM calls; fail closed on stale outputs or LaTeX errors."""
+ ws=Path(ws).resolve()
+ output=ws/'output';output.mkdir(parents=True,exist_ok=True)
+ reports=ws/'reports';reports.mkdir(parents=True,exist_ok=True)
+ tex=ws/(basename+'.tex')
+ pdf=output/(basename+'.pdf')
+ cmd=shutil.which('latexmk')
+ engine=shutil.which('xelatex')
+ report={'status':'FAILED','pdf':None,'api_calls':0,'engine':'xelatex',
+         'source_sha256':hashlib.sha256(tex.read_bytes()).hexdigest() if tex.exists() else None}
+ if not tex.exists():
+  report['reason']='Missing TeX source'
+ elif not cmd or not engine:
+  report['status']='UNAVAILABLE'
+  report['reason']='latexmk or xelatex not installed'
+ else:
+  # Delete only the generated PDF: old outputs cannot be reported as new.
+  if pdf.exists():pdf.unlink()
   args=[cmd,'-gg','-xelatex','-interaction=nonstopmode','-halt-on-error',
-        '-file-line-error','-outdir=output',texfile.name]
+        '-file-line-error','-outdir=output',tex.name]
+  report['command']=args
   try:
    p=subprocess.run(args,cwd=ws,capture_output=True,text=True,errors='replace',timeout=600)
-   combined=(p.stdout or '')+'\n'+(p.stderr or '')
+   log=(p.stdout or '')+'\n'+(p.stderr or '')
    logpath=output/(basename+'.log')
-   if logpath.exists():
-    combined+='\n'+logpath.read_text(encoding='utf-8',errors='replace')[-20000:]
-   errors=re.findall(r'(?m)^! .+|^.+?:\\d+: .+|^Latexmk: .+',combined)
-   missing=sorted(set(re.findall(r"(?:File [`']|! LaTeX Error: File [`'])([^'`]+\\.(?:sty|cls|bib))",combined)))
-   fresh=pdf.exists() and (old_pdf_mtime is None or pdf.stat().st_mtime_ns!=old_pdf_mtime)
-   status='PASS' if p.returncode==0 and pdf.exists() and fresh else 'FAILED'
-   report={'status':status,'exit_code':p.returncode,'pdf':str(pdf.relative_to(ws)) if status=='PASS' else None,
-           'pdf_exists':pdf.exists(),'fresh_pdf':fresh,'missing_packages':missing,
-           'errors':errors[-30:],'log_tail':combined[-6000:],
-           'command':args,'api_calls':0}
-  except subprocess.TimeoutExpired as e:
-   report={'status':'FAILED','reason':'latexmk timed out after 600 seconds','pdf':None,'api_calls':0}
+   if logpath.exists():log+='\n'+logpath.read_text(encoding='utf-8',errors='replace')[-20000:]
+   report['exit_code']=p.returncode
+   report['errors']=re.findall(r'(?m)^! .+|^.+?:\d+: .+|^Latexmk: .+',log)[-30:]
+   report['missing_packages']=sorted(set(re.findall(r"File [`']([^'`]+\.(?:sty|cls|bib))",log)))
+   report['log_tail']=log[-7000:]
+   report['status']='PASS' if p.returncode==0 and pdf.is_file() and pdf.stat().st_size>0 else 'FAILED'
+   if report['status']=='PASS':report['pdf']=str(pdf.relative_to(ws))
+  except subprocess.TimeoutExpired:
+   report['reason']='latexmk timed out after 600 seconds'
   except OSError as e:
-   report={'status':'FAILED','reason':str(e),'pdf':None,'api_calls':0}
-  atomic_json(ws/'reports'/(basename+'_build.json'),report)
-  return report
+   report['reason']=str(e)
+ atomic_json(reports/(basename+'_build.json'),report)
+ return report
+
 
 
 def bib_keys(text):
