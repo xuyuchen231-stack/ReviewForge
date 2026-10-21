@@ -193,9 +193,14 @@ def evaluate(workspace, minimum=60):
     build = {language: _read_json(reports / f"review_{language}_build.json", {})
              for language in ("en", "zh")}
     for language, result in build.items():
-        if result.get("status") != "PASS":
+        source_hash = integrity["languages"][language]["source_sha256"]
+        actual_pdf = ws / "output" / f"review_{language}.pdf"
+        if (result.get("status") != "PASS"
+                or result.get("source_sha256") != source_hash
+                or not actual_pdf.is_file()
+                or actual_pdf.stat().st_size == 0):
             issues.append({"severity": "critical", "gate": "build",
-                           "message": f"{language} PDF build not confirmed"})
+                           "message": f"{language} PDF build not confirmed for current source"})
     # Explicit external review: never self-certify scientific quality.
     independent_review = _read_json(ws / "independent_review.json", {})
     if independent_review.get("decision") != "approved" or not independent_review.get("reviewer"):
