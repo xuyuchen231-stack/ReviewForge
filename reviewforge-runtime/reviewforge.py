@@ -8,6 +8,7 @@ from pathlib import Path
 import subprocess
 import time
 import urllib.request
+import urllib.error
 
 
 def atomic_json(path, obj):
@@ -65,7 +66,12 @@ def extract_json(content):
 
 class CompatibleAPI:
     def __init__(self):
-        self.key = os.environ.get('RF_API_KEY','')
+        raw_keys = os.environ.get('RF_API_KEYS', '')
+        self.keys = [x.strip() for x in raw_keys.split(',') if x.strip() and x.strip() != 'replace_me']
+        if not self.keys:
+            self.keys = [os.environ.get('RF_API_KEY', '')]
+        self.key = self.keys[0]
+        self.key_index = 0
         self.base = os.environ.get('RF_BASE_URL','').rstrip('/')
         self.model = os.environ.get('RF_WRITER_MODEL',os.environ.get('RF_MODEL','mimo-v2.6-flash:free'))
         self.reviewer_model = os.environ.get('RF_REVIEWER_MODEL','deepseek-v4.1-flash:free')
@@ -80,19 +86,32 @@ class CompatibleAPI:
         failures = []
         for model in models:
             body = json.dumps({'model': model, 'messages': [{'role': 'system', 'content': system}, {'role': 'user', 'content': user}], 'temperature': 0.2, 'max_tokens': self.max_tokens}).encode()
-            req = urllib.request.Request(self.base + '/chat/completions', data=body, headers={'Authorization': 'Bearer ' + self.key, 'Content-Type': 'application/json'}, method='POST')
-            for attempt in range(2):
+            for key_index in range(self.key_index, len(self.keys)):
+                key = self.keys[key_index]
+                req = urllib.request.Request(self.base + '/chat/completions', data=body, headers={'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json'}, method='POST')
                 try:
                     with urllib.request.urlopen(req, timeout=150) as resp:
                         data = json.load(resp)
                     result = data['choices'][0]['message']['content']
                     if not isinstance(result, str) or not result.strip():
                         raise ValueError('Empty API response')
+                    self.key_index = key_index
                     return result
+                except urllib.error.HTTPError as exc:
+                    # Never rotate keys to evade provider rate limits.
+                    if exc.code == 429:
+                        retry = exc.headers.get('Retry-After', '')
+                        raise RuntimeError('Provider rate limit (429); respect Retry-After: ' + retry) from None
+                    # Explicitly opt-in only for independently authorized,
+                    # separately billed accounts. 402 is payment required.
+                    if exc.code == 402 and os.environ.get('RF_ALLOW_BILLING_FAILOVER') == '1':
+                        failures.append('HTTP 402 (key slot ' + str(key_index + 1) + ')')
+                        continue
+                    failures.append(model + ': HTTP ' + str(exc.code))
+                    break
                 except Exception as exc:
-                    failures.append(f'{model}: {type(exc).__name__}')
-                    if attempt == 0:
-                        time.sleep(1)
+                    failures.append(model + ': ' + type(exc).__name__)
+                    break
         raise RuntimeError('API attempts failed: ' + '; '.join(failures))
 
 
