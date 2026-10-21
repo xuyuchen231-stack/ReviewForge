@@ -1,0 +1,4 @@
+Put your complete English manuscript at original.tex (recommended: import_project.py).
+Keep all .bib, figures and LaTeX style files beside it with original relative paths.
+The original file will never be overwritten by ReviewForge v4.
+Do NOT place your Token Harbor key here; use setup_secret.bat and .env in the runtime root.

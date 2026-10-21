@@ -1,0 +1,3 @@
+ReviewForge v4.0 (2026-10-21)
+Modules: metadata discovery; DOI registration lookups; BibTeX; section-level two-model review; Chinese translation; XeLaTeX PDF build; checkpoints; citation count audit.
+Adaptation acknowledgments: Light0305/Light-skills (MIT workflow inspiration; no native full integration).

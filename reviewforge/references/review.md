@@ -1,0 +1,2 @@
+# Independent review protocol
+Identify major issues first: lack of distinct contribution, unsupported claims, inappropriate generalization, missing opposing results, methodological confounds, and absence of cross-condition validation. For each issue provide manuscript locator, impact, evidence, proposed correction, and acceptance test. Separate established findings from inference and agenda-setting. Assess whether revised prose actually solves a documented issue, not merely increases length. Score changes cautiously and never claim simulation equals external peer review.
