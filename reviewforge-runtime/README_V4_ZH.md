@@ -52,3 +52,25 @@ py -m unittest discover -s tests -v
 **持久化配置（更新）**：现在 API 配置保存在 `%USERPROFILE%\\.reviewforge\\credentials.env`，不是 Git 仓库中。第一次设置后，升级或新克隆项目不需要再次输入。旧版目录中的 `.env` 可通过 `setup_secret.bat` 导入一次。不要将配置文件提交到 GitHub。
 
 可在 `.env` 中将 `RF_MAX_OUTPUT_TOKENS` 设为 `12000` 或供应商支持的更高数值，以降低长章节返回被截断的风险；过长的章节会保留原文并在报告中标记待拆分。
+
+
+## 多 API Key（同平台）
+
+在**当前任务结束后**更新代码：
+
+```powershell
+cd "D:\\拓展和skill\\ReviewForge-repo"
+git pull origin main
+cd reviewforge-runtime
+.\\setup_secret.bat
+```
+
+如果提示已有持久配置，选择 `n` 重新配置；逐个输入获授权的 Token Harbor Key，最后直接回车结束。密钥只保存在 `%USERPROFILE%\\.reviewforge\\credentials.env`，不提交到 GitHub。旧单 Key 配置继续可用。
+
+多 Key 功能默认**不会**切换以规避限流。仅当服务商允许多个独立计费账户间进行故障切换时，才可以在 `credentials.env` 中单独增加：
+
+```ini
+RF_ALLOW_BILLING_FAILOVER=1
+```
+
+该模式仅在服务端明确返回 HTTP 402（需要付费/余额不足）时尝试下一个 Key；HTTP 429 不轮换，401/403 也不会自动换 Key。部分平台的余额不足错误并非 HTTP 402，因此不能保证覆盖所有额度耗尽情形。配置更改不会影响已经运行中的进程。可用 `.\\check_connection.bat` 验证连接，随后再启动或恢复任务。
