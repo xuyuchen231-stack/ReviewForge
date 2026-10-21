@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse, datetime, hashlib, json, os, re, shutil, subprocess, sys, time, urllib.parse, urllib.request, urllib.error
 from pathlib import Path
 from reviewforge import CompatibleAPI, load_env, atomic_json
+from research_quality import evaluate as evaluate_quality, scaffold as scaffold_quality
 
 ROOT=Path(__file__).resolve().parent
 WORK=ROOT/'workspace'
@@ -331,12 +332,13 @@ def run_v4(ws=WORK,hours=9,resume=False,minimum=60,skip_search=False,skip_transl
     atomic_json(ws/'reports'/(name+'_build.json'),report)
   result=audit(ws,minimum=minimum)
   atomic_json(ws/'reports/final_audit.json',result)
+  evaluate_quality(ws,minimum)
   state['stage']='finished';atomic_json(state_path,state)
  return state
 
 def main():
  parser=argparse.ArgumentParser(description='ReviewForge v4 academic review automation')
- parser.add_argument('action',choices=['discover','audit','compile','run','resume','preflight'])
+ parser.add_argument('action',choices=['discover','audit','compile','quality','quality-init','run','resume','preflight'])
  parser.add_argument('--workspace',default=str(WORK));parser.add_argument('--hours',type=float,default=9)
  parser.add_argument('--minimum',type=int,default=60);parser.add_argument('--skip-search',action='store_true')
  parser.add_argument('--skip-translation',action='store_true');args=parser.parse_args()
@@ -347,6 +349,8 @@ def main():
   'xelatex':bool(shutil.which('xelatex')),'bibtex':bool(shutil.which('bibtex')),
   'key_configured':bool(os.environ.get('RF_API_KEY')),'workspace':str(ws)},indent=2));return
  if args.action=='audit':print(json.dumps(audit(ws,args.minimum),ensure_ascii=False,indent=2));return
+ if args.action=='quality-init':print(json.dumps({'created':scaffold_quality(ws)},ensure_ascii=False,indent=2));return
+ if args.action=='quality':print(json.dumps(evaluate_quality(ws,args.minimum),ensure_ascii=False,indent=2));return
  if args.action=='compile':
   for name in ('review_en','review_zh'):
    if (ws/(name+'.tex')).exists():print(name,compile_tex(ws,name))
