@@ -192,30 +192,74 @@ def generate_chinese_body(api,tex,papers,workspace):
  return result
 
 def compile_tex(ws,basename):
- cmd=shutil.which('latexmk')
- if not cmd or not shutil.which('xelatex'):return {'status':'UNAVAILABLE','reason':'latexmk or xelatex not installed','pdf':None}
- texfile=ws/(basename+'.tex')
- if not texfile.exists():return {'status':'FAILED','reason':'missing source','pdf':None}
- try:
-  p=subprocess.run([cmd,'-xelatex','-interaction=nonstopmode','-halt-on-error','-file-line-error','-outdir=output',texfile.name],cwd=ws,capture_output=True,text=True,timeout=240)
-  pdf=ws/'output'/(basename+'.pdf')
-  return {'status':'PASS' if p.returncode==0 and pdf.exists() else 'FAILED','exit_code':p.returncode,
-          'pdf':str(pdf.relative_to(ws)) if pdf.exists() else None,'log_tail':(p.stdout+p.stderr)[-5000:]}
- except (subprocess.TimeoutExpired,OSError) as e:return {'status':'FAILED','reason':str(e),'pdf':None}
+  """Deterministic offline build; never invokes a language-model API."""
+  ws=Path(ws).resolve()
+  cmd=shutil.which('latexmk')
+  engine=shutil.which('xelatex')
+  if not cmd or not engine:
+   return {'status':'UNAVAILABLE','reason':'latexmk or xelatex not installed','pdf':None}
+  texfile=ws/(basename+'.tex')
+  if not texfile.is_file():
+   return {'status':'FAILED','reason':'missing source','pdf':None}
+  output=ws/'output'
+  output.mkdir(parents=True,exist_ok=True)
+  pdf=output/(basename+'.pdf')
+  # An existing PDF must never be mistaken for a successful new build.
+  old_pdf_mtime=pdf.stat().st_mtime_ns if pdf.exists() else None
+  args=[cmd,'-gg','-xelatex','-interaction=nonstopmode','-halt-on-error',
+        '-file-line-error','-outdir=output',texfile.name]
+  try:
+   p=subprocess.run(args,cwd=ws,capture_output=True,text=True,errors='replace',timeout=600)
+   combined=(p.stdout or '')+'\n'+(p.stderr or '')
+   logpath=output/(basename+'.log')
+   if logpath.exists():
+    combined+='\n'+logpath.read_text(encoding='utf-8',errors='replace')[-20000:]
+   errors=re.findall(r'(?m)^! .+|^.+?:\\d+: .+|^Latexmk: .+',combined)
+   missing=sorted(set(re.findall(r"(?:File [`']|! LaTeX Error: File [`'])([^'`]+\\.(?:sty|cls|bib))",combined)))
+   fresh=pdf.exists() and (old_pdf_mtime is None or pdf.stat().st_mtime_ns!=old_pdf_mtime)
+   status='PASS' if p.returncode==0 and pdf.exists() and fresh else 'FAILED'
+   report={'status':status,'exit_code':p.returncode,'pdf':str(pdf.relative_to(ws)) if status=='PASS' else None,
+           'pdf_exists':pdf.exists(),'fresh_pdf':fresh,'missing_packages':missing,
+           'errors':errors[-30:],'log_tail':combined[-6000:],
+           'command':args,'api_calls':0}
+  except subprocess.TimeoutExpired as e:
+   report={'status':'FAILED','reason':'latexmk timed out after 600 seconds','pdf':None,'api_calls':0}
+  except OSError as e:
+   report={'status':'FAILED','reason':str(e),'pdf':None,'api_calls':0}
+  atomic_json(ws/'reports'/(basename+'_build.json'),report)
+  return report
+
+
+def bib_keys(text):
+  """Extract BibTeX entry identifiers without relying on generated literature.json."""
+  return set(re.findall(r'(?m)^\\s*@[A-Za-z]+\\s*[{(]\\s*([^,\\s]+)\\s*,',text))
+
 
 def audit(ws,minimum=60):
- ws=Path(ws);papers=json.loads((ws/'literature.json').read_text(encoding='utf-8')) if (ws/'literature.json').exists() else []
- known={p['key'] for p in papers if p.get('key')}
- eng=(ws/'review_en.tex').read_text(encoding='utf-8') if (ws/'review_en.tex').exists() else ''
- zho=(ws/'review_zh.tex').read_text(encoding='utf-8') if (ws/'review_zh.tex').exists() else ''
- engkeys=cite_keys(eng); zhkeys=cite_keys(zho)
- return {'minimum':minimum,'registered_references':len(known),'english_used_references':len(engkeys),
-         'chinese_used_references':len(zhkeys),'english_unknown_keys':sorted(engkeys-known),
-         'chinese_unknown_keys':sorted(zhkeys-known),'english_only_keys':sorted(engkeys-zhkeys),
-         'chinese_only_keys':sorted(zhkeys-engkeys),
-         'minimum_pass':len(engkeys)>=minimum and len(zhkeys)>=minimum and not (engkeys-known) and not (zhkeys-known),
-         'semantic_source_support':'NOT_AUTOMATICALLY_VERIFIED',
-         'citation_warning':'Crossref metadata proves registration, not that an article supports a manuscript claim.'}
+  ws=Path(ws)
+  papers=json.loads((ws/'literature.json').read_text(encoding='utf-8')) if (ws/'literature.json').exists() else []
+  registered={p['key'] for p in papers if p.get('key')}
+  bibfile=ws/'references.bib'
+  bib=bib_keys(bibfile.read_text(encoding='utf-8',errors='replace')) if bibfile.exists() else set()
+  en=(ws/'review_en.tex').read_text(encoding='utf-8') if (ws/'review_en.tex').exists() else ''
+  zh=(ws/'review_zh.tex').read_text(encoding='utf-8') if (ws/'review_zh.tex').exists() else ''
+  enkeys=cite_keys(en); zhkeys=cite_keys(zh)
+  # A citation key present in a catalogue is not necessarily present in the compiled bibliography.
+  missing_en=sorted(enkeys-bib)
+  missing_zh=sorted(zhkeys-bib)
+  complete=bool(bib) and not missing_en and not missing_zh
+  return {'minimum':minimum,'registered_references':len(registered),'bib_entries':len(bib),
+          'english_used_references':len(enkeys),'chinese_used_references':len(zhkeys),
+          'english_unknown_keys':sorted(enkeys-registered),
+          'chinese_unknown_keys':sorted(zhkeys-registered),
+          'english_missing_bib_keys':missing_en,'chinese_missing_bib_keys':missing_zh,
+          'english_only_keys':sorted(enkeys-zhkeys),'chinese_only_keys':sorted(zhkeys-enkeys),
+          'bib_integrity_pass':complete,
+          'minimum_pass':complete and len(enkeys)>=minimum and len(zhkeys)>=minimum,
+          'semantic_source_support':'NOT_VERIFIED',
+          'metadata_verification':'CATALOGUE_ONLY_NOT_INDEPENDENTLY_RECHECKED',
+          'submission_ready':False,
+          'citation_warning':'Matching BibTeX keys and DOI metadata do not establish scientific support. Verify primary texts and claim-level evidence.'}
 
 def run_v4(ws=WORK,hours=9,resume=False,minimum=60,skip_search=False,skip_translation=False):
  ws=Path(ws).resolve(); (ws/'reports').mkdir(parents=True,exist_ok=True); (ws/'revisions').mkdir(exist_ok=True);(ws/'output').mkdir(exist_ok=True)
