@@ -1,0 +1,27 @@
+name: ReviewForge offline quality tests
+on:
+  push:
+    paths:
+      - 'reviewforge-runtime/**/*.py'
+      - '.github/workflows/reviewforge-quality.yml'
+  pull_request:
+    paths:
+      - 'reviewforge-runtime/**/*.py'
+  workflow_dispatch:
+
+jobs:
+  offline-tests:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Syntax check
+        working-directory: reviewforge-runtime
+        run: python -m compileall -q .
+      - name: Offline regression tests
+        working-directory: reviewforge-runtime
+        run: python -m unittest discover -s tests -p 'test_*.py' -v
