@@ -10,8 +10,8 @@ class QualityGateTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.ws = Path(self.tmp.name)
-        (self.ws / "review_en.tex").write_text(r"\\cite{A2020}", encoding="utf-8")
-        (self.ws / "review_zh.tex").write_text(r"\\cite{A2020}", encoding="utf-8")
+        (self.ws / "review_en.tex").write_text(r"\cite{A2020}", encoding="utf-8")
+        (self.ws / "review_zh.tex").write_text(r"\cite{A2020}", encoding="utf-8")
         (self.ws / "literature.json").write_text(json.dumps([
             {"key": "A2020", "doi": "10.1/abc", "title": "Example", "year": 2020}
         ]), encoding="utf-8")
