@@ -6,6 +6,7 @@ import argparse, datetime, hashlib, json, os, re, shutil, subprocess, sys, time,
 from pathlib import Path
 from reviewforge import CompatibleAPI, load_env, atomic_json
 from research_quality import evaluate as evaluate_quality, scaffold as scaffold_quality
+from manuscript_integrity import analyze as analyze_manuscript, write_report as write_integrity, bibkeys as parse_bibkeys
 
 ROOT=Path(__file__).resolve().parent
 WORK=ROOT/'workspace'
@@ -98,14 +99,22 @@ def collect_literature(workspace, target=60, max_queries=6):
  return papers
 
 def make_bib(ws,papers):
- ws=Path(ws); entries=[]
+ """Merge new registered records without overwriting the author's bibliography."""
+ ws=Path(ws); bib=ws/'references.bib'
+ existing=bib.read_text(encoding='utf-8',errors='replace') if bib.exists() else ''
+ keys=parse_bibkeys(existing)
+ entries=[]
  for p in papers:
-  if not p.get('doi') or not p.get('key'):continue
+  if not p.get('doi') or not p.get('key') or p['key'] in keys:continue
   fields={'title':p.get('title',''),'author':' and '.join(p.get('authors',[])),'year':p.get('year',''),
           'journal':p.get('venue',''),'doi':p['doi'],'url':'https://doi.org/'+p['doi']}
   lines=[f'  {key} = {{{bib_clean(val)}}}' for key,val in fields.items() if val]
   entries.append('@article{'+p['key']+',\n'+',\n'.join(lines)+'\n}')
- (ws/'references.bib').write_text('\n\n'.join(entries)+'\n',encoding='utf-8')
+ if entries:
+  with bib.open('a',encoding='utf-8') as handle:
+   if existing.strip():handle.write('\n\n')
+   handle.write('\n\n'.join(entries)+'\n')
+
 
 def extract_sections(tex):
  """Only replace top-level section bodies; preserve preamble, environments, math and bibliography tail."""
@@ -232,35 +241,20 @@ def compile_tex(ws,basename):
 
 
 def bib_keys(text):
-  """Extract BibTeX entry identifiers without relying on generated literature.json."""
-  return set(re.findall(r'(?m)^\\s*@[A-Za-z]+\\s*[{(]\\s*([^,\\s]+)\\s*,',text))
+ return parse_bibkeys(text)
 
 
 def audit(ws,minimum=60):
-  ws=Path(ws)
-  papers=json.loads((ws/'literature.json').read_text(encoding='utf-8')) if (ws/'literature.json').exists() else []
-  registered={p['key'] for p in papers if p.get('key')}
-  bibfile=ws/'references.bib'
-  bib=bib_keys(bibfile.read_text(encoding='utf-8',errors='replace')) if bibfile.exists() else set()
-  en=(ws/'review_en.tex').read_text(encoding='utf-8') if (ws/'review_en.tex').exists() else ''
-  zh=(ws/'review_zh.tex').read_text(encoding='utf-8') if (ws/'review_zh.tex').exists() else ''
-  enkeys=cite_keys(en); zhkeys=cite_keys(zh)
-  # A citation key present in a catalogue is not necessarily present in the compiled bibliography.
-  missing_en=sorted(enkeys-bib)
-  missing_zh=sorted(zhkeys-bib)
-  complete=bool(bib) and not missing_en and not missing_zh
-  return {'minimum':minimum,'registered_references':len(registered),'bib_entries':len(bib),
-          'english_used_references':len(enkeys),'chinese_used_references':len(zhkeys),
-          'english_unknown_keys':sorted(enkeys-registered),
-          'chinese_unknown_keys':sorted(zhkeys-registered),
-          'english_missing_bib_keys':missing_en,'chinese_missing_bib_keys':missing_zh,
-          'english_only_keys':sorted(enkeys-zhkeys),'chinese_only_keys':sorted(zhkeys-enkeys),
-          'bib_integrity_pass':complete,
-          'minimum_pass':complete and len(enkeys)>=minimum and len(zhkeys)>=minimum,
-          'semantic_source_support':'NOT_VERIFIED',
-          'metadata_verification':'CATALOGUE_ONLY_NOT_INDEPENDENTLY_RECHECKED',
-          'submission_ready':False,
-          'citation_warning':'Matching BibTeX keys and DOI metadata do not establish scientific support. Verify primary texts and claim-level evidence.'}
+ ws=Path(ws)
+ integrity=write_integrity(ws)
+ languages=integrity['languages']
+ citation_pass=all(languages[lang]['cited_count']>=minimum and
+                   not languages[lang]['missing_bibliography_keys'] for lang in ('en','zh'))
+ return {'minimum':minimum,'integrity':integrity,'citation_gate_pass':citation_pass,
+         'semantic_source_support':'NOT_VERIFIED',
+         'submission_ready':False}
+
+
 
 def run_v4(ws=WORK,hours=9,resume=False,minimum=60,skip_search=False,skip_translation=False):
  ws=Path(ws).resolve(); (ws/'reports').mkdir(parents=True,exist_ok=True); (ws/'revisions').mkdir(exist_ok=True);(ws/'output').mkdir(exist_ok=True)
