@@ -339,7 +339,7 @@ def run_v4(ws=WORK,hours=9,resume=False,minimum=60,skip_search=False,skip_transl
      message=type(e).__name__+': '+str(e)[:300]
      state['history'].append({'section':index,'accepted':False,'error':message,'attempt':attempt})
      if '429' in str(e) and 'rate limit' in str(e).lower():
-      import email.utils, datetime
+      import email.utils
       import re as _re
       m=_re.search(r'Retry-After:\\s*([^;\\n]+)',str(e))
       delay=60
