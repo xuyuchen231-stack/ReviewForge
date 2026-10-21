@@ -270,6 +270,16 @@ def run_v4(ws=WORK,hours=9,resume=False,minimum=60,skip_search=False,skip_transl
  if resume:
   if not state_path.exists():raise GateError('No v4 checkpoint to resume')
   state=json.loads(state_path.read_text(encoding='utf-8'))
+  # Legacy checkpoints could advance past rejected sections and enter translation.
+  failed=[h['section'] for h in state.get('history',[]) if isinstance(h.get('section'),int) and not h.get('accepted',False)]
+  if failed and state.get('stage') in ('writing','translation','compile','finished'):
+   first=min(failed)
+   state['section']=first
+   state['stage']='writing'
+   state['history']=[h for h in state['history'] if not isinstance(h.get('section'),int) or h['section']<first]
+  if time.time()>=state.get('deadline',0):
+   state['deadline']=time.time()+hours*3600
+  atomic_json(state_path,state)
  else:
   if state_path.exists():raise GateError('Existing checkpoint: choose --resume or archive it')
   start=time.time(); state={'started':start,'deadline':start+hours*3600,'stage':'literature','section':0,'calls':0,'history':[]}
@@ -300,25 +310,57 @@ def run_v4(ws=WORK,hours=9,resume=False,minimum=60,skip_search=False,skip_transl
    if time.time()>=state['deadline']:break
    head,start,end=sections[index];chunk=tex[start:end];body=chunk[len(head):]
    if len(body)>30000:
-    state['history'].append({'section':index,'status':'SKIPPED_TOO_LONG','characters':len(body)});state['section']=index+1;atomic_json(state_path,state);continue
-   try:
-    candidate=write_section(api,tex,head,body,papers).strip();state['calls']+=1
-    ok,why=protect_tex(body,candidate)
-    # user citations and labels cannot be lost, including all existing citekeys in section
-    if ok and not cite_keys(body).issubset(cite_keys(candidate)):ok=False;why='Existing citekeys removed'
-    verdict=review_section(api,head,body,candidate) if ok else {'accept':False,'issues':[why],'reason':'Structural gate'}
-    if ok:state['calls']+=1
-    accepted=ok and verdict.get('accept') is True
-    if accepted:
-     tex=tex[:start]+head+'\n'+candidate+'\n'+tex[end:]
-     (ws/'revisions'/f'section_{index+1:02}.tex').write_text(candidate,encoding='utf-8')
-    state['history'].append({'section':index,'accepted':accepted,'review':verdict})
-   except Exception as e:
-    state['history'].append({'section':index,'accepted':False,'error':type(e).__name__+': '+str(e)[:300]})
+    state['history'].append({'section':index,'accepted':False,'error':'Section exceeds 30000 characters'})
+    atomic_json(state_path,state);break
+   accepted=False
+   for attempt in range(1,4):
+    if time.time()>=state['deadline']:break
+    try:
+     candidate=write_section(api,tex,head,body,papers).strip();state['calls']+=1
+     ok,why=protect_tex(body,candidate)
+     if ok and not cite_keys(body).issubset(cite_keys(candidate)):ok=False;why='Existing citekeys removed'
+     verdict=review_section(api,head,body,candidate) if ok else {'accept':False,'issues':[why],'reason':'Structural gate'}
+     if ok:state['calls']+=1
+     accepted=ok and verdict.get('accept') is True
+     if accepted:
+      tex=tex[:start]+head+'\\n'+candidate+'\\n'+tex[end:]
+      (ws/'revisions'/f'section_{index+1:02}.tex').write_text(candidate,encoding='utf-8')
+      state['history'].append({'section':index,'accepted':True,'review':verdict,'attempt':attempt})
+      break
+     state['history'].append({'section':index,'accepted':False,'review':verdict,'attempt':attempt})
+    except Exception as e:
+     message=type(e).__name__+': '+str(e)[:300]
+     state['history'].append({'section':index,'accepted':False,'error':message,'attempt':attempt})
+     if '429' in str(e) and 'rate limit' in str(e).lower():
+      import email.utils, datetime
+      import re as _re
+      m=_re.search(r'Retry-After:\\s*([^;\\n]+)',str(e))
+      delay=60
+      if m:
+       try:delay=max(1,int(float(m.group(1).strip())))
+       except ValueError:
+        try:delay=max(1,int((email.utils.parsedate_to_datetime(m.group(1).strip())-datetime.datetime.now(datetime.timezone.utc)).total_seconds()))
+        except (ValueError,TypeError,OverflowError):pass
+      delay=min(delay,3600)
+      atomic_json(state_path,state)
+      print(f'Rate limited (429): waiting {delay}s before retry {attempt}/3',flush=True)
+      if time.time()+delay>=state['deadline']:break
+      time.sleep(delay)
+     else:
+      atomic_json(state_path,state)
+    atomic_json(state_path,state)
    (ws/'review_en.tex').write_text(tex,encoding='utf-8')
-   state['section']=index+1;atomic_json(state_path,state)
+   if not accepted:
+    state['stage']='writing'
+    atomic_json(state_path,state)
+    print(f'Section {index+1} not accepted; checkpoint preserved for resume',flush=True)
+    break
+   state['section']=index+1
+   atomic_json(state_path,state)
+   print(f'Accepted section {index+1}/{len(sections)}; API calls {state["calls"]}',flush=True)
    sections=extract_sections(tex)
-  if state['section']>=len(sections):state['stage']='translation';atomic_json(state_path,state)
+  if state['section']>=len(sections) and all(h.get('accepted') for h in state['history'] if isinstance(h.get('section'),int)):
+   state['stage']='translation';atomic_json(state_path,state)
  if state['stage']=='translation' and not skip_translation and time.time()<state['deadline']:
   # Avoid creating a misleading partial Chinese file: translate when API and time budget permit.
   try:
