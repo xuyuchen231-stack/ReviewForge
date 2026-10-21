@@ -56,6 +56,34 @@ def _studies(workspace):
     data = _read_json(workspace / "study_matrix.json", [])
     return data if isinstance(data, list) else []
 
+def synthesis_analysis(studies):
+    """Transparent research-gap mapping, not an AI claim about any paper."""
+    axes = ("unseen_operating_conditions", "cross_batch_validation",
+            "baseline_comparison", "mechanistic_constraints", "failure_modes")
+    not_reported = ("", "unknown", "not reported", "not tested", "n/a", "none")
+    gaps = {}
+    for axis in axes:
+        missing = []
+        for i, row in enumerate(studies):
+            if not isinstance(row, dict):
+                missing.append(f"row_{i}")
+                continue
+            value = str(row.get(axis, "")).strip().lower()
+            if value in not_reported:
+                missing.append(row.get("citekey") or f"row_{i}")
+        gaps[axis] = {"unresolved_count": len(missing), "citekeys": missing}
+    questions = [
+        "Which studies evaluate trajectories under feeding or induction policies excluded from training?",
+        "Do gains survive cross-batch and cross-reactor holdout, not only interpolation?",
+        "Are learned rates compared against reinitialized or recalibrated mechanistic baselines?",
+        "Which mass-balance or stoichiometric constraints remain valid under policy changes?",
+        "Are prediction failures tied to measurement drift, input shift, identifiability, or solver convergence?",
+    ]
+    return {"matrix_entries": len(studies), "evidence_gaps": gaps,
+            "critical_synthesis_questions": questions,
+            "warning": "Unknown/not reported is not evidence of failure; confirm each claim in primary studies."}
+
+
 def evaluate(workspace, minimum=60):
     ws = Path(workspace)
     reports = ws / "reports"
@@ -117,6 +145,7 @@ def evaluate(workspace, minimum=60):
             continue
         matrix.append({"index": i, "citekey": study.get("citekey"),
                        "missing": [field for field in AXES if not study.get(field)]})
+    synthesis = synthesis_analysis(studies)
     missing_study_keys = sorted(all_cited - {s.get("citekey") for s in studies if isinstance(s, dict)})
     issues = []
     for language, body in tex.items():
@@ -173,11 +202,14 @@ def evaluate(workspace, minimum=60):
         "primary_text_verified_citekeys_recorded": sorted(verified_keys),
         "unverified_cited_keys": uncovered,
         "study_matrix_rows": len(studies),
+        "synthesis_analysis": synthesis,
         "study_matrix_missing_keys": missing_study_keys,
         "build": {lang: report.get("status", "UNKNOWN") for lang, report in build.items()},
         "issues": issues,
         "note": "A recorded evidence excerpt and independent approval require human authentication; this offline gate cannot prove that an excerpt truly supports a claim."
     }
+    (reports / "synthesis_gaps.json").write_text(
+        json.dumps(synthesis, ensure_ascii=False, indent=2), encoding="utf-8")
     (reports / "quality_gate.json").write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     (reports / "major_issues.md").write_text(
         "# ReviewForge quality findings\n\n" +
