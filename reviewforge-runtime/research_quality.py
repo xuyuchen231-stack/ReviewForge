@@ -4,6 +4,7 @@ No LLM calls, DOI lookups, or inferred primary-source verification.
 from __future__ import annotations
 import json
 import re
+import hashlib
 from pathlib import Path
 
 CITE = re.compile(r'\\cite[a-zA-Z*]*(?:\[[^\]]*\])*\{([^{}]+)\}')
@@ -81,6 +82,25 @@ def evaluate(workspace, minimum=60):
             missing.append("citekey")
         if key not in by_key:
             missing.append("citekey_in_literature")
+        # Never trust a user/LLM-set status flag without an inspectable local anchor.
+        source_rel = row.get("source_file")
+        excerpt = row.get("supporting_excerpt")
+        source_ok = False
+        if isinstance(source_rel, str) and isinstance(excerpt, str) and len(excerpt.strip()) >= 20:
+            candidate = (ws / source_rel).resolve()
+            try:
+                if candidate.is_relative_to(ws.resolve()) and candidate.is_file():
+                    source_text = candidate.read_text(encoding="utf-8", errors="replace")
+                    source_ok = excerpt.strip() in source_text
+            except (OSError, ValueError):
+                pass
+        if not source_ok:
+            missing.append("source_file_with_matching_excerpt")
+        metadata = by_key.get(key, {})
+        if metadata:
+            for field in ("doi", "title", "year"):
+                if str(row.get(field, "")).strip().lower() != str(metadata.get(field, "")).strip().lower():
+                    missing.append("catalogue_mismatch_" + field)
         verified = (not missing and row.get("verification_status") == VERIFIED
                     and row.get("full_text_access") not in ("none", "metadata_only", "abstract_only"))
         evidence.append({"index": i, "citekey": key,
@@ -110,10 +130,16 @@ def evaluate(workspace, minimum=60):
                        "message": "English/Chinese citation sets differ",
                        "english_only": sorted(citations["en"] - citations["zh"]),
                        "chinese_only": sorted(citations["zh"] - citations["en"])})
+    if not ledger:
+        issues.append({"severity": "critical", "gate": "evidence",
+                       "message": "No claim-level evidence ledger supplied"})
     if uncovered:
         issues.append({"severity": "critical", "gate": "evidence",
                        "message": "Cited works lack independently inspected primary-text evidence",
                        "keys": uncovered})
+    if not studies:
+        issues.append({"severity": "critical", "gate": "synthesis",
+                       "message": "No study comparison matrix supplied"})
     if missing_study_keys:
         issues.append({"severity": "major", "gate": "synthesis",
                        "message": "Cited works lack a structured comparison-matrix entry",
@@ -141,6 +167,7 @@ def evaluate(workspace, minimum=60):
         "schema_version": 1,
         "submission_ready": not issues,
         "scientific_quality_human_verified": False,
+        "evidence_anchor_rule": "Exact excerpt must occur in an inspectable local UTF-8 source file; semantic support still requires human review.",
         "cited": {lang: len(keys) for lang, keys in citations.items()},
         "evidence_rows": evidence,
         "primary_text_verified_citekeys_recorded": sorted(verified_keys),
@@ -166,6 +193,7 @@ def scaffold(workspace):
             "citekey": "EXAMPLE2026", "doi": "10.xxxx/example", "title": "Example title",
             "authors": ["Author A"], "year": 2026, "full_text_access": "local_pdf",
             "evidence_location": "p. 5, Fig. 2",
+            "source_file": "sources/example_extracted.txt",
             "supporting_excerpt": "Exact quotation checked against the source",
             "supported_claim": "Claim supported by this evidence",
             "verification_status": "PENDING_HUMAN_CHECK",
