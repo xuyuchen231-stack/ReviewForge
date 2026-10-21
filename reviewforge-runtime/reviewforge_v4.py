@@ -129,7 +129,12 @@ def protect_tex(before,after):
  for pattern in tokens:
   old=re.findall(pattern,before);new=re.findall(pattern,after)
   if any(new.count(x)<old.count(x) for x in set(old)):return False,'TeX structure or labels were removed: '+pattern
- if after.count(r'\begin{')!=after.count(r'\end{'):return False,'Unbalanced environments'
+ # Equation and graphical source must remain byte-identical across AI edits.
+ for env in ('equation','equation*','align','align*','gather','gather*','tikzpicture'):
+  pattern=r'\\begin\\{'+re.escape(env)+r'\\}.*?\\end\\{'+re.escape(env)+r'\\}'
+  if re.findall(pattern,before,re.S)!=re.findall(pattern,after,re.S):
+   return False,'Protected scientific/graphical environment changed: '+env
+ if after.count(r'\\begin{')!=after.count(r'\\end{'):return False,'Unbalanced environments'
  if after.count('$')%2:return False,'Odd number of inline math delimiters'
  if '\\documentclass' in after or '\\begin{document}' in after:return False,'Section edit attempted document reset'
  return True,''
