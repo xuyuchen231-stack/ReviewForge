@@ -154,6 +154,41 @@ def write_section(api,whole,section_head,section_body,papers,feedback=''):
  sysmsg='''You are a senior reviewer-author in biochemical engineering. Rewrite ONLY the provided LaTeX section body.\nReturn plain LaTeX body without fences or the \\section header, preamble or bibliography. Preserve ALL figures, tables, TikZ, equations, labels, user citation commands and technical accuracy.\nCite supplied keys only when actually relevant from title/metadata; do NOT attribute findings, numerical results or detailed methods based on titles alone.\nMake synthesis deep, arguments coherent, terms precise. Avoid defensive self-justifying prose. Do not replace equations with generic prose.\nIf evidence is insufficient, preserve existing supported statements and avoid inventing new ones. No full document output.\n'''
  return client_chat(api,sysmsg,{'brief':BRIEF,'section':section_head,'body':section_body,'reference_catalogue':sources,'reviewer_feedback':feedback})
 
+def rewrite_in_blocks(api,whole,head,body,papers,feedback=''):
+ """Bound each model output and keep protected LaTeX unchanged."""
+ starts=[m.start() for m in re.finditer(r'(?m)^\\(?:subsection|subsubsection)\*?(?:\[[^\]]*\])?\{[^\n]*\}',body)]
+ cuts=sorted(set([0]+starts+[len(body)]))
+ pieces=[body[cuts[i]:cuts[i+1]] for i in range(len(cuts)-1)]
+ chunks=[]
+ for piece in pieces:
+  if len(piece)<=3800:
+   chunks.append(piece)
+  else:
+   paragraphs=re.split(r'(\n\s*\n)',piece)
+   current=''
+   for part in paragraphs:
+    if current and len(current)+len(part)>3800:
+     chunks.append(current);current=''
+    current+=part
+   if current:chunks.append(current)
+ output=[]
+ for i,part in enumerate(chunks):
+  # Keep blocks with structural material intact rather than risk loss.
+  if re.search(r'\\begin\{(?:equation|align|gather|figure|table|tikzpicture)\*?\}|\\includegraphics|\\label\{',part):
+   output.append(part);continue
+  candidate=write_section(api,whole,head,part,papers,feedback=feedback).strip()
+  if len(candidate)<max(100,int(len(part)*0.7)):
+   raise ValueError('Truncated block '+str(i+1)+'/'+str(len(chunks)))
+  ok,why=protect_tex(part,candidate)
+  if not ok or not cite_keys(part).issubset(cite_keys(candidate)):
+   raise ValueError('Block '+str(i+1)+' structural gate: '+why)
+  oldheads=re.findall(r'(?m)^\\(?:subsection|subsubsection)\*?(?:\[[^\]]*\])?\{[^\n]*\}',part)
+  newheads=re.findall(r'(?m)^\\(?:subsection|subsubsection)\*?(?:\[[^\]]*\])?\{[^\n]*\}',candidate)
+  if oldheads!=newheads:raise ValueError('Subsection headings changed in block '+str(i+1))
+  output.append(candidate)
+ return '\n'.join(output)
+
+
 def analyze_structure(text):
  return {'sections':[s[0] for s in extract_sections(text)],'citekeys':sorted(cite_keys(text)),
          'figures':text.count(r'\begin{figure'),'tables':text.count(r'\begin{table')}
@@ -330,7 +365,7 @@ def run_v4(ws=WORK,hours=9,resume=False,minimum=60,skip_search=False,skip_transl
     state['status']='requesting'
     atomic_json(state_path,state)
     try:
-     candidate=write_section(api,tex,head,body,papers,feedback=feedback).strip();state['calls']+=1
+     candidate=rewrite_in_blocks(api,tex,head,body,papers,feedback=feedback).strip();state['calls']+=1
      ok,why=protect_tex(body,candidate)
      if ok and not cite_keys(body).issubset(cite_keys(candidate)):ok=False;why='Existing citekeys removed'
      if ok:
