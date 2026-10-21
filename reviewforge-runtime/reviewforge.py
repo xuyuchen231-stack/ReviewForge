@@ -72,6 +72,7 @@ class CompatibleAPI:
             self.keys = [os.environ.get('RF_API_KEY', '')]
         self.key = self.keys[0]
         self.key_index = 0
+        self.key_cooldowns = {}
         self.base = os.environ.get('RF_BASE_URL','').rstrip('/')
         self.model = os.environ.get('RF_WRITER_MODEL',os.environ.get('RF_MODEL','mimo-v2.6-flash:free'))
         self.reviewer_model = os.environ.get('RF_REVIEWER_MODEL','deepseek-v4.1-flash:free')
@@ -86,7 +87,12 @@ class CompatibleAPI:
         failures = []
         for model in models:
             body = json.dumps({'model': model, 'messages': [{'role': 'system', 'content': system}, {'role': 'user', 'content': user}], 'temperature': 0.2, 'max_tokens': self.max_tokens}).encode()
-            for key_index in range(self.key_index, len(self.keys)):
+            # Only opt in when the provider explicitly permits independent-account failover.
+            allow_rate_failover = os.environ.get('RF_ALLOW_RATE_LIMIT_FAILOVER') == '1'
+            key_order = list(range(self.key_index, len(self.keys))) + list(range(0, self.key_index))
+            for key_index in key_order:
+                if self.key_cooldowns.get(key_index, 0) > time.time():
+                    continue
                 key = self.keys[key_index]
                 req = urllib.request.Request(self.base + '/chat/completions', data=body, headers={'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json'}, method='POST')
                 try:
@@ -98,9 +104,18 @@ class CompatibleAPI:
                     self.key_index = key_index
                     return result
                 except urllib.error.HTTPError as exc:
-                    # Never rotate keys to evade provider rate limits.
                     if exc.code == 429:
                         retry = exc.headers.get('Retry-After', '')
+                        if allow_rate_failover and len(self.keys) > 1:
+                            # Independent accounts only, with explicit provider permission.
+                            # Preserve each account's cooldown and never log key material.
+                            try:
+                                delay = max(60, int(float(retry)))
+                            except (TypeError, ValueError):
+                                delay = 60
+                            self.key_cooldowns[key_index] = time.time() + delay
+                            failures.append('HTTP 429 (key slot ' + str(key_index + 1) + ')')
+                            continue
                         raise RuntimeError('Provider rate limit (429); respect Retry-After: ' + retry) from None
                     # Explicitly opt-in only for independently authorized,
                     # separately billed accounts. 402 is payment required.
@@ -112,6 +127,9 @@ class CompatibleAPI:
                 except Exception as exc:
                     failures.append(model + ': ' + type(exc).__name__)
                     break
+        if failures and all('HTTP 429' in f for f in failures):
+            delay = max(60, int(min(self.key_cooldowns.values()) - time.time())) if self.key_cooldowns else 60
+            raise RuntimeError('Provider rate limit (429); respect Retry-After: ' + str(delay))
         raise RuntimeError('API attempts failed: ' + '; '.join(failures))
 
 
