@@ -159,7 +159,8 @@ def analyze_structure(text):
          'figures':text.count(r'\begin{figure'),'tables':text.count(r'\begin{table')}
 
 def review_section(api,head,old,new):
- raw=client_chat(api,'You are a skeptical scientific reviewer. Give a concise JSON object only: {"accept": true/false, "issues": [string], "reason": string}. Reject missing equations/figures/citations, unsupported scientific specificity, loss of meaningful coverage, defensive prose, and incoherent method comparisons.',{'section':head,'before':old[:18000],'after':new[:18000]},role='reviewer')
+ today=datetime.datetime.now(datetime.timezone.utc).date().isoformat()
+ raw=client_chat(api,'Current UTC date: '+today+'. Treat this as the authoritative current date, not your training cutoff. Do not reject dates earlier than this date merely for being in the future; distinguish provenance verification from calendar consistency. You are a skeptical scientific reviewer. Give a concise JSON object only: {"accept": true/false, "issues": [string], "reason": string}. Reject missing equations/figures/citations, unsupported scientific specificity, loss of meaningful coverage, defensive prose, and incoherent method comparisons.',{'section':head,'before':old[:18000],'after':new[:18000],'current_date_utc':today},role='reviewer')
  try:return json.loads(raw.removeprefix('```json').removesuffix('```').strip())
  except ValueError:return {'accept':False,'issues':['Non-JSON review response'],'reason':'Parse failed'}
 
@@ -313,10 +314,15 @@ def run_v4(ws=WORK,hours=9,resume=False,minimum=60,skip_search=False,skip_transl
     state['history'].append({'section':index,'accepted':False,'error':'Section exceeds 30000 characters'})
     atomic_json(state_path,state);break
    accepted=False
+   feedback=''
    for attempt in range(1,4):
     if time.time()>=state['deadline']:break
+    state['heartbeat_utc']=datetime.datetime.now(datetime.timezone.utc).isoformat()
+    state['active_section']=index+1
+    state['active_attempt']=attempt
+    atomic_json(state_path,state)
     try:
-     candidate=write_section(api,tex,head,body,papers).strip();state['calls']+=1
+     candidate=write_section(api,tex,head,body,papers,feedback=feedback).strip();state['calls']+=1
      ok,why=protect_tex(body,candidate)
      if ok and not cite_keys(body).issubset(cite_keys(candidate)):ok=False;why='Existing citekeys removed'
      verdict=review_section(api,head,body,candidate) if ok else {'accept':False,'issues':[why],'reason':'Structural gate'}
@@ -328,6 +334,7 @@ def run_v4(ws=WORK,hours=9,resume=False,minimum=60,skip_search=False,skip_transl
       state['history'].append({'section':index,'accepted':True,'review':verdict,'attempt':attempt})
       break
      state['history'].append({'section':index,'accepted':False,'review':verdict,'attempt':attempt})
+     feedback='Previous candidate was rejected. Fix these exact problems while preserving every protected LaTeX equation, align block, figure, table, label and citekey verbatim: '+json.dumps(verdict.get('issues',[]),ensure_ascii=False)
     except Exception as e:
      message=type(e).__name__+': '+str(e)[:300]
      state['history'].append({'section':index,'accepted':False,'error':message,'attempt':attempt})
@@ -352,10 +359,12 @@ def run_v4(ws=WORK,hours=9,resume=False,minimum=60,skip_search=False,skip_transl
    (ws/'review_en.tex').write_text(tex,encoding='utf-8')
    if not accepted:
     state['stage']='writing'
+    state['last_error']='Section failed all attempts; resume to retry with feedback'
     atomic_json(state_path,state)
     print(f'Section {index+1} not accepted; checkpoint preserved for resume',flush=True)
     break
    state['section']=index+1
+   state['history']=[h for h in state['history'] if h.get('section')!=index or h.get('accepted')]
    atomic_json(state_path,state)
    print(f'Accepted section {index+1}/{len(sections)}; API calls {state["calls"]}',flush=True)
    sections=extract_sections(tex)
