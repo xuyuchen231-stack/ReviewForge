@@ -19,13 +19,22 @@ def atomic_json(path, obj):
 
 
 def load_env(path):
-    p = Path(path)
-    if not p.exists(): return
-    for line in p.read_text(encoding='utf-8').splitlines():
-        if not line.strip() or line.lstrip().startswith('#') or '=' not in line: continue
-        k, v = line.split('=', 1)
-        if k.strip().startswith('RF_'):
-            os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
+    """Load local overrides, then persistent per-user configuration.
+
+    Explicit process environment variables take priority. The project-local
+    .env is supported for backward compatibility; the per-user config survives
+    cloning, upgrading, or moving the repository.
+    """
+    paths = [Path(path), Path.home() / '.reviewforge' / 'credentials.env']
+    for p in paths:
+        if not p.is_file():
+            continue
+        for line in p.read_text(encoding='utf-8-sig').splitlines():
+            if not line.strip() or line.lstrip().startswith('#') or '=' not in line:
+                continue
+            k, v = line.split('=', 1)
+            if k.strip().startswith('RF_'):
+                os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
 
 
 def validate_ledger(ledger, sources):
