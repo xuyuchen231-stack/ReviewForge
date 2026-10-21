@@ -359,7 +359,7 @@ def run_v4(ws=WORK,hours=9,resume=False,minimum=60,skip_search=False,skip_transl
    atomic_json(state_path,state)
    print(f'Accepted section {index+1}/{len(sections)}; API calls {state["calls"]}',flush=True)
    sections=extract_sections(tex)
-  if state['section']>=len(sections) and all(h.get('accepted') for h in state['history'] if isinstance(h.get('section'),int)):
+  if state['section']>=len(sections):
    state['stage']='translation';atomic_json(state_path,state)
  if state['stage']=='translation' and not skip_translation and time.time()<state['deadline']:
   # Avoid creating a misleading partial Chinese file: translate when API and time budget permit.
