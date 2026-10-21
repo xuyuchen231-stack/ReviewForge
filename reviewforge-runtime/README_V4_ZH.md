@@ -5,7 +5,7 @@
 ## Windows 快速使用
 
 1. 安装 Python 3.10+、Git；推荐安装 [MiKTeX](https://miktex.org/download)，确保命令行 `latexmk` 和 `xelatex` 可调用（安装时允许按需安装 LaTeX 包）。
-2. 在本目录执行 `setup_secret.bat` 保存密钥（ZIP 不含 API Key），然后 `check_connection.bat` 检查 MiMo / DeepSeek。配置 MiMo `mimo-v2.6-flash:free` 写作，DeepSeek `deepseek-v4.1-flash:free` 审稿。
+2. **首次配置一次即可**：执行 `setup_secret.bat`，密钥保存至用户目录 `%USERPROFILE%\\.reviewforge\\credentials.env`，后续克隆、更新或移动项目都会自动读取。若旧目录存在 `.env`，脚本可选择导入而无需重新输入。然后执行 `check_connection.bat` 检查 MiMo / DeepSeek。配置 MiMo `mimo-v2.6-flash:free` 写作，DeepSeek `deepseek-v4.1-flash:free` 审稿。
 3. 将**完整英文 LaTeX 源文件**放在 `workspace/original.tex`，原论文的图片、`.bib`、`.sty` 等文件保持原相对路径也复制到 `workspace/`。从现有项目导入可运行：
 
 ```powershell
@@ -49,6 +49,6 @@ py -m unittest discover -s tests -v
 
 本 ZIP 已包含 v3 的所有文件。不要把它直接覆盖到旧目录里；建议解压到**新的目录**，避免原稿、旧 `state.json`、密钥配置与新版 `v4_state.json` 混淆。旧 v3 的 `start_9h.bat` 仍运行 Markdown 引擎；新 v4 的入口是 `start_review_v4_9h.bat`。
 
-由于 `.env` 刻意不随 ZIP 分发，需在新版目录**再次运行一次 `setup_secret.bat`**。请使用已轮换、只保存在你电脑上的 API Key。
+**持久化配置（更新）**：现在 API 配置保存在 `%USERPROFILE%\\.reviewforge\\credentials.env`，不是 Git 仓库中。第一次设置后，升级或新克隆项目不需要再次输入。旧版目录中的 `.env` 可通过 `setup_secret.bat` 导入一次。不要将配置文件提交到 GitHub。
 
 可在 `.env` 中将 `RF_MAX_OUTPUT_TOKENS` 设为 `12000` 或供应商支持的更高数值，以降低长章节返回被截断的风险；过长的章节会保留原文并在报告中标记待拆分。
