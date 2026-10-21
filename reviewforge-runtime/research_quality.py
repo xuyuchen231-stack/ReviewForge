@@ -6,6 +6,7 @@ import json
 import re
 import hashlib
 from pathlib import Path
+from manuscript_integrity import analyze as analyze_manuscript
 
 CITE = re.compile(r'\\cite[a-zA-Z*]*(?:\[[^\]]*\])*\{([^{}]+)\}')
 REQUIRED_FIELDS = ("doi", "title", "authors", "year", "full_text_access",
@@ -97,6 +98,7 @@ def evaluate(workspace, minimum=60):
         path = ws / f"review_{language}.tex"
         tex[language] = path.read_text(encoding="utf-8", errors="replace") if path.exists() else ""
     citations = {language: _keys(body) for language, body in tex.items()}
+    integrity = analyze_manuscript(ws)
     ledger = _claims(ws)
     studies = _studies(ws)
     evidence = []
@@ -148,6 +150,13 @@ def evaluate(workspace, minimum=60):
     synthesis = synthesis_analysis(studies)
     missing_study_keys = sorted(all_cited - {s.get("citekey") for s in studies if isinstance(s, dict)})
     issues = []
+    for lang in ("en", "zh"):
+        for key in integrity["languages"][lang]["missing_bibliography_keys"]:
+            issues.append({"severity": "critical", "gate": "bibliography",
+                           "message": f"{lang}: missing bibliography entry for {key}"})
+        for problem in integrity["languages"][lang]["tex_issues"]:
+            issues.append({"severity": "major", "gate": "latex",
+                           "message": f"{lang}: {problem}"})
     for language, body in tex.items():
         if not body:
             issues.append({"severity": "critical", "gate": "manuscript",
@@ -198,6 +207,7 @@ def evaluate(workspace, minimum=60):
         "scientific_quality_human_verified": False,
         "evidence_anchor_rule": "Exact excerpt must occur in an inspectable local UTF-8 source file; semantic support still requires human review.",
         "cited": {lang: len(keys) for lang, keys in citations.items()},
+        "manuscript_integrity": integrity,
         "evidence_rows": evidence,
         "primary_text_verified_citekeys_recorded": sorted(verified_keys),
         "unverified_cited_keys": uncovered,
