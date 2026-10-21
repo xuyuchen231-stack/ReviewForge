@@ -1,10 +1,31 @@
 # ReviewForge
 
+**Research-review automation · Windows Runtime + ChatGPT Skill**
+
+![Python](https://img.shields.io/badge/Python-3.10%2B-blue) ![Platform](https://img.shields.io/badge/Platform-Windows-informational) ![LaTeX](https://img.shields.io/badge/Output-LaTeX%20%2F%20PDF-success) ![Status](https://img.shields.io/badge/Status-v4%20source%20snapshot-yellow)
+
+**English** | [简体中文](README.zh-CN.md)
+
 **AI-assisted scientific review writing, literature discovery, multi-model peer review, and bilingual LaTeX publishing.**
 
 [中文使用指南](reviewforge-runtime/README_V4_ZH.md) · [Windows Runtime](reviewforge-runtime/) · [ChatGPT Skill](reviewforge/) · [Limitations](reviewforge-runtime/LIMITATIONS.md) · [Light-skills integration](reviewforge-runtime/LIGHT_INTEGRATION.md)
 
 > **Project status:** v4 source code and ChatGPT skill are available. This is a research-assistance workflow, not an autonomous scientific fact checker or a guarantee of publication-ready manuscripts.
+
+## At a glance
+
+```mermaid
+flowchart LR
+    A[LaTeX manuscript] --> B[Literature discovery]
+    B --> C[Writer model]
+    C --> D[Reviewer model]
+    D -->|Revise| C
+    D --> E[Citation and structure audits]
+    E --> F[English and Chinese PDF builds]
+    F --> G[Human verification]
+```
+
+[Workflow demo and release notes](docs/DEMO.md) · [中文快速上手](README.zh-CN.md)
 
 ## Overview
 
@@ -158,6 +179,10 @@ The repository is public. Never push API keys, `.env`, unpublished manuscripts, 
 ## Acknowledgments
 
 ReviewForge adapts workflow ideas from [Light-skills](https://github.com/Light0305/Light-skills) under its MIT license. This is an independent lightweight integration, **not** a complete port of its skills or an official affiliated project. See [LIGHT_INTEGRATION.md](reviewforge-runtime/LIGHT_INTEGRATION.md) and [THIRD_PARTY_NOTICES.txt](reviewforge-runtime/THIRD_PARTY_NOTICES.txt).
+
+## Examples, screenshots and release notes
+
+See [docs/DEMO.md](docs/DEMO.md) for an example command sequence, expected report locations, architecture diagram and v4 source-snapshot notes. Actual screenshots and PDF previews will be added only after a reproducible run using non-sensitive sample data; none are presented as completed results.
 
 ## Further reading
 
