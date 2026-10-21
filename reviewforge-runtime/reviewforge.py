@@ -127,7 +127,7 @@ class CompatibleAPI:
                 except Exception as exc:
                     failures.append(model + ': ' + type(exc).__name__)
                     break
-        if failures and all('HTTP 429' in f for f in failures):
+        if (failures and all('HTTP 429' in f for f in failures)) or (not failures and self.key_cooldowns and all(self.key_cooldowns.get(i,0)>time.time() for i in range(len(self.keys)))):
             delay = max(60, int(min(self.key_cooldowns.values()) - time.time())) if self.key_cooldowns else 60
             raise RuntimeError('Provider rate limit (429); respect Retry-After: ' + str(delay))
         raise RuntimeError('API attempts failed: ' + '; '.join(failures))
