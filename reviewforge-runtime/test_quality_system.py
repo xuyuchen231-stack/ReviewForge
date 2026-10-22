@@ -55,8 +55,8 @@ class QualityTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as root:
             ws=Path(root)
             tex=r'\documentclass{article}'+'\n'+r'\begin{document}'+'\n'
-            tex+='\\n'.join(r'\\section{Part %d} Short text.'%i for i in range(1,5))
-            tex+='\\n'+r'\\end{document}'
+            tex+='\n'.join('\\section{Part %d}\nShort text.'%i for i in range(1,5))
+            tex+='\n'+r'\end{document}'
             (ws/'original.tex').write_text(tex,encoding='utf-8')
             report=prepare(ws)
             self.assertEqual(report['sections'],4)
