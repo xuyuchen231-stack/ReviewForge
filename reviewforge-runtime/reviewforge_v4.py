@@ -459,6 +459,8 @@ def run_v4(ws=WORK,hours=9,resume=False,minimum=60,skip_search=False,skip_transl
    if not cite_keys(body).issubset(cite_keys(candidate)):
     state['status']='blocked_section';state['last_error']='Section citations removed';atomic_json(state_path,state)
     break
+   from quality_audit import write_depth_report
+   write_depth_report(candidate,ws/'reports'/f'section_{index+1:02}_depth.json')
    (ws/'revisions'/f'section_{index+1:02}.tex').write_text(candidate,encoding='utf-8')
    tex=proposed
    (ws/'review_en.tex').write_text(tex,encoding='utf-8')
