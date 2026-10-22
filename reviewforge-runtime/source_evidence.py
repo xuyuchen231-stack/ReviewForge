@@ -24,8 +24,9 @@ def evaluate_ledger(manuscript,ledger):
   'traceable_claims':sum(e['traceable'] for e in audited),
   'expert_verified_claims':sum(e['expert_verified'] and e['citation_in_manuscript'] for e in audited),
   'unresolved_claims':[e for e in audited if not e['expert_verified'] or not e['citation_in_manuscript']],
-  'complete_expert_verification':bool(keys) and not(keys-covered) and bool(audited) and all(e['expert_verified'] and e['citation_in_manuscript'] for e in audited),
-  'note':'Source anchors and DOI metadata alone do not prove semantic support; citation coverage is not claim coverage.'}
+  'complete_expert_verification':False,
+  'verification_scope':'CITATION_ANCHORS_ONLY; manuscript-wide claim completeness cannot be inferred',
+  'note':'Even expert-reviewed ledger entries do not establish that every manuscript claim was inventoried. Manuscript-wide verification is not certified.'}
 def main():
  p=argparse.ArgumentParser()
  p.add_argument('--manuscript',required=True);p.add_argument('--ledger',required=True);p.add_argument('--output',required=True)
