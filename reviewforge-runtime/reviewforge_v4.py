@@ -524,7 +524,7 @@ def main():
    'Mark claims requiring primary-source verification. This is a proposed outline, not a completed evidence audit.')
   raw_plan=client_chat(api,instructions,{'planning_contract':contract,'draft_excerpt':draft[:45000]},role='writer')
   try:
-   plan=json.loads(raw_plan.removeprefix('\\`\\`\\`json').removesuffix('\\`\\`\\`').strip())
+   plan=json.loads(raw_plan.removeprefix('```json').removeprefix('```').removesuffix('```').strip())
    if not isinstance(plan,dict) or not isinstance(plan.get('chapters'),list) or len(plan['chapters'])<2:
     raise ValueError('Missing chapters')
   except ValueError:
