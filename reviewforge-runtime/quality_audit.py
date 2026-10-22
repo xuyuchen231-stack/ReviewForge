@@ -2,9 +2,9 @@
 import re
 import json
 from pathlib import Path
-
-HEADING = re.compile(r'(?m)^\\(subsection|subsubsection|paragraph)\\*?(?:\\[[^\\]]*\\])?\\{([^\\n]*)\\}')
-CITE = re.compile(r'\\\\cite[a-zA-Z*]*\\s*(?:\\[[^\\]]*\\]\\s*)*\\{([^}]+)\\}')
+HEADING = re.compile(r'(?m)^\\(subsection|subsubsection|paragraph)\*?(?:\[[^\]]*\])?\{([^\n]*)\}')
+CITE = re.compile(r'\\cite[a-zA-Z*]*\s*(?:\[[^\]]*\]\s*)*\{([^}]+)\}')
+LATEX = re.compile(r'\\(?:begin|end)\{[^}]+\}|\\[a-zA-Z]+\*?(?:\[[^\]]*\])?')
 LATEX = re.compile(r'\\\\(?:begin|end)\\{[^}]+\\}|\\\\[a-zA-Z]+\\*?(?:\\[[^\\]]*\\])?')
 WORD = re.compile(r"[A-Za-z]+(?:[-'][A-Za-z]+)?")
 
@@ -18,7 +18,7 @@ def audit_depth(body, min_words=220):
         cites=set()
         for group in CITE.findall(text):
             cites.update(k.strip() for k in group.split(',') if k.strip())
-        paragraphs=[p for p in re.split(r'\\n\\s*\\n',clean) if len(WORD.findall(p))>=25]
+        paragraphs=[p for p in re.split(r'\n\s*\n',clean) if len(WORD.findall(p))>=25]
         findings=[]
         if words<min_words: findings.append('Short treatment: inspect whether this subsection adequately develops its scientific argument')
         if len(paragraphs)<2: findings.append('Limited paragraph-level development; consider evidence, comparison, and limitations')
