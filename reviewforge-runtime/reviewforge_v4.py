@@ -499,7 +499,7 @@ def run_v4(ws=WORK,hours=9,resume=False,minimum=60,skip_search=False,skip_transl
 
 def main():
  parser=argparse.ArgumentParser(description='ReviewForge v4 academic review automation')
- parser.add_argument('action',choices=['discover','audit','compile','quality','quality-init','plan','run','resume','preflight'])
+ parser.add_argument('action',choices=['discover','audit','compile','quality','quality-init','plan','improve','run','resume','preflight'])
  parser.add_argument('--workspace',default=str(WORK));parser.add_argument('--hours',type=float,default=9)
  parser.add_argument('--minimum',type=int,default=60);parser.add_argument('--skip-search',action='store_true')
  parser.add_argument('--skip-translation',action='store_true');args=parser.parse_args()
@@ -532,6 +532,25 @@ def main():
    raise GateError('Planning output not valid JSON; inspect reports/review_plan_unparsed.json')
   atomic_json(ws/'reports/review_plan_proposed.json',plan)
   print(json.dumps({'proposed_chapters':len(plan['chapters']),'plan':str(ws/'reports/review_plan_proposed.json'),'original_unchanged':True},ensure_ascii=False))
+  return
+ if args.action=='improve':
+  from quality_loop import improve,save
+  source=ws/'review_en.tex'
+  if not source.exists():raise GateError('Run improve after review_en.tex exists')
+  tex=source.read_text(encoding='utf-8')
+  sections=extract_sections(tex)
+  if not sections:raise GateError('No sections for improvement')
+  api=CompatibleAPI()
+  def ask(prompt,payload):
+   return client_chat(api,prompt,payload,role='reviewer' if 'Independent scholarly reviewer' in prompt else 'writer')
+  report=[]
+  for index,(heading,start,end) in enumerate(sections,1):
+   body=tex[start+len(heading):end]
+   result=improve(ask,gate_block,heading,body,max_rounds=3)
+   save(result,ws/'quality_revisions',f'section_{index:02d}')
+   report.append({'section':index,'heading':heading,'score':result['review']['total'],'status':result['status']})
+  atomic_json(ws/'reports/quality_improvement_summary.json',report)
+  print(json.dumps({'reviewed_sections':len(report),'outputs':str(ws/'quality_revisions'),'master_unchanged':True},ensure_ascii=False))
   return
  if args.action=='discover':print('registered metadata records:',len(collect_literature(ws,args.minimum)));return
  if args.action=='preflight':
