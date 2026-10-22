@@ -412,7 +412,13 @@ def compile_tex(ws,basename):
   report['reason']='latexmk or xelatex not installed'
  else:
   # Delete only the generated PDF: old outputs cannot be reported as new.
-  if pdf.exists():pdf.unlink()
+  if pdf.exists():
+   try:
+    pdf.unlink()
+   except OSError as e:
+    report['reason']='Cannot replace locked PDF: '+str(e)
+    atomic_json(reports/(basename+'_build.json'),report)
+    return report
   args=[cmd,'-gg','-xelatex','-interaction=nonstopmode','-halt-on-error',
         '-file-line-error','-outdir=output',tex.name]
   report['command']=args
