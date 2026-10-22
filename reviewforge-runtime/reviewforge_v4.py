@@ -543,10 +543,19 @@ def main():
   api=CompatibleAPI()
   def ask(prompt,payload):
    return client_chat(api,prompt,payload,role='reviewer' if 'Independent scholarly reviewer' in prompt else 'writer')
+  from evidence_gate import evidence_gate,provenance_audit
   report=[]
   for index,(heading,start,end) in enumerate(sections,1):
    body=tex[start+len(heading):end]
-   result=improve(ask,gate_block,heading,body,max_rounds=3)
+   def combined_gate(before,after):
+    ok,why=gate_block(before,after)
+    if not ok:return ok,why
+    safe,reason,_=evidence_gate(before,after,ws)
+    return safe,reason
+   result=improve(ask,combined_gate,heading,body,max_rounds=3)
+   result['evidence_audit']=provenance_audit(body,result['text'],ws)
+   if result['status']=='provisional_pass':
+    result['status']='model_review_pass_evidence_unverified'
    save(result,ws/'quality_revisions',f'section_{index:02d}')
    report.append({'section':index,'heading':heading,'score':result['review']['total'],'status':result['status']})
   atomic_json(ws/'reports/quality_improvement_summary.json',report)
