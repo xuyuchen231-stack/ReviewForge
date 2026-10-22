@@ -537,7 +537,13 @@ def run_v4(ws=WORK,hours=9,resume=False,minimum=60,skip_search=False,skip_transl
   result=audit(ws,minimum=minimum)
   atomic_json(ws/'reports/final_audit.json',result)
   evaluate_quality(ws,minimum)
-  state['stage']='finished';atomic_json(state_path,state)
+  repair_path=ws/'reports'/'repair_queue.json'
+  try:
+   pending=json.loads(repair_path.read_text(encoding='utf-8')) if repair_path.exists() else []
+  except (ValueError,OSError):pending=[{'error':'Unreadable repair queue'}]
+  state['unresolved_repair_count']=len(pending)
+  state['stage']='finished_with_unresolved_reviews' if pending else 'finished'
+  atomic_json(state_path,state)
  return state
 
 def main():
