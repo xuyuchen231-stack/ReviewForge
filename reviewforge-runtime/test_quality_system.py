@@ -42,5 +42,26 @@ class QualityTests(unittest.TestCase):
             self.assertFalse(passed)
             self.assertTrue(report['new_numeric_expressions'])
 
+    def test_ledger_cannot_certify_entire_manuscript(self):
+        from source_evidence import evaluate_ledger
+        manuscript=r'This result is supported \\cite{Known2020}.'
+        ledger={'entries':[{'claim':'This result is supported','citekey':'Known2020','source_id':'paper1',
+                'locator':'p.4','excerpt':'Original text','verification_status':'expert_verified'}]}
+        report=evaluate_ledger(manuscript,ledger)
+        self.assertFalse(report['complete_expert_verification'])
+
+    def test_prepare_weak_draft_without_fixed_chapters(self):
+        from quality_pipeline import prepare
+        with tempfile.TemporaryDirectory() as root:
+            ws=Path(root)
+            tex=r'\documentclass{article}'+'\n'+r'\begin{document}'+'\n'
+            tex+='\\n'.join(r'\\section{Part %d} Short text.'%i for i in range(1,5))
+            tex+='\\n'+r'\\end{document}'
+            (ws/'original.tex').write_text(tex,encoding='utf-8')
+            report=prepare(ws)
+            self.assertEqual(report['sections'],4)
+            self.assertTrue((ws/'reports'/'review_plan_input.json').exists())
+            self.assertFalse((ws/'review_en.tex').exists())
+
 if __name__=='__main__':
     unittest.main()
