@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 
 from review_planner import planning_contract, inspect_draft
-from quality_audit import audit_depth
+from quality_audit import audit_depth, audit_manuscript
 from source_evidence import evaluate_ledger
 from quality_loop import improve
 from evidence_gate import evidence_gate
@@ -35,6 +35,7 @@ def prepare(workspace):
     reportdir=ws/'reports'
     write_json(reportdir/'review_plan_input.json',planning_contract(topic,text))
     write_json(reportdir/'draft_depth.json',audit_depth(text))
+    write_json(reportdir/'manuscript_structure_and_depth.json',audit_manuscript(text))
     ledgerfile=ws/'evidence_ledger.json'
     ledger=json.loads(ledgerfile.read_text(encoding='utf-8')) if ledgerfile.exists() else {'entries':[]}
     write_json(reportdir/'source_evidence_report.json',evaluate_ledger(text,ledger))
