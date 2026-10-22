@@ -27,6 +27,34 @@ Preserve TeX mathematics, figures, tables, captions, and user citations unless c
 Never fabricate DOI, experiments, numerical findings, or article-specific conclusions.
 '''
 
+def topic_brief(workspace):
+ """Use optional project-specific brief; default preserves legacy fermentation runs."""
+ file=Path(workspace)/'review_brief.txt'
+ if file.exists():
+  value=file.read_text(encoding='utf-8').strip()
+  if value:return value
+ topic=Path(workspace)/'review_topic.txt'
+ if topic.exists():
+  value=topic.read_text(encoding='utf-8').strip()
+  if value:return ('Academic literature review topic: '+value+
+   '. Develop evidence-grounded, critical cross-study synthesis and precise scholarly prose. '
+   'Do not invent findings, citations or numerical results; preserve original TeX.')
+ return BRIEF
+
+def topic_queries(workspace,max_queries):
+ """Custom queries prevent fermentation-specific discovery on unrelated subjects."""
+ queryfile=Path(workspace)/'review_queries.txt'
+ if queryfile.exists():
+  queries=[line.strip() for line in queryfile.read_text(encoding='utf-8').splitlines()
+           if line.strip() and not line.lstrip().startswith('#')]
+  if queries:return queries[:max_queries]
+ topicfile=Path(workspace)/'review_topic.txt'
+ if topicfile.exists():
+  topic=topicfile.read_text(encoding='utf-8').strip()
+  if topic:return [topic+' review',topic+' methods comparison',topic+' systematic evidence',
+                   topic+' challenges limitations',topic+' recent advances'][:max_queries]
+ return DEFAULT_QUERIES[:max_queries]
+
 class GateError(Exception): pass
 
 def http_json(url, timeout=35):
@@ -59,7 +87,7 @@ def collect_literature(workspace, target=60, max_queries=6):
   except (ValueError,OSError):papers=[]
  seen={doi_normalize(x.get('doi')) for x in papers if isinstance(x,dict)}
  log=[]
- for q in DEFAULT_QUERIES[:max_queries]:
+ for q in topic_queries(workspace,max_queries):
   try:
    results=discover(q,70); log.append({'query':q,'status':'OK','hits':len(results)})
   except Exception as e:
@@ -152,7 +180,7 @@ def client_chat(api,system,payload,role='writer'):
 def write_section(api,whole,section_head,section_body,papers,feedback=''):
  sources=[{'key':p['key'],'title':p['title'],'year':p['year'],'doi':p['doi'],'metadata_status':p['metadata_status']} for p in papers[:180]]
  sysmsg='''You are a senior reviewer-author in biochemical engineering. Rewrite ONLY the provided LaTeX section body.\nReturn plain LaTeX body without fences or the \\section header, preamble or bibliography. Preserve ALL figures, tables, TikZ, equations, labels, user citation commands and technical accuracy. Keep existing cross-reference targets (\\ref, \\eqref, \\autoref, \\cref) valid; you may move their mentions with reorganized prose, but do not invent or remove targets.\nCite supplied keys only when actually relevant from title/metadata; do NOT attribute findings, numerical results or detailed methods based on titles alone.\nYou may rename subsection, subsubsection and paragraph headings to improve clarity, brevity and scholarly organization. You may merge, split, or reorganize subheadings within this block when justified, but never omit substantive content, citations, figures, equations, tables, or labels. Make synthesis deep, arguments coherent, terms precise. Avoid defensive self-justifying prose. Do not replace equations with generic prose.\nIf evidence is insufficient, preserve existing supported statements and avoid inventing new ones. No full document output.\n'''
- return client_chat(api,sysmsg,{'brief':BRIEF,'section':section_head,'body':section_body,'reference_catalogue':sources,'reviewer_feedback':feedback})
+ return client_chat(api,sysmsg,{'brief':topic_brief(WORK),'section':section_head,'body':section_body,'reference_catalogue':sources,'reviewer_feedback':feedback})
 
 def split_safe_blocks(body, limit=3200):
  """Split at headings and blank lines, never within LaTeX environments."""
