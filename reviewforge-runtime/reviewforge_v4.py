@@ -499,7 +499,7 @@ def run_v4(ws=WORK,hours=9,resume=False,minimum=60,skip_search=False,skip_transl
 
 def main():
  parser=argparse.ArgumentParser(description='ReviewForge v4 academic review automation')
- parser.add_argument('action',choices=['discover','audit','compile','quality','quality-init','plan','improve','run','resume','preflight'])
+ parser.add_argument('action',choices=['discover','audit','compile','quality','quality-init','plan','improve','evidence','run','resume','preflight'])
  parser.add_argument('--workspace',default=str(WORK));parser.add_argument('--hours',type=float,default=9)
  parser.add_argument('--minimum',type=int,default=60);parser.add_argument('--skip-search',action='store_true')
  parser.add_argument('--skip-translation',action='store_true');args=parser.parse_args()
@@ -560,6 +560,17 @@ def main():
    report.append({'section':index,'heading':heading,'score':result['review']['total'],'status':result['status']})
   atomic_json(ws/'reports/quality_improvement_summary.json',report)
   print(json.dumps({'reviewed_sections':len(report),'outputs':str(ws/'quality_revisions'),'master_unchanged':True},ensure_ascii=False))
+  return
+ if args.action=='evidence':
+  from source_evidence import evaluate_ledger
+  source=ws/'review_en.tex'
+  ledger=ws/'evidence_ledger.json'
+  if not source.exists():raise GateError('Missing review_en.tex')
+  if not ledger.exists():
+   atomic_json(ledger,{'entries':[]})
+  report=evaluate_ledger(source.read_text(encoding='utf-8'),json.loads(ledger.read_text(encoding='utf-8')))
+  atomic_json(ws/'reports/source_evidence_report.json',report)
+  print(json.dumps({'unanchored_citations':len(report['citations_without_source_anchor']),'expert_verified_claims':report['expert_verified_claims'],'complete_expert_verification':report['complete_expert_verification']},ensure_ascii=False))
   return
  if args.action=='discover':print('registered metadata records:',len(collect_literature(ws,args.minimum)));return
  if args.action=='preflight':
