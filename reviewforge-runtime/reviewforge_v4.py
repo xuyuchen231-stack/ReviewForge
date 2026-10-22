@@ -301,10 +301,25 @@ def review_blocks(api,tex,head,body,papers,ws,index,state,state_path):
     atomic_json(record_path,{'source_sha256':fingerprint,'accepted':False,'last_error':message,'attempt':attempt})
     attempt+=1
   if not accepted:
-   state['status']='blocked_block';state['last_error']=f'Section {index+1}, block {number} failed; accepted earlier blocks retained'
-   atomic_json(ws/'reports/blocked_block.json',{'section':index+1,'block':number,'total_blocks':len(blocks),'reason':state['last_error']})
+   # Preserve the original block and continue. Failure is tracked, never treated
+   # as a successful scholarly revision or silently discarded.
+   reason=f'Section {index+1}, block {number} failed independent review'
+   atomic_json(record_path,{'source_sha256':fingerprint,'accepted':False,
+       'candidate':original,'mode':'original_fallback','reason':reason,'attempts':attempt-1})
+   queue_path=ws/'reports'/'repair_queue.json'
+   try:
+    queue=json.loads(queue_path.read_text(encoding='utf-8')) if queue_path.exists() else []
+    if not isinstance(queue,list):queue=[]
+   except (OSError,ValueError):queue=[]
+   task={'section':index+1,'block':number,'source_sha256':fingerprint,'reason':reason}
+   queue=[item for item in queue if not (item.get('section')==index+1 and item.get('block')==number)]
+   queue.append(task)
+   atomic_json(queue_path,queue)
+   output.append(original)
+   state['status']='continued_with_unresolved_block'
+   state['last_error']=reason
    atomic_json(state_path,state)
-   return None
+   print(f'Unresolved block {number} in section {index+1}: retained original; queued for repair',flush=True)
  return ''.join(output)
 
 
