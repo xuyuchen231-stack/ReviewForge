@@ -5,7 +5,6 @@ from pathlib import Path
 HEADING = re.compile(r'(?m)^\\(subsection|subsubsection|paragraph)\*?(?:\[[^\]]*\])?\{([^\n]*)\}')
 CITE = re.compile(r'\\cite[a-zA-Z*]*\s*(?:\[[^\]]*\]\s*)*\{([^}]+)\}')
 LATEX = re.compile(r'\\(?:begin|end)\{[^}]+\}|\\[a-zA-Z]+\*?(?:\[[^\]]*\])?')
-LATEX = re.compile(r'\\\\(?:begin|end)\\{[^}]+\\}|\\\\[a-zA-Z]+\\*?(?:\\[[^\\]]*\\])?')
 WORD = re.compile(r"[A-Za-z]+(?:[-'][A-Za-z]+)?")
 
 def audit_depth(body, min_words=220):
