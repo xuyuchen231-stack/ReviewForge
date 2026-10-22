@@ -499,11 +499,40 @@ def run_v4(ws=WORK,hours=9,resume=False,minimum=60,skip_search=False,skip_transl
 
 def main():
  parser=argparse.ArgumentParser(description='ReviewForge v4 academic review automation')
- parser.add_argument('action',choices=['discover','audit','compile','quality','quality-init','run','resume','preflight'])
+ parser.add_argument('action',choices=['discover','audit','compile','quality','quality-init','plan','run','resume','preflight'])
  parser.add_argument('--workspace',default=str(WORK));parser.add_argument('--hours',type=float,default=9)
  parser.add_argument('--minimum',type=int,default=60);parser.add_argument('--skip-search',action='store_true')
  parser.add_argument('--skip-translation',action='store_true');args=parser.parse_args()
  load_env(ROOT/'.env');ws=Path(args.workspace);(ws/'reports').mkdir(parents=True,exist_ok=True)
+ if args.action=='plan':
+  from review_planner import planning_contract
+  source=ws/'original.tex'
+  if not source.exists():raise GateError('Planning requires workspace/original.tex; original is never modified')
+  draft=source.read_text(encoding='utf-8')
+  topic_file=ws/'review_topic.txt'
+  topic=topic_file.read_text(encoding='utf-8').strip() if topic_file.exists() else ''
+  if not topic:
+   match=re.search(r'\\\\title\\{([^{}]+)\\}',draft)
+   topic=match.group(1) if match else 'Academic literature review (topic to be confirmed)'
+  contract=planning_contract(topic,draft)
+  atomic_json(ws/'reports/review_plan_input.json',contract)
+  api=CompatibleAPI()
+  instructions=('You are a scholarly review architect. Return ONLY a JSON object matching output_schema. '
+   'Propose the chapter count and hierarchy based on the scientific question, not the existing chapter count. '
+   'Diagnose weak draft coverage, compare alternative structures, and explain each chapter\'s argument and evidence needs. '
+   'Do not invent primary-study findings or references. Use the original only as source material. '
+   'Mark claims requiring primary-source verification. This is a proposed outline, not a completed evidence audit.')
+  raw_plan=client_chat(api,instructions,{'planning_contract':contract,'draft_excerpt':draft[:45000]},role='writer')
+  try:
+   plan=json.loads(raw_plan.removeprefix('\\`\\`\\`json').removesuffix('\\`\\`\\`').strip())
+   if not isinstance(plan,dict) or not isinstance(plan.get('chapters'),list) or len(plan['chapters'])<2:
+    raise ValueError('Missing chapters')
+  except ValueError:
+   atomic_json(ws/'reports/review_plan_unparsed.json',{'raw':raw_plan})
+   raise GateError('Planning output not valid JSON; inspect reports/review_plan_unparsed.json')
+  atomic_json(ws/'reports/review_plan_proposed.json',plan)
+  print(json.dumps({'proposed_chapters':len(plan['chapters']),'plan':str(ws/'reports/review_plan_proposed.json'),'original_unchanged':True},ensure_ascii=False))
+  return
  if args.action=='discover':print('registered metadata records:',len(collect_literature(ws,args.minimum)));return
  if args.action=='preflight':
   print(json.dumps({'original_tex_exists':(ws/'original.tex').exists(),'latexmk':bool(shutil.which('latexmk')),
