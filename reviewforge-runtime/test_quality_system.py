@@ -75,5 +75,22 @@ class QualityTests(unittest.TestCase):
         report=audit_manuscript(text)
         self.assertEqual(report['heading_count'],2)
 
+    def test_failed_section_is_quarantined_and_advanced(self):
+        import json
+        from reviewforge_v4 import skip_failed_section
+        with tempfile.TemporaryDirectory() as root:
+            ws=Path(root)
+            (ws/'reports').mkdir()
+            state={'section':2,'history':[]}
+            state_path=ws/'v4_state.json'
+            skip_failed_section(state,state_path,ws,2,'Section inventory changed')
+            self.assertEqual(state['section'],3)
+            self.assertEqual(state['status'],'section_skipped')
+            self.assertFalse(state['history'][-1]['accepted'])
+            report=json.loads((ws/'reports'/'failed_sections.json').read_text(encoding='utf-8'))
+            self.assertEqual(report[0]['section'],3)
+            self.assertEqual(report[0]['status'],'original_retained')
+            self.assertEqual(json.loads(state_path.read_text(encoding='utf-8'))['section'],3)
+
 if __name__=='__main__':
     unittest.main()
