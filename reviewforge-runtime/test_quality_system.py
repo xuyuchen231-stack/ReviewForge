@@ -65,13 +65,13 @@ class QualityTests(unittest.TestCase):
 
     def test_chinese_subsection_length_is_counted(self):
         from quality_audit import audit_depth
-        text='\\\\subsection{方法原理}\\n' + ('这是一个用于描述研究方法、证据比较以及模型适用边界的中文段落。' * 20)
+        text=r'\subsection{方法原理}'+'\n'+('这是一个用于描述研究方法、证据比较以及模型适用边界的中文段落。'*20)
         report=audit_depth(text)
         self.assertGreater(report['subsections'][0]['cjk_characters'],100)
 
     def test_manuscript_inventory_is_topic_independent(self):
         from quality_audit import audit_manuscript
-        text='\\\\section{Introduction}\\n' + ('A substantive paragraph. ' * 30) + '\\n\\\\section{Methods}\\n' + ('A second substantive paragraph. ' * 30)
+        text=r'\section{Introduction}'+'\n'+('A substantive paragraph. '*30)+'\n'+r'\section{Methods}'+'\n'+('A second substantive paragraph. '*30)
         report=audit_manuscript(text)
         self.assertEqual(report['heading_count'],2)
 
