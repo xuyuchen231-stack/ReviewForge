@@ -151,7 +151,7 @@ def client_chat(api,system,payload,role='writer'):
 
 def write_section(api,whole,section_head,section_body,papers,feedback=''):
  sources=[{'key':p['key'],'title':p['title'],'year':p['year'],'doi':p['doi'],'metadata_status':p['metadata_status']} for p in papers[:180]]
- sysmsg='''You are a senior reviewer-author in biochemical engineering. Rewrite ONLY the provided LaTeX section body.\nReturn plain LaTeX body without fences or the \\section header, preamble or bibliography. Preserve ALL figures, tables, TikZ, equations, labels, user citation commands and technical accuracy.\nCite supplied keys only when actually relevant from title/metadata; do NOT attribute findings, numerical results or detailed methods based on titles alone.\nYou may rename subsection, subsubsection and paragraph headings to improve clarity, brevity and scholarly organization. You may merge, split, or reorganize subheadings within this block when justified, but never omit substantive content, citations, figures, equations, tables, or labels. Make synthesis deep, arguments coherent, terms precise. Avoid defensive self-justifying prose. Do not replace equations with generic prose.\nIf evidence is insufficient, preserve existing supported statements and avoid inventing new ones. No full document output.\n'''
+ sysmsg='''You are a senior reviewer-author in biochemical engineering. Rewrite ONLY the provided LaTeX section body.\nReturn plain LaTeX body without fences or the \\section header, preamble or bibliography. Preserve ALL figures, tables, TikZ, equations, labels, user citation commands and technical accuracy. Keep existing cross-reference targets (\\ref, \\eqref, \\autoref, \\cref) valid; you may move their mentions with reorganized prose, but do not invent or remove targets.\nCite supplied keys only when actually relevant from title/metadata; do NOT attribute findings, numerical results or detailed methods based on titles alone.\nYou may rename subsection, subsubsection and paragraph headings to improve clarity, brevity and scholarly organization. You may merge, split, or reorganize subheadings within this block when justified, but never omit substantive content, citations, figures, equations, tables, or labels. Make synthesis deep, arguments coherent, terms precise. Avoid defensive self-justifying prose. Do not replace equations with generic prose.\nIf evidence is insufficient, preserve existing supported statements and avoid inventing new ones. No full document output.\n'''
  return client_chat(api,sysmsg,{'brief':BRIEF,'section':section_head,'body':section_body,'reference_catalogue':sources,'reviewer_feedback':feedback})
 
 def split_safe_blocks(body, limit=3200):
@@ -194,8 +194,12 @@ def gate_block(old,new):
   # All protected LaTeX, citations, labels and cross-references are still gated below.
   if len(heading_inventory(new))>max(20,3*max(1,len(heading_inventory(old)))):
    return False,'Excessive new headings; possible model-generated outline instead of revision'
- if re.findall(r'\\(?:ref|eqref)\{[^}]+\}',old)!=re.findall(r'\\(?:ref|eqref)\{[^}]+\}',new):
-  return False,'Cross-references changed'
+ old_refs=set(re.findall(r'\\(?:ref|eqref|autoref|cref|Cref)\{([^}]+)\}',old))
+ new_refs=set(re.findall(r'\\(?:ref|eqref|autoref|cref|Cref)\{([^}]+)\}',new))
+ if old_refs-new_refs:
+  return False,'Existing cross-reference targets removed: '+', '.join(sorted(old_refs-new_refs))
+ if new_refs-old_refs:
+  return False,'New cross-reference targets require whole-document validation: '+', '.join(sorted(new_refs-old_refs))
  for env in ('figure','figure*','table','table*','equation','equation*','align','align*','gather','gather*','tikzpicture'):
   p=r'\\begin\{'+re.escape(env)+r'\}.*?\\end\{'+re.escape(env)+r'\}'
   if re.findall(p,old,re.S)!=re.findall(p,new,re.S):return False,'Protected environment changed: '+env
