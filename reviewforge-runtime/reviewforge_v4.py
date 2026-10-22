@@ -234,6 +234,24 @@ def gate_block(old,new):
  return protect_tex(old,new)
 
 
+def skip_failed_section(state,state_path,ws,index,reason):
+ """Quarantine a failed section; leave manuscript unchanged and continue."""
+ report_path=ws/'reports'/'failed_sections.json'
+ try:
+  report=json.loads(report_path.read_text(encoding='utf-8')) if report_path.exists() else []
+  if not isinstance(report,list):report=[]
+ except (OSError,ValueError):report=[]
+ entry={'section':index+1,'reason':str(reason),'status':'original_retained'}
+ report=[x for x in report if x.get('section')!=index+1]+[entry]
+ atomic_json(report_path,report)
+ state['section']=index+1
+ state['status']='section_skipped'
+ state['last_error']=str(reason)
+ state.setdefault('history',[]).append({'section':index,'accepted':False,'reason':str(reason)})
+ atomic_json(state_path,state)
+ print(f'Skipped section {index+1}: {reason}; original retained',flush=True)
+
+
 def review_blocks(api,tex,head,body,papers,ws,index,state,state_path):
  """Persist each accepted, independently reviewed block before moving on."""
  blocks=split_safe_blocks(body)
@@ -490,18 +508,21 @@ def run_v4(ws=WORK,hours=9,resume=False,minimum=60,skip_search=False,skip_transl
    if candidate is None:
     print(f'Section {index+1} paused; accepted blocks saved for resume',flush=True)
     break
+   # Normalize only the boundary with the next section, not the section content.
+   if end<len(tex) and tex[end:].lstrip().startswith((r'\section',r'\chapter')):
+    candidate=candidate.rstrip('\r\n')+'\n\n'
    ok,why=gate_block(body,candidate)
    if not ok:
-    state['status']='blocked_section';state['last_error']=why;atomic_json(state_path,state)
-    break
+    skip_failed_section(state,state_path,ws,index,why)
+    continue
    proposed=tex[:start]+head+candidate+tex[end:]
    if [h for h,_,_ in extract_sections(proposed)]!=expected:
-    state['status']='blocked_section';state['last_error']='Section inventory changed';atomic_json(state_path,state)
-    break
+    skip_failed_section(state,state_path,ws,index,'Section inventory changed')
+    continue
    # Check both the complete section and all protected structural material.
    if not cite_keys(body).issubset(cite_keys(candidate)):
-    state['status']='blocked_section';state['last_error']='Section citations removed';atomic_json(state_path,state)
-    break
+    skip_failed_section(state,state_path,ws,index,'Section citations removed')
+    continue
    from quality_audit import write_depth_report
    write_depth_report(candidate,ws/'reports'/f'section_{index+1:02}_depth.json')
    (ws/'revisions'/f'section_{index+1:02}.tex').write_text(candidate,encoding='utf-8')
