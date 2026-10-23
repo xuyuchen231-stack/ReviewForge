@@ -1,3 +1,5 @@
+> Update 2026-10-24: [v4.1 evidence and delivery gates](reviewforge-runtime/README_V4_1_ZH.md). Existing v4 commands remain supported.
+
 # ReviewForge · 中文指南
 
 [English](README.md) · [快速开始](#快速开始) · [工作流程](#工作流程) · [常见问题](#常见问题)

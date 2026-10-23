@@ -16,3 +16,11 @@ workspace/private/
 *.blg
 *.synctex.gz
 .DS_Store
+
+# Private manuscripts and local repair archives must not be published.
+reviewforge-runtime/workspace/
+reviewforge-runtime/workspace_backup*/
+reviewforge-runtime/workspace-backup*/
+reviewforge-runtime/ReviewForge_Repair_Input.zip
+reviewforge-runtime/ReviewForge_Results.zip
+*.bak

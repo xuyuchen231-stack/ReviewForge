@@ -13,6 +13,8 @@ from quality_audit import audit_depth, audit_manuscript
 from source_evidence import evaluate_ledger
 from quality_loop import improve
 from evidence_gate import evidence_gate
+from evidence_context import load_context
+from research_planning import coverage_report, figure_inventory
 
 def write_json(path,value):
     path=Path(path);path.parent.mkdir(parents=True,exist_ok=True)
@@ -36,6 +38,8 @@ def prepare(workspace):
     write_json(reportdir/'review_plan_input.json',planning_contract(topic,text))
     write_json(reportdir/'draft_depth.json',audit_depth(text))
     write_json(reportdir/'manuscript_structure_and_depth.json',audit_manuscript(text))
+    write_json(reportdir/'coverage_report.json',coverage_report(ws,text))
+    write_json(reportdir/'figure_review_briefs.json',figure_inventory(text))
     ledgerfile=ws/'evidence_ledger.json'
     ledger=json.loads(ledgerfile.read_text(encoding='utf-8')) if ledgerfile.exists() else {'entries':[]}
     write_json(reportdir/'source_evidence_report.json',evaluate_ledger(text,ledger))
@@ -64,7 +68,7 @@ def revise_sections(workspace,chat,structure_gate,max_rounds=3):
             if not ok:return ok,reason
             ok,reason,_=evidence_gate(before,after,ws)
             return ok,reason
-        result=improve(chat,gate,heading,body,max_rounds=max_rounds)
+        result=improve(chat,gate,heading,body,max_rounds=max_rounds,evidence_context=load_context(ws,body,heading))
         stem='section_%02d'%i
         (out/(stem+'.tex')).write_text(result['text'],encoding='utf-8')
         write_json(out/(stem+'.json'),{k:v for k,v in result.items() if k!='text'})

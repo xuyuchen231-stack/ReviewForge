@@ -34,7 +34,7 @@ For fermentation hybrid-modeling reviews, distinguish in-distribution trajectory
 
 ## Manuscript language policy
 
-Write publication-ready scholarly prose. Remove defensive disclaimers, apologies, self-justifying commentary, writing-process notes, and generic caveats from the manuscript. Retain meaningful limitations and uncertainty as concise, specific scientific analysis supported by evidence. Keep evidence warnings, review decisions and tool limitations in separate audit reports, never in the article body. For local execution use MiMo V2.6 Flash for writing and DeepSeek V4.1 Flash for independent review when the provider supports them. Never embed API secrets in a skill.
+Write publication-ready scholarly prose. Remove defensive disclaimers, apologies, self-justifying commentary, writing-process notes, and generic caveats from the manuscript. Retain meaningful limitations and uncertainty as concise, specific scientific analysis supported by evidence. Keep evidence warnings, review decisions and tool limitations in separate audit reports, never in the article body. Use the project's configured writer and reviewer models; keep provider/model choices in runtime configuration. Never embed API secrets in a skill.
 
 ## ReviewForge v4 + Light-skills workflow integration
 
@@ -59,3 +59,42 @@ Never include writing-process commentary, defensive disclaimers, self-justificat
 ### Output readiness rules
 
 Deliver the English and Chinese XeLaTeX source, actual generated PDFs only when compilation succeeded, BibTeX database, literature trace, review log, and final audit. If 60 distinct works are not actually cited and registered, report the shortfall; never manufacture citations to satisfy a numerical target. Preserve source title, numbers, figures, and author control of the master document.
+
+## v4.1: evidence and delivery contracts
+
+- **Translation:** translate bounded prose units with protected TeX/math/citation tokens.
+  Include title, abstract, headings, captions and table prose. Retry failed units and
+  persist successful units; never count retained English as completed Chinese.
+  Translate from the current English source, preserve class options, and use the
+  project's terminology glossary. Text embedded in images/TikZ needs a separate
+  figure edit and visual check; do not claim it was translated by the prose pipeline.
+- **Evidence:** give writer and reviewer the same source excerpts, locations,
+  limitations and verification status. Metadata is a discovery aid. A missing
+  source anchor is an unresolved evidence task, not permission to invent support.
+  Changing the evidence ledger invalidates cached model revisions.
+- **Coverage:** organize evidence around the review's questions. Record supporting
+  studies, counterevidence searches (including searches yielding no counterevidence),
+  and unresolved conditions in `coverage_matrix.json`. Prioritize these gaps when
+  adding literature; numerical targets are configurable project requirements.
+- **Figures:** first specify the question answered and evidence sources; then
+  decide retain/redraw/remove. Inspect scientific meaning, caption, abbreviations,
+  and readability at final column width. Use editable scientific plotting/vector
+  sources for evidence figures. An inventory is not a completed redesign.
+- **Revision acceptance:** require documented issue resolution without new major
+  or unsupported-claim problems. Model-score increases alone cannot accept changes.
+- **Delivery:** distinguish compiler PASS, layout PASS, rendered previews and
+  actual visual review. Inspect all rendered pages, particularly equations and
+  tables. Bind visual approval to the exact PDF hash and reviewed page list.
+  Missing previews, overflow or unresolved references remain delivery blockers.
+  These technical checks do not certify scientific validity or journal readiness.
+
+### Revision modes
+
+The default runtime revises within existing top-level sections. For an inadequate
+outline, first propose a topic-led structure and map old paragraphs, evidence,
+equations and figures to their destinations. Review that mapping before producing
+a separate structural candidate. The runtime `plan` command proposes a structure;
+`run` does not automatically execute a whole-manuscript restructure. Never describe
+conservative section editing as structural rewriting.
+
+See `reviewforge-runtime/README_V4_1_ZH.md` in the repository for schemas and commands.

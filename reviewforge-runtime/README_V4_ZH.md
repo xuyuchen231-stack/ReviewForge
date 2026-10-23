@@ -1,3 +1,5 @@
+> Update 2026-10-24: [v4.1 evidence and delivery gates](README_V4_1_ZH.md). Existing v4 commands remain supported.
+
 # ReviewForge v4 — 微生物发酵混合建模综述自动化
 
 本目录是 v3 的增量升级，原有 `setup_secret.bat`、`check_connection.bat` 和 `start_9h.bat` 均保留。**本次使用新入口 `start_review_v4_9h.bat`。**

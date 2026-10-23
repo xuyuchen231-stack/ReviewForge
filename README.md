@@ -1,3 +1,5 @@
+> Update 2026-10-24: [v4.1 evidence and delivery gates](reviewforge-runtime/README_V4_1_ZH.md). Existing v4 commands remain supported.
+
 # ReviewForge
 
 **Research-review automation · Windows Runtime + ChatGPT Skill**

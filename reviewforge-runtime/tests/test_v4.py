@@ -30,6 +30,7 @@ class TestV4(unittest.TestCase):
    self.assertFalse(audit(w,60)['minimum_pass'])
  def test_compile_unavailable(self):
   with tempfile.TemporaryDirectory() as tmp:
+   (Path(tmp)/'test.tex').write_text(TEX)
    with patch('reviewforge_v4.shutil.which',return_value=None):self.assertEqual(compile_tex(Path(tmp),'test')['status'],'UNAVAILABLE')
  def test_missing_source(self):
   with tempfile.TemporaryDirectory() as tmp:
