@@ -9,6 +9,19 @@ import reviewforge_v4 as rf
 
 
 class RepairResumeTests(unittest.TestCase):
+    def test_missing_source_anchors_pause_before_any_model_request(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ws=Path(tmp); (ws/'reports').mkdir()
+            state={'deadline':time.time()+60,'calls':0}
+            body=r'An empirical result requires support \cite{Study2024}.'
+            with patch.object(rf,'write_section',side_effect=AssertionError('Missing evidence sent to model')):
+                result=rf.review_blocks(None,'','Methods',body,[],ws,0,state,ws/'state.json')
+            self.assertIsNone(result)
+            self.assertEqual(state['status'],'blocked_evidence')
+            self.assertEqual(state['calls'],0)
+            report=json.loads((ws/'reports/evidence_preflight.json').read_text())
+            self.assertEqual(report['missing_citekeys'],['Study2024'])
+
     def test_whole_section_failure_counts_even_without_block_queue(self):
         with tempfile.TemporaryDirectory() as tmp:
             ws=Path(tmp); (ws/'reports').mkdir()

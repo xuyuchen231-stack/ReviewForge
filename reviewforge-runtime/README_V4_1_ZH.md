@@ -92,6 +92,12 @@ python reviewforge_v4.py resume --workspace workspace
 入口会从修复队列、失败章节和检查点中收集未解决章节，重试这些章节。
 整节替换通过检查后才更新修复队列；已解决记录会清除，仍失败的记录继续保留。
 空白文本块会直接保留，不占模型调用。不要删除检查点或将状态手工改成 `finished`。
+若待改写正文引用缺少原文摘录/定位，续跑在模型调用前暂停，状态为
+`blocked_evidence`，具体引用键见 `reports/evidence_preflight.json`。
+补齐 `evidence_ledger.json` 中真实读取的原文证据后再续跑；不要把示例文件改名
+或把 DOI 元数据当作原文证据。失败块保留最后一次审稿意见/接口错误，便于诊断。
+有未修复原文回填的章节会打印 `Saved section ... with ... unresolved blocks`，
+避免被误读为整节科学审稿通过。
 最终审计中的 `submission_ready` 继续为 false：技术验收不代替科学审稿。
 检查失败的译文时，以当前 `translation_gate.json` 为准；旧版文件可能仍被保留。
 

@@ -267,7 +267,7 @@ def review_blocks(api,tex,head,body,papers,ws,index,state,state_path):
    output.append(original)
    continue
   fingerprint=hashlib.sha256(original.encode('utf-8')).hexdigest()
-  evidence_fingerprint=context_digest(load_context(ws,original,head))
+  evidence_fingerprint=context_digest({'context':load_context(ws,original,head),'gate_version':2})
   record_path=directory/('block_%03d.json'%number)
   if record_path.exists():
    try:
@@ -286,8 +286,26 @@ def review_blocks(api,tex,head,body,papers,ws,index,state,state_path):
    atomic_json(record_path,{'source_sha256':fingerprint,'accepted':True,'candidate':original,'mode':'protected_original'})
    output.append(original)
    continue
+  context=load_context(ws,original,head)
+  if context['unanchored_citekeys']:
+   missing=context['unanchored_citekeys']
+   task={'section':index+1,'block':number,'source_sha256':fingerprint,
+         'reason':'Source excerpts/locators required before scientific revision',
+         'missing_citekeys':missing,'status':'blocked_evidence'}
+   atomic_json(ws/'reports/evidence_preflight.json',task)
+   queue=repair_report_items(ws,'repair_queue.json')
+   queue=[item for item in queue if not (item.get('section')==index+1 and item.get('block')==number)]
+   atomic_json(ws/'reports/repair_queue.json',queue+[task])
+   atomic_json(record_path,{'source_sha256':fingerprint,'accepted':False,'mode':'blocked_evidence','reason':task['reason'],'missing_citekeys':missing})
+   state.update(status='blocked_evidence',active_section=index+1,active_block=number,
+                last_error='Missing source anchors: '+', '.join(missing))
+   atomic_json(state_path,state)
+   print(f'Paused section {index+1} block {number}: source excerpts/locators missing for '+', '.join(missing)+'; see reports/evidence_preflight.json. No model call made for this block.',flush=True)
+   return None
   feedback=''
   accepted=False
+  last_review=None
+  last_error=None
   attempt=1
   rate_count=0
   while attempt<=3 and time.time()<state['deadline']:
@@ -299,6 +317,7 @@ def review_blocks(api,tex,head,body,papers,ws,index,state,state_path):
     ok,why=gate_block(original,candidate)
     if ok:ok,why=candidate_evidence_gate(original,candidate,ws,head)
     verdict=review_section(api,head,original,candidate,workspace=ws) if ok else {'accept':False,'issues':[why],'reason':'Structural gate'}
+    last_review=verdict
     if ok:state['calls']+=1
     if ok and verdict.get('accept') is True:
      atomic_json(record_path,{'source_sha256':fingerprint,'accepted':True,'candidate':candidate,'evidence_sha256':evidence_fingerprint,'review':verdict,'attempt':attempt,'heading_changes':heading_change_log(original,candidate),'heading_structure_before':heading_inventory(original),'heading_structure_after':heading_inventory(candidate)})
@@ -312,6 +331,7 @@ def review_blocks(api,tex,head,body,papers,ws,index,state,state_path):
     attempt+=1
    except Exception as e:
     message=type(e).__name__+': '+str(e)[:300]
+    last_error=message
     if '429' in str(e):
      rate_count+=1
      delay=min(1800,60*2**min(rate_count-1,4))
@@ -332,7 +352,8 @@ def review_blocks(api,tex,head,body,papers,ws,index,state,state_path):
    # as a successful scholarly revision or silently discarded.
    reason=f'Section {index+1}, block {number} failed independent review'
    atomic_json(record_path,{'source_sha256':fingerprint,'accepted':False,
-       'candidate':original,'mode':'original_fallback','reason':reason,'attempts':attempt-1})
+       'candidate':original,'mode':'original_fallback','reason':reason,'attempts':attempt-1,
+       'last_review':last_review,'last_error':last_error})
    queue_path=ws/'reports'/'repair_queue.json'
    try:
     queue=json.loads(queue_path.read_text(encoding='utf-8')) if queue_path.exists() else []
@@ -593,7 +614,10 @@ def run_v4(ws=WORK,hours=9,resume=False,minimum=60,skip_search=False,skip_transl
    state['history']=[h for h in state.get('history',[]) if h.get('section')!=index]
    state['history'].append({'section':index,'accepted':True,'blocks':len(split_safe_blocks(body))})
    atomic_json(state_path,state)
-   print(f'Accepted section {index+1}/{len(sections)}; API calls {state["calls"]}',flush=True)
+   if pending['items']:
+    print(f'Saved section {index+1}/{len(sections)} with {len(pending["items"])} unresolved blocks retained; API calls {state["calls"]}',flush=True)
+   else:
+    print(f'Accepted section {index+1}/{len(sections)}; API calls {state["calls"]}',flush=True)
    sections=extract_sections(tex)
   if state['section']>=len(sections):
    state.pop('repair_sections',None)
