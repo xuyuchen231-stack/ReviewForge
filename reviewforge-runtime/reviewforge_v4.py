@@ -261,7 +261,11 @@ def review_blocks(api,tex,head,body,papers,ws,index,state,state_path):
  directory=ws/'revisions'/('section_%02d_blocks'%(index+1))
  directory.mkdir(parents=True,exist_ok=True)
  output=[]
+ pending=[]
  for number,original in enumerate(blocks,1):
+  if not original.strip():
+   output.append(original)
+   continue
   fingerprint=hashlib.sha256(original.encode('utf-8')).hexdigest()
   evidence_fingerprint=context_digest(load_context(ws,original,head))
   record_path=directory/('block_%03d.json'%number)
@@ -335,6 +339,7 @@ def review_blocks(api,tex,head,body,papers,ws,index,state,state_path):
     if not isinstance(queue,list):queue=[]
    except (OSError,ValueError):queue=[]
    task={'section':index+1,'block':number,'source_sha256':fingerprint,'reason':reason}
+   pending.append(task)
    queue=[item for item in queue if not (item.get('section')==index+1 and item.get('block')==number)]
    queue.append(task)
    atomic_json(queue_path,queue)
@@ -343,6 +348,8 @@ def review_blocks(api,tex,head,body,papers,ws,index,state,state_path):
    state['last_error']=reason
    atomic_json(state_path,state)
    print(f'Unresolved block {number} in section {index+1}: retained original; queued for repair',flush=True)
+ state['section_pending_repairs']={'section':index+1,'items':pending}
+ atomic_json(state_path,state)
  return ''.join(output)
 
 
@@ -463,19 +470,52 @@ def audit(ws,minimum=60):
 
 
 
+def repair_report_items(workspace,name):
+ path=Path(workspace)/'reports'/name
+ if not path.exists():return []
+ try:
+  rows=json.loads(path.read_text(encoding='utf-8'))
+  if not isinstance(rows,list) or any(not isinstance(row,dict) or type(row.get('section')) is not int or row['section']<1 for row in rows):
+   raise ValueError('Expected repair entries with positive section numbers')
+  return rows
+ except (OSError,ValueError,TypeError) as exc:
+  raise GateError('Cannot safely read repair report: '+str(path)) from exc
+
+
+def unresolved_repairs(state,workspace):
+ latest={h['section']:h for h in state.get('history',[]) if type(h.get('section')) is int}
+ pending={i for i,h in latest.items() if not h.get('accepted',False)}
+ pending.update(row['section']-1 for row in repair_report_items(workspace,'failed_sections.json'))
+ return repair_report_items(workspace,'repair_queue.json')+[
+  {'section':i+1,'scope':'section','reason':'Whole-section revision unresolved'} for i in sorted(pending)]
+
+
+def prepare_repair_resume(state,workspace):
+ """Re-enter only unresolved sections after an otherwise completed run."""
+ if state.get('stage') not in ('translation','compile','finished','finished_with_unresolved_reviews','delivery_blocked','consistency','consistency_blocked'):
+  return
+ pending={row['section']-1 for row in unresolved_repairs(state,workspace)}
+ if not pending:return
+ state.update(stage='writing',section=min(pending),repair_sections=sorted(pending),status='resuming_repairs')
+ state['history']=[h for h in state.get('history',[]) if h.get('section') not in pending]
+
+
+def finish_section_repairs(workspace,index,pending):
+ """Clear stale block identifiers only after the whole replacement was accepted."""
+ ws=Path(workspace)
+ queue=[row for row in repair_report_items(ws,'repair_queue.json') if row['section']!=index+1]
+ atomic_json(ws/'reports/repair_queue.json',queue+pending)
+ failed=[row for row in repair_report_items(ws,'failed_sections.json') if row['section']!=index+1]
+ atomic_json(ws/'reports/failed_sections.json',failed)
+
+
 def run_v4(ws=WORK,hours=9,resume=False,minimum=60,skip_search=False,skip_translation=False):
  ws=Path(ws).resolve(); (ws/'reports').mkdir(parents=True,exist_ok=True); (ws/'revisions').mkdir(exist_ok=True);(ws/'output').mkdir(exist_ok=True)
  state_path=ws/'v4_state.json'
  if resume:
   if not state_path.exists():raise GateError('No v4 checkpoint to resume')
   state=json.loads(state_path.read_text(encoding='utf-8'))
-  # Legacy checkpoints could advance past rejected sections and enter translation.
-  failed=[h['section'] for h in state.get('history',[]) if isinstance(h.get('section'),int) and not h.get('accepted',False)]
-  if failed and state.get('stage') in ('writing','translation','compile','finished'):
-   first=min(failed)
-   state['section']=first
-   state['stage']='writing'
-   state['history']=[h for h in state['history'] if not isinstance(h.get('section'),int) or h['section']<first]
+  prepare_repair_resume(state,ws)
   if time.time()>=state.get('deadline',0):
    state['deadline']=time.time()+hours*3600
   atomic_json(state_path,state)
@@ -510,9 +550,15 @@ def run_v4(ws=WORK,hours=9,resume=False,minimum=60,skip_search=False,skip_transl
    raise GateError('Section inventory differs from original; resume blocked to prevent manuscript loss. See reports/section_integrity_error.json')
   sections=extract_sections(tex)
   if not sections:raise GateError('No \\section blocks detected')
+  if any(i<0 or i>=len(sections) for i in state.get('repair_sections',[])):
+   raise GateError('Repair section number is outside the manuscript inventory')
   while state['section']<len(sections):
    if time.time()>=state['deadline']:break
    index=state['section']
+   if 'repair_sections' in state and index not in state['repair_sections']:
+    state['section']=index+1
+    atomic_json(state_path,state)
+    continue
    head,start,end=sections[index]
    body=tex[start+len(head):end]
    candidate=review_blocks(api,tex,head,body,papers,ws,index,state,state_path)
@@ -541,12 +587,16 @@ def run_v4(ws=WORK,hours=9,resume=False,minimum=60,skip_search=False,skip_transl
    (ws/'review_en.tex').write_text(tex,encoding='utf-8')
    state['section']=index+1
    state['status']='section_complete'
-   state['history']=[h for h in state.get('history',[]) if h.get('section')!=index or h.get('accepted')]
+   pending=state.pop('section_pending_repairs',{'section':index+1,'items':[]})
+   if pending['section']!=index+1:raise GateError('Repair result belongs to a different section')
+   finish_section_repairs(ws,index,pending['items'])
+   state['history']=[h for h in state.get('history',[]) if h.get('section')!=index]
    state['history'].append({'section':index,'accepted':True,'blocks':len(split_safe_blocks(body))})
    atomic_json(state_path,state)
    print(f'Accepted section {index+1}/{len(sections)}; API calls {state["calls"]}',flush=True)
    sections=extract_sections(tex)
   if state['section']>=len(sections):
+   state.pop('repair_sections',None)
    state['stage']='consistency';atomic_json(state_path,state)
  if state['stage']=='consistency':
   report={'sections':len(extract_sections(tex)),'expected_sections':len(extract_sections(raw)),'missing_original_citations':sorted(cite_keys(raw)-cite_keys(tex)),'figure_count_original':raw.count(r'\begin{figure'),'figure_count_current':tex.count(r'\begin{figure'),'table_count_original':raw.count(r'\begin{table'),'table_count_current':tex.count(r'\begin{table'),'duplicate_section_titles':len(set(h for h,_,_ in extract_sections(tex)))!=len(extract_sections(tex)),'scientific_claim_verification':'REQUIRES_PRIMARY_SOURCE_REVIEW'}
@@ -569,10 +619,7 @@ def run_v4(ws=WORK,hours=9,resume=False,minimum=60,skip_search=False,skip_transl
   result=audit(ws,minimum=minimum)
   atomic_json(ws/'reports/final_audit.json',result)
   evaluate_quality(ws,minimum)
-  repair_path=ws/'reports'/'repair_queue.json'
-  try:
-   pending=json.loads(repair_path.read_text(encoding='utf-8')) if repair_path.exists() else []
-  except (ValueError,OSError):pending=[{'error':'Unreadable repair queue'}]
+  pending=unresolved_repairs(state,ws)
   state['unresolved_repair_count']=len(pending)
   state['stage']='finished_with_unresolved_reviews' if pending else ('finished' if result['delivery']['ready'] and result['citation_gate_pass'] else 'delivery_blocked')
   atomic_json(state_path,state)

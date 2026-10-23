@@ -88,6 +88,10 @@ python reviewforge_v4.py resume --workspace workspace
 ```
 
 缺少译文、视觉验收或版面检查失败时，运行状态为 `delivery_blocked`。
+`finished_with_unresolved_reviews` 表示仍有待修复段落：使用同一个 `resume`
+入口会从修复队列、失败章节和检查点中收集未解决章节，重试这些章节。
+整节替换通过检查后才更新修复队列；已解决记录会清除，仍失败的记录继续保留。
+空白文本块会直接保留，不占模型调用。不要删除检查点或将状态手工改成 `finished`。
 最终审计中的 `submission_ready` 继续为 false：技术验收不代替科学审稿。
 检查失败的译文时，以当前 `translation_gate.json` 为准；旧版文件可能仍被保留。
 
