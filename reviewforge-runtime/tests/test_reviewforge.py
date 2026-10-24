@@ -53,6 +53,23 @@ class TestLiveLoopMock(unittest.TestCase):
             self.assertTrue((p/'reports/iteration_0001.json').exists())
 
 class TestModelRouting(unittest.TestCase):
+    def test_empty_reviewer_response_uses_available_writer_as_labeled_fallback(self):
+        from unittest.mock import patch
+        from io import BytesIO
+        from reviewforge import CompatibleAPI
+        calls=[]
+        class Response:
+            def __init__(self,content):self.content=content
+            def __enter__(self):return BytesIO(json.dumps({'choices':[{'message':{'content':self.content}}]}).encode())
+            def __exit__(self,*args):return False
+        def opener(req,timeout):
+            model=json.loads(req.data)['model'];calls.append(model)
+            return Response('' if model=='critic' else 'ok')
+        env={'RF_API_KEYS':'test-routing','RF_API_KEY':'test-routing','RF_BASE_URL':'https://routing.invalid','RF_WRITER_MODEL':'writer','RF_REVIEWER_MODEL':'critic','RF_FALLBACK_MODEL':'critic'}
+        with patch.dict('os.environ',env),patch('reviewforge.urllib.request.urlopen',side_effect=opener):
+            api=CompatibleAPI();self.assertEqual(api.chat('s','u',role='reviewer'),'ok')
+            self.assertEqual(api.last_model,'writer')
+        self.assertEqual(calls,['critic','writer'])
     def test_writer_and_reviewer_models(self):
         from unittest.mock import patch
         from io import BytesIO

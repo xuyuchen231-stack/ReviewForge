@@ -49,9 +49,15 @@ application of each criterion using actual bridge passages. Empirical claims sti
 def digest(text):return hashlib.sha256(text.encode('utf-8')).hexdigest()
 def read(path):return json.loads(Path(path).read_text(encoding='utf-8'))
 
-def contract_digest(plan,matrix,evidence):
+def contract_digest(plan,matrix,evidence,unit_id=None):
     # User approval metadata changes after a sample review; its scientific contract must not.
     scientific_plan={k:v for k,v in plan.items() if k!='calibration'}
+    if unit_id:
+        argument=next(u for u in plan['units'] if u['id']==unit_id)
+        keys=set(argument.get('study_keys',[]))
+        scientific_plan=argument
+        matrix={'studies':[r for r in matrix['studies'] if r['citekey'] in keys]}
+        evidence={k:v for k,v in evidence.items() if k not in ('ledger_sha256','ledger_digest')}
     return digest(json.dumps({'plan':scientific_plan,'matrix':matrix,'evidence':evidence},sort_keys=True))
 
 def unit_evidence(ws,unit,argument):
@@ -62,8 +68,8 @@ def units(text):
     """Subsections keep all child headings; unheaded section introductions stay separate."""
     matches=list(re.finditer(r'(?m)^\\(?:section|subsection)\*?(?:\[[^\]]*\])?\{[^\n]*\}',text))
     result=[]
-    end=text.find(r'\end{document}')
-    end=len(text) if end<0 else end
+    tail=re.search(r'\\(?:begin\{thebibliography\}|bibliography\{|printbibliography|end\{document\})',text)
+    end=tail.start() if tail else len(text)
     for i,m in enumerate(matches):
         stop=matches[i+1].start() if i+1<len(matches) else end
         if m.start()>=end:continue
@@ -163,7 +169,7 @@ def review_verdict(verdict,candidate,prior_major=()):
         if set(prior_major)-set(str(x) for x in claimed) or set(prior_major)-proven:issues.append('previous_major_issues_unresolved')
     return not issues,issues
 
-def revise_unit(workspace,unit_id,chat,max_rounds=3):
+def revise_unit(workspace,unit_id,chat,max_rounds=3,require_calibration=True):
     from reviewforge_v4 import gate_block
     ws=Path(workspace);report=audit_contract(ws,unit_id)
     if not report['ready']:raise ValueError('Synthesis preflight: '+str(report['issues']))
@@ -171,7 +177,7 @@ def revise_unit(workspace,unit_id,chat,max_rounds=3):
     u=next(u for u in units(text) if u['id']==unit_id);argument=next(x for x in plan['units'] if x['id']==unit_id)
     calibration=plan.get('calibration',{})
     matrix=read(ws/'study_comparisons.json')
-    if unit_id!=plan.get('sample_unit_id'):
+    if require_calibration and unit_id!=plan.get('sample_unit_id'):
         sample_id=str(plan.get('sample_unit_id'))
         sample=ws/'synthesis_candidates'/'accepted'/(sample_id+'.tex')
         review=sample.with_suffix('.json')
@@ -180,7 +186,7 @@ def revise_unit(workspace,unit_id,chat,max_rounds=3):
         sample_report=read(review)
         sample_unit=next((x for x in units(text) if x['id']==sample_id),None)
         sample_plan=next((x for x in plan['units'] if x['id']==sample_id),None)
-        if not sample_unit or not sample_plan or sample_report.get('candidate_sha256')!=digest(sample.read_text(encoding='utf-8')) or sample_report.get('source_sha256')!=digest(text) or sample_report.get('contract_sha256')!=contract_digest(plan,matrix,unit_evidence(ws,sample_unit,sample_plan)):
+        if not sample_unit or not sample_plan or sample_report.get('candidate_sha256')!=digest(sample.read_text(encoding='utf-8')) or sample_report.get('source_sha256')!=digest(text) or sample_report.get('contract_sha256')!=contract_digest(plan,matrix,unit_evidence(ws,sample_unit,sample_plan),sample_id):
             raise ValueError('Calibrated sample source, plan or evidence changed; review and calibrate again.')
     if len(u['body'])>60000:raise ValueError('Unit exceeds context budget; propose an argument-based split, not silent truncation.')
     keys=set(argument['study_keys'])|citekeys(u['body'])
@@ -203,14 +209,16 @@ def revise_unit(workspace,unit_id,chat,max_rounds=3):
             for item in history:
                 open_major.update(i['id'] for i in item.get('review',{}).get('issues',[]) if isinstance(i,dict) and isinstance(i.get('id'),str) and i.get('severity')=='major')
             payload['open_major_issues']=sorted(open_major)
-            payload['feedback']={'previous_run':prior.get('run_id'),'previous_review':history[-1] if history else {},'contract_changed':prior.get('contract_sha256')!=contract_digest(plan,matrix,evidence)}
+            payload['feedback']={'previous_run':prior.get('run_id'),'previous_review':history[-1] if history else {},'contract_changed':prior.get('contract_sha256')!=contract_digest(plan,matrix,evidence,unit_id)}
+            previous_text=folder/(unit_id+'.tex')
+            if previous_text.exists():payload['previous_candidate']=previous_text.read_text(encoding='utf-8')
     for attempt in range(1,max_rounds+1):
         # Any API exception exits immediately; already saved attempts survive.
         candidate=chat(WRITER,payload,'writer').strip()
         attemptfile=runfolder/(unit_id+f'.attempt_{attempt:02}.tex')
         attemptfile.write_bytes(candidate.encode('utf-8'))
         (folder/(unit_id+'.tex')).write_bytes(candidate.encode('utf-8'))
-        atomic_json(folder/(unit_id+'.json'),{'status':'review_pending','run_id':run_id,'candidate_sha256':digest(candidate),'source_sha256':digest(text),'contract_sha256':contract_digest(plan,matrix,evidence),'open_major_issues':sorted(open_major),'history':history})
+        atomic_json(folder/(unit_id+'.json'),{'status':'review_pending','run_id':run_id,'candidate_sha256':digest(candidate),'source_sha256':digest(text),'contract_sha256':contract_digest(plan,matrix,evidence,unit_id),'open_major_issues':sorted(open_major),'history':history})
         structural,reason=gate_block(u['body'],candidate)
         unknown=citekeys(candidate)-keys
         if unknown:structural=False;reason='Citations outside supplied evidence: '+','.join(sorted(unknown))
@@ -222,7 +230,7 @@ def revise_unit(workspace,unit_id,chat,max_rounds=3):
         open_major.update(i['id'] for i in verdict.get('issues',[]) if isinstance(i,dict) and isinstance(i.get('id'),str) and i.get('severity')=='major')
         result={'status':'model_review_passed' if accepted else 'needs_revision','unit_id':unit_id,'run_id':run_id,'source_sha256':digest(text),
                 'unit_source_sha256':u['source_sha256'],'candidate_sha256':digest(candidate),
-                'contract_sha256':contract_digest(plan,matrix,evidence),
+                'contract_sha256':contract_digest(plan,matrix,evidence,unit_id),
                 'expert_verified':False,'style_approved_by_user':False,'open_major_issues':[] if accepted else sorted(open_major),'history':history}
         atomic_json(folder/(unit_id+'.json'),result)
         atomic_json(runfolder/(unit_id+f'.attempt_{attempt:02}.json'),result)

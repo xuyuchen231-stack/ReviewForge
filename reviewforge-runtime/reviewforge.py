@@ -93,6 +93,7 @@ class CompatibleAPI:
     def chat(self, system, user, role='writer'):
         preferred = self.reviewer_model if role == 'reviewer' else self.model
         models = [preferred] + ([self.fallback_model] if self.fallback_model != preferred else [])
+        if role=='reviewer' and self.model not in models:models.append(self.model)
         failures = []
         for model in models:
             body = json.dumps({'model': model, 'messages': [{'role': 'system', 'content': system}, {'role': 'user', 'content': user}], 'temperature': 0.2, 'max_tokens': self.max_tokens}).encode()
@@ -100,17 +101,20 @@ class CompatibleAPI:
             allow_rate_failover = os.environ.get('RF_ALLOW_RATE_LIMIT_FAILOVER') == '1'
             key_order = list(range(self.key_index, len(self.keys))) + list(range(0, self.key_index))
             for key_index in key_order:
+                if time.time()>=getattr(self,'deadline',float('inf')):raise TimeoutError('API time budget reached')
                 if self.key_cooldowns.get(key_index, 0) > time.time():
                     continue
                 key = self.keys[key_index]
                 req = urllib.request.Request(self.base + '/chat/completions', data=body, headers={'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json'}, method='POST')
                 try:
-                    with urllib.request.urlopen(req, timeout=150) as resp:
+                    with urllib.request.urlopen(req, timeout=max(.1,min(getattr(self,'request_timeout',150),getattr(self,'deadline',float('inf'))-time.time()))) as resp:
                         data = json.load(resp)
                     result = data['choices'][0]['message']['content']
                     if not isinstance(result, str) or not result.strip():
                         raise ValueError('Empty API response')
                     self.key_index = key_index
+                    self.last_model=model
+                    self.last_key_slot=key_index+1
                     return result
                 except urllib.error.HTTPError as exc:
                     if exc.code == 429:

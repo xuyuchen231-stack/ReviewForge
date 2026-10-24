@@ -1,0 +1,357 @@
+"""Budgeted local whole-subsection review: automatic planning, review and delivery.
+Originals are read-only; all working contracts and best candidates live in a run folder.
+"""
+import argparse
+import contextlib
+import datetime
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import threading
+import time
+import uuid
+
+from reviewforge import CompatibleAPI, atomic_json, extract_json, load_env
+from manuscript_integrity import citekeys, tex_integrity
+from synthesis_pipeline import initialize, units, audit_contract, revise_unit, digest, read, contract_digest, unit_evidence
+
+ROOT=Path(__file__).resolve().parent
+PREPARE='''You design a critical scientific-review subsection using actual supplied evidence.
+Return ONLY JSON {"argument":{question,thesis,comparison_axes:[str],study_keys:[str],
+paragraph_plan:[{role,point,study_keys:[str]}],synthesis_claim,limitations,open_question,
+sparse_evidence_reason,kind:"core"|"bridge",bridge_reason},"studies":[{citekey,source_type,
+fields:{axis:{status:"supported"|"not_accessible"|"not_reported"|"not_applicable",
+value,locator,excerpt,explicit_in_abstract:bool}}}]}.
+Choose substantive comparative axes suited to this scientific question, such as learned_component,
+conditioning_inputs, validation_split, baseline_tuning, operating_changes and failure_modes.
+Include every original citation and no keys outside available_keys. Additional supplied keys may
+be selected when genuinely relevant. For EVERY selected study and axis, supply a field record.
+Every supported field needs an exact SHORT substring of a supplied source chunk and its locator;
+do not paraphrase the quote. Never infer protocols/numbers/results from titles or from a general
+claim. Unknown/inaccessible is NOT a study failure. Source chunks are selective: unseen methods
+must be not_accessible, not not_reported. For an abstract detail, explicit_in_abstract is true
+only if that exact detail is explicitly stated in the quoted abstract. Do not force studies
+into the same architecture or rank heterogeneous metrics. Plan cross-study reasoning, alternative
+explanations and a bounded conclusion; a definition+equation is not a complete core subsection.
+Use bridge only for genuine transitions, with a reason. No invented evidence or human approval.'''
+
+class RunLock:
+    def __init__(self,path):self.path=Path(path);self.handle=None
+    def __enter__(self):
+        self.path.parent.mkdir(parents=True,exist_ok=True)
+        self.handle=self.path.open('a+b')
+        if self.path.stat().st_size==0:self.handle.write(b'0');self.handle.flush()
+        self.handle.seek(0)
+        try:
+            if os.name=='nt':
+                import msvcrt
+                msvcrt.locking(self.handle.fileno(),msvcrt.LK_NBLCK,1)
+            else:
+                import fcntl
+                fcntl.flock(self.handle.fileno(),fcntl.LOCK_EX|fcntl.LOCK_NB)
+        except OSError:
+            self.handle.close();raise RuntimeError('Another nine-hour run is active for this workspace. Do not start a second copy.') from None
+        return self
+    def __exit__(self,*args):
+        if self.handle:
+            self.handle.seek(0)
+            if os.name=='nt':
+                import msvcrt
+                msvcrt.locking(self.handle.fileno(),msvcrt.LK_UNLCK,1)
+            else:
+                import fcntl
+                fcntl.flock(self.handle.fileno(),fcntl.LOCK_UN)
+            self.handle.close()
+
+def bootstrap(workspace,hours,new_run=False):
+    ws=Path(workspace).resolve();source=ws/'review_en.tex'
+    if not source.exists():source=ws/'original.tex'
+    raw=source.read_text(encoding='utf-8');pointer=ws/'autonomous_active.json'
+    if pointer.exists() and not new_run:
+        run=(ws/read(pointer)['run_directory']).resolve()
+        if not run.is_relative_to(ws):raise ValueError('Invalid run directory')
+        state=read(run/'autonomous_state.json')
+        if digest(raw)!=state['master_source_sha256']:raise ValueError('Master changed since snapshot. Use --new-run to preserve prior work and start a separate run.')
+        state['deadline']=time.time()+hours*3600;state['session_started']=time.time()
+        
+        for task in state['tasks'].values():
+            if task.pop('in_flight',False):task['visits']=max(0,task['visits']-1);task['status']='retry'
+        state['status']='resuming';atomic_json(run/'autonomous_state.json',state)
+        return run,state
+    run=ws/'autonomous_runs'/('run_'+datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')+'_'+uuid.uuid4().hex[:6]);run.mkdir(parents=True)
+    (run/'review_en.tex').write_bytes(raw.encode('utf-8'))
+    shutil.copyfile(source,run/'original.tex')
+    for name in ['evidence_ledger.json','literature.json','references.bib','review_topic.txt','translation_glossary.json']:
+        if (ws/name).exists():shutil.copyfile(ws/name,run/name)
+    if not (run/'evidence_ledger.json').exists():atomic_json(run/'evidence_ledger.json',{'entries':[]})
+    initialize(run)
+    started=time.time();tasklist=units(raw)
+    state={'mode':'autonomous','started':started,'session_started':started,'deadline':started+hours*3600,
+           'master_source_sha256':digest(raw),'source_name':source.name,'calls':0,'requests_attempted':0,
+           'status':'initialized','phase':'planning','tasks':{u['id']:{'status':'pending','visits':0,'priority':len(citekeys(u['body']))} for u in tasklist}}
+    atomic_json(run/'autonomous_state.json',state)
+    atomic_json(pointer,{'run_directory':str(run.relative_to(ws)),'mode':'autonomous'})
+    return run,state
+
+def choose_task(state,max_visits):
+    candidates=[(key,row) for key,row in state['tasks'].items() if row['status'] in ('pending','retry') and row.get('visits',0)<max_visits]
+    # First cover every unit; then revisit expensive failures, prioritizing evidence-rich units.
+    return min(candidates,key=lambda pair:(pair[1].get('visits',0),-pair[1].get('priority',0),pair[0]))[0] if candidates else None
+
+def source_packet(workspace,run,entry,query,max_chars=8500):
+    ws=Path(workspace).resolve();run=Path(run);key=entry['citekey'];text='';access='anchor_only'
+    folder=(ws/entry.get('source_directory','__missing__')).resolve()
+    if folder.is_relative_to(ws) and folder.is_dir():
+        if (folder/'source.txt').is_file():text=(folder/'source.txt').read_text(encoding='utf-8');access='full_text_excerpt'
+        elif (folder/'sections.json').is_file():text='\n'.join(p['text'] for p in read(folder/'sections.json'));access='full_text_excerpt'
+        elif (folder/'pages.json').is_file():text='\n'.join(read(folder/'pages.json'));access='full_text_excerpt'
+        elif (folder/'abstract.txt').is_file():text=(folder/'abstract.txt').read_text(encoding='utf-8');access='abstract_only'
+    if not text:text=entry.get('excerpt','')
+    text=re.sub(r'\s+',' ',text)
+    target=run/'auto_sources'/(hashlib.sha256(key.encode()).hexdigest()[:20]+'.txt');target.parent.mkdir(exist_ok=True);target.write_bytes(text.encode('utf-8'))
+    tokens=set(re.findall(r'[A-Za-z]{5,}',query.lower()))-{'model','models','study','studies','their','which','these','those'}
+    windows=[(i,text[i:i+2200]) for i in range(0,len(text),1800)]
+    scored=sorted(windows,key=lambda x:sum(x[1].lower().count(k) for k in tokens)+sum(x[1].lower().count(k) for k in ('validat','train','test','conclu')),reverse=True)
+    chosen=sorted({i:s for i,s in (windows[:1]+scored[:4])}.items());chunks=[];remaining=max_chars
+    for offset,part in chosen:
+        if remaining<=0:break
+        part=part[:remaining];chunks.append({'locator':'normalized source text offset '+str(offset),'text':part});remaining-=len(part)
+    return {'citekey':key,'access':access,'source_type':'abstract_only' if access=='abstract_only' or entry.get('source_type')=='abstract_only' else 'full_text_excerpt',
+            'source_text_file':str(target.relative_to(run)),'claim_anchor':entry,'chunks':chunks,'selective_excerpt_warning':True}
+
+def checkpoint_call(api,state,path,system,payload,role):
+    budget=state.get('work_deadline',state['deadline']) if state.get('phase')!='delivery' else state['deadline']
+    remaining=budget-time.time()
+    if remaining<=2:raise TimeoutError('Run time budget reached before new request')
+    state['requests_attempted']=state.get('requests_attempted',0)+1;state['last_request_role']=role;state['last_request_started']=time.time();atomic_json(path,state)
+    api.request_timeout=max(1,min(150,int(remaining)));api.deadline=budget
+    result=api.chat(system,json.dumps(payload,ensure_ascii=False),role=role)
+    state['calls']=state.get('calls',0)+1;state['last_response']=time.time()
+    state.setdefault('model_routes',[]).append({'role':role,'model':getattr(api,'last_model','unknown'),'account_slot':getattr(api,'last_key_slot',None),'utc':datetime.datetime.now(datetime.timezone.utc).isoformat()})
+    atomic_json(path,state)
+    return result
+
+def prepare_unit(workspace,run,state,unit,api):
+    ledger=read(run/'evidence_ledger.json');records=ledger.get('entries',[]) if isinstance(ledger,dict) else ledger
+    anchors={e['citekey']:e for e in records};required=citekeys(unit['body'])
+    missing=required-set(anchors)
+    if missing:
+        atomic_json(run/'evidence_tasks'/f'{unit["id"]}.json',{'status':'missing_original_evidence','citekeys':sorted(missing),'action':'Obtain inspectable source text before empirical rewriting. Other units may proceed.'})
+        raise ValueError('Missing source anchors: '+','.join(sorted(missing)))
+    query=unit['body'][:12000];terms=set(re.findall(r'[A-Za-z]{6,}',query.lower()))
+    ranked=sorted((k for k in anchors if k not in required),key=lambda k:len(terms&set(re.findall(r'[A-Za-z]{6,}',(anchors[k].get('claim','')+' '+k).lower()))),reverse=True)
+    available=sorted(required|set(ranked[:2]));packets=[source_packet(workspace,run,anchors[k],query,max_chars=min(8500,max(1000,100000//max(1,len(available))))) for k in available]
+    # Source access is not invented. Selective chunks and their actual local files are recorded.
+    packet_index={p['citekey']:p for p in packets}
+    payload={'heading':unit['heading'],'body':unit['body'],'available_keys':available,'required_original_keys':sorted(required),'sources':packets,
+             'output_note':'No padding, no tool-access commentary in planned journal prose; unknown detail belongs in audit fields.'}
+    if len(json.dumps(payload))>180000:raise ValueError('Unit/evidence exceeds planning context budget; requires argument-based split')
+    feedback=[]
+    for attempt in range(2):
+        raw=checkpoint_call(api,state,run/'autonomous_state.json',PREPARE,{**payload,'previous_contract_errors':feedback},'writer')
+        data=extract_json(raw);argument=data['argument'];studies=data['studies']
+        if not isinstance(argument,dict) or not isinstance(studies,list):raise ValueError('Invalid automatic plan schema')
+        if not required.issubset(set(argument.get('study_keys',[]))) or set(argument.get('study_keys',[]))-set(available):raise ValueError('Automatic plan changed citation scope')
+        plan=read(run/'synthesis_plan.json');target=next(u for u in plan['units'] if u['id']==unit['id'])
+        for key in ['question','thesis','comparison_axes','study_keys','paragraph_plan','synthesis_claim','limitations','open_question','sparse_evidence_reason','kind','bridge_reason']:
+            if key in argument:target[key]=argument[key]
+        matrix=read(run/'study_comparisons.json');rows={r['citekey']:r for r in matrix['studies']}
+        for row in studies:
+            key=row['citekey']
+            if key not in packet_index:raise ValueError('Planner invented study key')
+            row['source_type']=packet_index[key]['source_type'];row['source_text_file']=packet_index[key]['source_text_file'];row['fields']={**rows.get(key,{}).get('fields',{}),**row.get('fields',{})};rows[key]=row
+        matrix['studies']=list(rows.values());atomic_json(run/'synthesis_plan.json',plan);atomic_json(run/'study_comparisons.json',matrix)
+        report=audit_contract(run,unit['id']);atomic_json(run/'reports'/(unit['id']+'_preflight.json'),report)
+        if report['ready']:return
+        feedback=report['issues']
+    raise ValueError('Automatic evidence/argument contract still fails: '+str(feedback)[:1200])
+
+def assemble(run,state):
+    from reviewforge_v4 import gate_block
+    run=Path(run);original=(run/'review_en.tex').read_text(encoding='utf-8');candidate=original;accepted=[];invalid=[]
+    for unit in reversed(units(original)):
+        folder=run/'synthesis_candidates/accepted';path=folder/(unit['id']+'.tex');review=path.with_suffix('.json')
+        if not path.exists() or not review.exists():continue
+        body=path.read_text(encoding='utf-8');record=read(review)
+        plan=read(run/'synthesis_plan.json');matrix=read(run/'study_comparisons.json')
+        argument=next(u for u in plan['units'] if u['id']==unit['id'])
+        current_contract=contract_digest(plan,matrix,unit_evidence(run,unit,argument),unit['id'])
+        if record.get('contract_sha256')!=current_contract or record.get('open_major_issues'):
+            invalid.append(unit['id']);continue
+        if record.get('status')!='model_review_passed' or record.get('source_sha256')!=digest(original) or record.get('unit_source_sha256')!=unit['source_sha256'] or record.get('candidate_sha256')!=digest(body) or not gate_block(unit['body'],body)[0]:invalid.append(unit['id']);continue
+        candidate=candidate[:unit['start']]+body+candidate[unit['end']:];accepted.append(unit['id'])
+    def content(tex):return tex.split(r'\begin{document}',1)[-1].rsplit(r'\end{document}',1)[0]
+    ok,reason=gate_block(content(original),content(candidate))
+    if not ok or tex_integrity(candidate)!=tex_integrity(original):raise ValueError('Whole-candidate structural gate failed: '+reason)
+    output=run/'output';output.mkdir(exist_ok=True);english=output/'review_en.tex';english.write_bytes(candidate.encode('utf-8'))
+    known=set(re.findall(r'\\bibitem(?:\[[^]]*\])?\{([^}]+)\}',candidate));missing=citekeys(candidate)-known;added=[]
+    literature=read(run/'literature.json') if (run/'literature.json').exists() else []
+    catalogue={p.get('key'):p for p in literature if isinstance(p,dict)}
+    if r'\end{thebibliography}' in candidate:
+        def escape(value):return re.sub(r'([&%$#_{}])',lambda m:'\\'+m.group(1),str(value))
+        entries=[]
+        for key in sorted(missing):
+            p=catalogue.get(key,{})
+            if p.get('metadata_status')!='REGISTERED_METADATA' or not all(p.get(f) for f in ('title','year','doi')):continue
+            entries.append('\\bibitem{'+key+'}\n'+escape('; '.join(p.get('authors',[])))+'. '+escape(p['title'])+'. '+escape(p.get('venue',''))+' ('+str(p['year'])+'). DOI: \\url{https://doi.org/'+p['doi']+'}.\n')
+            added.append(key)
+        candidate=candidate.replace(r'\end{thebibliography}','\n'.join(entries)+'\n'+r'\end{thebibliography}',1)
+        english.write_bytes(candidate.encode('utf-8'))
+    # Preserve relative figure/style paths without copying primary-paper libraries or secrets.
+    parent=run.parent.parent
+    for asset in parent.rglob('*'):
+        rel=asset.relative_to(parent)
+        if rel.as_posix() in {'review_en.tex','review_zh.tex','original.tex'}:continue
+        if any(x in {'autonomous_runs','primary_sources','revisions','reports','output','.git','synthesis_candidates'} or x.startswith('synthesis_sample') for x in rel.parts):continue
+        if asset.is_file() and asset.suffix.lower() in {'.bib','.sty','.cls','.png','.jpg','.jpeg','.eps','.svg','.pdf','.tex'}:
+            destination=output/rel;destination.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(asset,destination)
+    report={'english':str(english),'accepted_units':len(accepted),'accepted_ids':sorted(accepted),'invalid_cached_candidates':invalid,'bibliography_added':added,
+            'bibliography_unresolved':sorted(missing-set(added)) if r'\end{thebibliography}' in candidate else [],
+            'retained_original_units':[u['id'] for u in units(original) if u['id'] not in accepted],
+            'submission_ready':False,'expert_verified':False,'author_approved':False,
+            'note':'Only model-passing units replaced in a separate full candidate; originals remain unchanged.'}
+    atomic_json(run/'reports/assembly.json',report);return report
+
+def heartbeat(stop,state,run):
+    while not stop.wait(20):
+        done=sum(t['status']=='completed' for t in state['tasks'].values())
+        print(f'[heartbeat] phase={state.get("phase")} unit={state.get("active_unit","-")} completed={done}/{len(state["tasks"])} calls={state.get("calls",0)} remaining={max(0,int(state["deadline"]-time.time()))}s',flush=True)
+        atomic_json(run/'heartbeat.json',{'utc':datetime.datetime.now(datetime.timezone.utc).isoformat(),'phase':state.get('phase'),'unit':state.get('active_unit'),'completed':done,'calls':state.get('calls',0)})
+
+def coherence_review(run,state,api):
+    """Review cross-unit consistency; actionable findings re-enter the same queue."""
+    base=(run/'review_en.tex').read_text(encoding='utf-8');packets=[]
+    for unit in units(base):
+        candidate=run/'synthesis_candidates/accepted'/(unit['id']+'.tex')
+        body=candidate.read_text(encoding='utf-8') if candidate.exists() else unit['body']
+        packets.append({'unit_id':unit['id'],'heading':unit['heading'],'text':body})
+    scope='complete_units'
+    if sum(len(p['text']) for p in packets)>130000:
+        scope='selected_opening_and_conclusion_excerpts'
+        for p in packets:p['text']=p['text'][:1100]+'\n[...unseen middle omitted...]\n'+p['text'][-1100:]
+    prompt='''Review cross-subsection coherence of this scientific review. Source entailment was
+assessed locally and is not certified here. Inspect contradictions, repeated definitions, incompatible
+comparison tasks and conclusions that do not develop a common contribution. Respect the supplied scope;
+never pretend omitted text was read. Return JSON {"issues":[{"unit_id":str,"id":str,
+"severity":"major"|"minor","passage":exact quotation from that unit,"reason":str,
+"required_change":str}]}. Do not reward length or manufacture issues to keep a program busy.'''
+    raw=checkpoint_call(api,state,run/'autonomous_state.json',prompt,{'scope':scope,'units':packets},'reviewer')
+    verdict=extract_json(raw);issues=verdict.get('issues')
+    if not isinstance(issues,list):raise ValueError('Invalid coherence review')
+    index={p['unit_id']:p['text'] for p in packets};requeued=[]
+    for issue in issues:
+        key=issue.get('unit_id');quote=issue.get('passage')
+        if key not in index or not isinstance(quote,str) or not quote.strip() or quote not in index[key] or not issue.get('id') or not issue.get('required_change'):raise ValueError('Unanchored coherence issue')
+        if issue.get('severity')!='major' or state['tasks'][key]['status']!='completed':continue
+        report=run/'synthesis_candidates'/(key+'.json');record=read(report)
+        finding={'id':'global:'+issue['id'],'severity':'major','locator':quote,'reason':issue['reason'],'required_evidence_or_change':issue['required_change']}
+        record['status']='needs_revision';record.setdefault('open_major_issues',[]).append(finding['id'])
+        record.setdefault('history',[]).append({'review':{'accept':False,'issues':[finding]},'stage':'coherence'})
+        atomic_json(report,record)
+        accepted_report=run/'synthesis_candidates/accepted'/(key+'.json')
+        if accepted_report.exists():atomic_json(accepted_report,record)
+        state['tasks'][key]['status']='retry';requeued.append(key)
+    atomic_json(run/'reports'/('coherence_%02d.json'%state.get('coherence_rounds',1)),{'scope':scope,'verdict':verdict,'requeued':requeued,'expert_verified':False})
+    return requeued
+
+def run_review(workspace,hours=9,reserve_minutes=40,max_visits=3,new_run=False,translate=True,api_factory=CompatibleAPI):
+    ws=Path(workspace).resolve()
+    with RunLock(ws/'autonomous.lock'):
+        run,state=bootstrap(ws,hours,new_run);path=run/'autonomous_state.json'
+        state['work_deadline']=state['deadline']-min(reserve_minutes*60,hours*3600*.15)
+        api=api_factory();api.max_tokens=int(os.environ.get('RF_AUTO_OUTPUT_TOKENS','6500'))
+        stop=threading.Event();thread=threading.Thread(target=heartbeat,args=(stop,state,run),daemon=True);thread.start()
+        print('Autonomous run: '+str(run)+'; no manual plan filling or sample approval required.',flush=True)
+        allunits={u['id']:u for u in units((run/'review_en.tex').read_text(encoding='utf-8'))}
+        try:
+            while time.time()<state['work_deadline']:
+                for completed_id,completed_task in state['tasks'].items():
+                    if completed_task['status']!='completed':continue
+                    reviewed=run/'synthesis_candidates/accepted'/(completed_id+'.json')
+                    plan=read(run/'synthesis_plan.json');matrix=read(run/'study_comparisons.json')
+                    argument=next(u for u in plan['units'] if u['id']==completed_id)
+                    current=contract_digest(plan,matrix,unit_evidence(run,allunits[completed_id],argument),completed_id)
+                    if not reviewed.exists() or read(reviewed).get('contract_sha256')!=current:
+                        completed_task.update(status='retry',last_result='contract_changed')
+                key=choose_task(state,max_visits)
+                if key is None:
+                    if state.get('coherence_rounds',0)<2 and any(t['status']=='completed' for t in state['tasks'].values()) and time.time()+120<state['work_deadline']:
+                        state['coherence_rounds']=state.get('coherence_rounds',0)+1;state['phase']='coherence';atomic_json(path,state)
+                        try:
+                            if coherence_review(run,state,api) and choose_task(state,max_visits):continue
+                        except Exception as exc:state['coherence_error']=type(exc).__name__+': '+str(exc)[:300]
+                    break
+                task=state['tasks'][key];task['visits']+=1;task['in_flight']=True;state.update(active_unit=key,phase='planning',status='running');atomic_json(path,state)
+                print(f'[{key}] visit {task["visits"]}/{max_visits}: preparing evidence and argument',flush=True)
+                try:
+                    if not audit_contract(run,key)['ready']:prepare_unit(ws,run,state,allunits[key],api)
+                    state['phase']='writing_review';atomic_json(path,state)
+                    previous=run/'synthesis_candidates'/(key+'.json');pending=previous.exists() and read(previous).get('status')=='review_pending'
+                    saved=previous.with_suffix('.tex')
+                    def chat(system,payload,role):
+                        nonlocal pending
+                        if role=='writer' and pending and saved.exists():pending=False;return saved.read_text(encoding='utf-8')
+                        api.max_tokens=int(os.environ.get('RF_AUTO_OUTPUT_TOKENS','6500'))
+                        return checkpoint_call(api,state,path,system,payload,role)
+                    result=revise_unit(run,key,chat,max_rounds=1,require_calibration=False)
+                    task.update(status='completed' if result['status']=='model_review_passed' else 'retry',last_result=result['status'],open_major_issues=result.get('open_major_issues',[]))
+                except KeyboardInterrupt:
+                    task['visits']=max(0,task['visits']-1);task['status']='retry';task['in_flight']=False;raise
+                except TimeoutError as exc:
+                    task.update(status='retry',last_error=str(exc));task['visits']=max(0,task['visits']-1);task['in_flight']=False;break
+                except Exception as exc:
+                    message=type(exc).__name__+': '+str(exc)[:1400];task.update(status='retry',last_error=message)
+                    retry=re.search(r'Retry-After:\s*(\d+)',str(exc),re.I)
+                    if '429' in str(exc) and retry:
+                        task['visits']-=1;until=min(time.time()+int(retry.group(1)),state['work_deadline']);state['phase']='accounts_cooling';state['retry_after_epoch']=until;atomic_json(path,state)
+                        print('All currently usable API accounts are cooling; checkpoint retained.',flush=True)
+                        while time.time()<until:stop.wait(min(20,max(0,until-time.time())))
+                    elif 'Missing source anchors:' in str(exc):task['status']='blocked_evidence'
+                    elif 'API attempts failed:' in str(exc):
+                        # A provider outage is not 58 failed scientific reviews.
+                        task['visits']-=1;state['phase']='provider_backoff';atomic_json(path,state)
+                        stop.wait(min(60,max(0,state['work_deadline']-time.time())))
+                task['in_flight']=False
+                atomic_json(path,state)
+                print(f'[{key}] {task["status"]}; completed={sum(t["status"]=="completed" for t in state["tasks"].values())}/{len(state["tasks"])} calls={state["calls"]}',flush=True)
+            state.update(phase='delivery',status='assembling');atomic_json(path,state)
+            report=assemble(run,state)
+            output=run/'output'
+            if translate and time.time()+120<state['deadline']:
+                from reviewforge_v4 import generate_chinese_body
+                class DeliveryAPI:
+                    def chat(self,system,user,role='writer'):
+                        return checkpoint_call(api,state,path,system,{'translation_request':user},role)
+                try:
+                    chinese=generate_chinese_body(DeliveryAPI(),(output/'review_en.tex').read_text(encoding='utf-8'),[],output,deadline=state['deadline'])
+                    (output/'review_zh.tex').write_bytes(chinese.encode('utf-8'));report['translation']='generated'
+                except Exception as exc:report['translation']='incomplete';report['translation_error']=type(exc).__name__+': '+str(exc)[:250]
+            else:report['translation']='not_run_time_budget_or_disabled'
+            from reviewforge_v4 import compile_tex
+            for name in ['review_en','review_zh']:
+                if (output/(name+'.tex')).exists() and time.time()+610<state['deadline']:
+                    report[name+'_build']=compile_tex(output,name)
+            report.update(calls=state['calls'],requests_attempted=state['requests_attempted'],runtime_seconds=round(time.time()-state['session_started']),unresolved={k:v for k,v in state['tasks'].items() if v['status']!='completed' or k not in report['accepted_ids']},finished_utc=datetime.datetime.now(datetime.timezone.utc).isoformat())
+            state.update(status='finished_with_unresolved' if report['unresolved'] else 'finished_model_review',phase='finished');atomic_json(run/'reports/autonomous_result.json',report);atomic_json(path,state)
+            print(json.dumps({'status':state['status'],'accepted_units':report['accepted_units'],'total_units':len(state['tasks']),'output':str(output),'report':str(run/'reports/autonomous_result.json')},ensure_ascii=False),flush=True)
+            return report
+        finally:
+            atomic_json(path,state);stop.set();thread.join(timeout=2)
+
+def main():
+    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--workspace',default=str(ROOT/'workspace'));parser.add_argument('--hours',type=float,default=9)
+    parser.add_argument('--reserve-minutes',type=float,default=40);parser.add_argument('--max-visits',type=int,default=3);parser.add_argument('--new-run',action='store_true');parser.add_argument('--skip-translation',action='store_true');parser.add_argument('--check',action='store_true')
+    args=parser.parse_args()
+    if not 0<args.hours<=24 or args.reserve_minutes<0 or not 1<=args.max_visits<=10:parser.error('Use hours in (0,24], reserve>=0 and max-visits in 1..10')
+    load_env(ROOT/'.env')
+    if args.check:
+        ws=Path(args.workspace);source=ws/'review_en.tex'
+        if not source.exists():source=ws/'original.tex'
+        print(json.dumps({'source_exists':source.exists(),'units':len(units(source.read_text(encoding='utf-8'))) if source.exists() else 0,'evidence_ledger_exists':(ws/'evidence_ledger.json').exists(),'hours':args.hours,'network_calls':0},ensure_ascii=False));return
+    run_review(args.workspace,args.hours,args.reserve_minutes,args.max_visits,args.new_run,not args.skip_translation)
+if __name__=='__main__':
+    try:main()
+    except KeyboardInterrupt:print('Interrupted; local checkpoint retained. Run the same launcher to resume.',flush=True)

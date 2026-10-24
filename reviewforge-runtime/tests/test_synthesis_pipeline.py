@@ -3,6 +3,11 @@ from pathlib import Path
 from synthesis_pipeline import initialize, audit_contract, revise_unit, review_verdict, CRITERIA
 
 class SynthesisTests(unittest.TestCase):
+ def test_bibliography_is_not_a_writing_unit(self):
+  from synthesis_pipeline import units
+  text='\\begin{document}\n\\section{X}\n\\subsection{Y}\nProse.\n\\begin{thebibliography}{99}\n\\bibitem{A} Reference\n\\end{thebibliography}\n\\end{document}'
+  result=units(text)
+  self.assertNotIn('bibitem',result[-1]['body'])
  def workspace(self,tmp):
   w=Path(tmp);(w/'review_en.tex').write_text('\\begin{document}\n\\section{Models}\n\\subsection{Parameters}\nA definition and an equation. \\cite{A,B}\n\\end{document}',encoding='utf-8')
   (w/'evidence_ledger.json').write_text(json.dumps({'entries':[{'citekey':k,'claim':'Narrow finding','source_id':k,'locator':'p1','excerpt':'An exact short passage','limitations':'Limited scope'} for k in ['A','B']]}))
