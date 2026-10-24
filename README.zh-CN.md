@@ -1,4 +1,4 @@
-> Update 2026-10-24: [v4.1 evidence and delivery gates](reviewforge-runtime/README_V4_1_ZH.md). Existing v4 commands remain supported.
+> 2026-10-24 更新：[v4.2 综述深度改写流程](reviewforge-runtime/README_SYNTHESIS_ZH.md)。新增小节论证设计、研究比较表、样板校准和整节审查；与原有断点续跑分开，生成候选稿，不自动覆盖主稿。
 
 # ReviewForge · 中文指南
 

@@ -8,6 +8,8 @@ description: Research, critique, and revise scientific review articles through a
 Use this skill for scientific review articles. Preserve scientific meaning and trace every important empirical claim to an inspectable primary source. Never invent a citation, DOI, study result, or journal standard.
 
 ## Workflow
+For substantive review writing or a request to fix shallow/textbook-like coverage,
+use the **critical-synthesis workflow** below before ordinary prose revision.
 1. Define review question, scope, target journals, intended contribution, and explicit exclusions. Request manuscript and literature evidence when absent.
 2. Study authoritative reviews in the same field: compare how they establish scope, organize competing methods, synthesize disagreements, evaluate evidence, and justify open questions. Distinguish editorial patterns from actual journal requirements. See `references/benchmark.md`.
 3. Build a claim-to-evidence matrix before revising: claim, source identity, exact supporting excerpt and location, study limitations, and verification status. Follow `references/evidence.md`.
@@ -98,3 +100,57 @@ a separate structural candidate. The runtime `plan` command proposes a structure
 conservative section editing as structural rewriting.
 
 See `reviewforge-runtime/README_V4_1_ZH.md` in the repository for schemas and commands.
+
+## Critical-synthesis workflow (v4.2)
+
+Default to problem-led scholarly synthesis when drafting or substantially rebuilding
+a review. Definitions and equations introduce a comparison; they do not complete it.
+Language-only polishing and short transitions do not need an artificial literature essay.
+
+1. **Diagnose the argument, not just length.** Identify definition-only subsections,
+   paper-by-paper lists, unsupported citation bundles, repeated generic limitations
+   and headings with no independent scientific question. Propose merging/splitting
+   around questions; preserve an old-to-new map for equations, figures and evidence.
+   Read [argument design](references/critical-synthesis.md).
+2. **Read into a comparison matrix.** For each important study record the actual
+   construction, data, comparator, validation, findings and limitations with field-level
+   locations. Distinguish full text, inspected excerpt and abstract. Unknown is not
+   a study failure. Read [study comparison contract](references/study-comparisons.md).
+3. **Design each coherent subsection.** Record its question, proposed answer,
+   comparison axes, study clusters, paragraph functions, bounded conclusion and open
+   question in `synthesis_plan.json`. A thin heading should be merged or assigned a
+   clear transition role, not padded. Sparse evidence needs an explicit search rationale;
+   do not invent a second study, opposition, numerical comparison or mechanistic cause.
+4. **Calibrate one representative sample.** Choose a difficult central subsection,
+   complete its records, draft and review it, and show it with an explanation of its
+   comparative reasoning. Record the user's actual feedback against that exact version.
+   Do not mark a sample approved because the user approved the outline or asked to proceed.
+   Continue independent evidence/planning work while feedback is pending. See
+   [depth review and calibration](references/depth-review.md).
+5. **Write complete argument units.** Keep all paragraph/subsubsection children in
+   context. Organize by questions and dimensions, integrating studies in comparisons.
+   Explain agreements, disagreements, alternative explanations and noncomparability.
+   Distinguish source findings, review-author inference and proposed protocol. Retain
+   necessary mechanism/math, connecting it to empirical choices and tested boundaries.
+6. **Review the complete subsection.** Require passage-based judgments on question,
+   comparisons, explanation, evidence scope and conclusion. Explicitly reject a
+   definition+equation subsection masquerading as a completed core synthesis. Give
+   actionable issues and missing evidence, not a word-count/score target. Both a
+   structural/source check and a substantive review must pass; neither proves the other.
+7. **Review chapter and manuscript coherence.** Check that local conclusions develop
+   the review's contribution, that comparisons use consistent tasks/terms, and that
+   neighboring sections do not repeat the same introduction. Recheck every changed
+   claim; translate only after the English candidate is stabilized and accepted for use.
+
+### Runtime selection and limits
+
+`synthesis_pipeline.py init|audit|revise` is the v4.2 candidate workflow; see
+`reviewforge-runtime/README_SYNTHESIS_ZH.md`. It generates whole-subsection drafts
+and hash-bound model-review reports in `workspace/synthesis_candidates/` and never
+silently replaces `review_en.tex`, the original, or an active v4 checkpoint.
+`resume_review_v4.bat` remains the legacy bounded-block workflow: running that command
+alone does **not** apply this new architecture. Do not describe a legacy run as a
+completed critical-synthesis upgrade. Reconcile source changes before reusing plans
+or approved samples. Human feedback calibrates preferences; model reviews remain
+provisional. Technical validation and more words do not guarantee author satisfaction
+or journal readiness.

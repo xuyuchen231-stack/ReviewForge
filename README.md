@@ -1,4 +1,4 @@
-> Update 2026-10-24: [v4.1 evidence and delivery gates](reviewforge-runtime/README_V4_1_ZH.md). Existing v4 commands remain supported.
+> Update 2026-10-24: [v4.2 whole-subsection critical synthesis](reviewforge-runtime/README_SYNTHESIS_ZH.md): argument plans, field-level study comparisons, sample calibration and passage-based depth reviews. This is a separate candidate workflow; legacy v4 resume remains supported.
 
 # ReviewForge
 
