@@ -90,3 +90,15 @@ class AutonomousTests(unittest.TestCase):
   first=contract_digest(plan,matrix,{},'a');plan['units'][1]['thesis']='changed';matrix['studies'][1]['fields']['x']='changed'
   self.assertEqual(first,contract_digest(plan,matrix,{},'a'))
   matrix['studies'][0]['fields']['x']='changed';self.assertNotEqual(first,contract_digest(plan,matrix,{},'a'))
+ def test_provider_failures_pause_without_consuming_scientific_visits(self):
+  from unittest.mock import patch
+  class API:
+   def chat(self,*a,**k):raise RuntimeError('API attempts failed: model: ValueError; Empty API response; finish_reason=length')
+  with tempfile.TemporaryDirectory() as t:
+   w=Path(t);self.source(w)
+   with patch('autonomous_review.heartbeat'),patch('threading.Event.wait',return_value=False):
+    report=run_review(w,hours=.1,translate=False,api_factory=API)
+   self.assertEqual(report['status'],'paused_provider_failure')
+   run=Path(report['report']).parent.parent;state=json.loads((run/'autonomous_state.json').read_text())
+   self.assertEqual(state['requests_attempted'],3);self.assertEqual(state['calls'],0)
+   self.assertTrue(all(row['visits']==0 for row in state['tasks'].values()))

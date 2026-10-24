@@ -111,7 +111,8 @@ class CompatibleAPI:
                         data = json.load(resp)
                     result = data['choices'][0]['message']['content']
                     if not isinstance(result, str) or not result.strip():
-                        raise ValueError('Empty API response')
+                        choice=data['choices'][0];message=choice.get('message',{})
+                        raise ValueError('Empty API response; finish_reason='+str(choice.get('finish_reason','unknown'))+'; reasoning_chars='+str(len(message.get('reasoning_content') or message.get('reasoning') or '')))
                     self.key_index = key_index
                     self.last_model=model
                     self.last_key_slot=key_index+1
@@ -144,7 +145,9 @@ class CompatibleAPI:
                     failures.append(model + ': HTTP ' + str(exc.code))
                     break
                 except Exception as exc:
-                    failures.append(model + ': ' + type(exc).__name__)
+                    detail=('; '+str(exc)) if isinstance(exc,ValueError) and str(exc).startswith('Empty API response;') else ''
+                    failures.append(model + ': ' + type(exc).__name__+detail)
+                    if detail:continue
                     break
         if (failures and all('HTTP 429' in f for f in failures)) or (not failures and self.key_cooldowns and all(self.key_cooldowns.get(i,0)>time.time() for i in range(len(self.keys)))):
             active_cooldowns=[until for until in self.key_cooldowns.values() if until>time.time()]

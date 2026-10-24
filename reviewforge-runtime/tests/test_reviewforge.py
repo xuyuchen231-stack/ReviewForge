@@ -87,3 +87,16 @@ class TestModelRouting(unittest.TestCase):
             self.assertEqual(api.chat('system','user',role='writer'),'ok')
             self.assertEqual(api.chat('system','user',role='reviewer'),'ok')
         self.assertEqual(calls,['mimo-v2.6-flash:free','deepseek-v4.1-flash:free'])
+
+class TestEmptyDiagnostics(unittest.TestCase):
+ def test_empty_response_reports_safe_metadata(self):
+  from unittest.mock import patch
+  from io import BytesIO
+  from reviewforge import CompatibleAPI
+  class Response:
+   def __enter__(self):return BytesIO(json.dumps({'choices':[{'finish_reason':'length','message':{'content':'','reasoning_content':'private reasoning'}}]}).encode())
+   def __exit__(self,*a):pass
+  env={'RF_API_KEYS':'diagnostic-test','RF_BASE_URL':'https://example.invalid','RF_WRITER_MODEL':'model','RF_FALLBACK_MODEL':'model'}
+  with patch.dict('os.environ',env),patch('reviewforge.urllib.request.urlopen',return_value=Response()):
+   with self.assertRaisesRegex(RuntimeError,'finish_reason=length') as caught:CompatibleAPI().chat('s','u')
+   self.assertNotIn('private reasoning',str(caught.exception))

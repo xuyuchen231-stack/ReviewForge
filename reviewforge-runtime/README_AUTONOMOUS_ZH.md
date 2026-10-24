@@ -13,3 +13,4 @@
 结果位于 workspace/autonomous_runs/<运行编号>/output；报告为同目录 reports/autonomous_result.json。原稿不覆盖；未通过或来源记录改变的单元保留原文并列入未完成清单。全文审查存在严重问题的候选稿不得进入交付稿。模型审查不代表作者批准、专家核验或可直接投稿。
 
 `python autonomous_review.py --check` 仅检查本地输入，不调用模型。`--skip-translation` 可跳过中文同步。PDF生成取决于已有 TeX 环境和剩余时间。运行期间电脑需保持开启且联网。
+`n故障保护：连续三次模型服务失败会保存并暂停，不消耗科学审查轮次。空响应会显示 finish_reason 和推理字符数（不记录推理内容），尝试其他账户；一次调用的账户/模型回退预算最多180秒。

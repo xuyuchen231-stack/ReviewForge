@@ -79,6 +79,7 @@ def bootstrap(workspace,hours,new_run=False):
         
         for task in state['tasks'].values():
             if task.pop('in_flight',False):task['visits']=max(0,task['visits']-1);task['status']='retry'
+        state['consecutive_provider_failures']=0
         state['status']='resuming';atomic_json(run/'autonomous_state.json',state)
         return run,state
     run=ws/'autonomous_runs'/('run_'+datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')+'_'+uuid.uuid4().hex[:6]);run.mkdir(parents=True)
@@ -127,8 +128,9 @@ def checkpoint_call(api,state,path,system,payload,role):
     remaining=budget-time.time()
     if remaining<=2:raise TimeoutError('Run time budget reached before new request')
     state['requests_attempted']=state.get('requests_attempted',0)+1;state['last_request_role']=role;state['last_request_started']=time.time();atomic_json(path,state)
-    api.request_timeout=max(1,min(150,int(remaining)));api.deadline=budget
+    api.request_timeout=max(1,min(150,int(remaining)));api.deadline=min(budget,time.time()+180)
     result=api.chat(system,json.dumps(payload,ensure_ascii=False),role=role)
+    state['consecutive_provider_failures']=0
     state['calls']=state.get('calls',0)+1;state['last_response']=time.time()
     state.setdefault('model_routes',[]).append({'role':role,'model':getattr(api,'last_model','unknown'),'account_slot':getattr(api,'last_key_slot',None),'utc':datetime.datetime.now(datetime.timezone.utc).isoformat()})
     atomic_json(path,state)
@@ -312,7 +314,15 @@ def run_review(workspace,hours=9,reserve_minutes=40,max_visits=3,new_run=False,t
                     elif 'Missing source anchors:' in str(exc):task['status']='blocked_evidence'
                     elif 'API attempts failed:' in str(exc):
                         # A provider outage is not 58 failed scientific reviews.
-                        task['visits']-=1;state['phase']='provider_backoff';atomic_json(path,state)
+                        task['visits']-=1;state['phase']='provider_backoff'
+                        state['consecutive_provider_failures']=state.get('consecutive_provider_failures',0)+1
+                        print('Provider failure: '+message,flush=True)
+                        atomic_json(path,state)
+                        if state['consecutive_provider_failures']>=3:
+                            state.update(status='paused_provider_failure',phase='paused');task['in_flight']=False;atomic_json(path,state)
+                            atomic_json(run/'reports/provider_failure.json',{'status':state['status'],'error':message,'attempts':state['requests_attempted'],'successful_calls':state['calls']})
+                            print('Paused after 3 consecutive provider failures. Check reports/provider_failure.json; same launcher resumes.',flush=True)
+                            return {'status':'paused_provider_failure','report':str(run/'reports/provider_failure.json')}
                         stop.wait(min(60,max(0,state['work_deadline']-time.time())))
                 task['in_flight']=False
                 atomic_json(path,state)
