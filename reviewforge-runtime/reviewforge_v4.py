@@ -21,7 +21,7 @@ DEFAULT_QUERIES=[
  'hybrid modeling bioprocess neural networks dynamic prediction',
 ]
 BRIEF='''Hybrid Modeling of Microbial Fermentation: Dynamic Prediction under Changing Operating Conditions.
-Write a substantial Q1-oriented academic review on microbial bioreactor-scale mechanistic鈥揹ata-driven hybrids.
+Write a substantial Q1-oriented academic review on microbial bioreactor-scale mechanistic-data-driven hybrids.
 Core: changed feed/induction trajectories; biomass, substrate and product balances; kinetics/parameter/rate/residual learning;
 measurement and PAT, extrapolation, uncertainty, independent validation, identifiability, industrial deployment.
 Prefer precise, evidence-calibrated academic prose. Remove defensive/self-justifying statements; discuss scientific limitations objectively.
@@ -219,7 +219,7 @@ def heading_change_log(old,new):
 def gate_block(old,new):
  if not new.strip() or len(new)<max(80,int(len(old)*.72)):
   return False,'Output empty or likely truncated'
- if cite_keys(old)-cite_keys(new):return False,'Existing citations removed'
+ if cite_keys(old)-cite_keys(new):return False,'Existing citations removed: '+', '.join(sorted(cite_keys(old)-cite_keys(new)))
  if heading_inventory(old)!=heading_inventory(new):
   # Structural reorganization is allowed only after independent scientific review.
   # All protected LaTeX, citations, labels and cross-references are still gated below.

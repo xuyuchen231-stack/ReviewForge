@@ -53,6 +53,21 @@ class TestLiveLoopMock(unittest.TestCase):
             self.assertTrue((p/'reports/iteration_0001.json').exists())
 
 class TestModelRouting(unittest.TestCase):
+    def test_reasoning_only_length_response_switches_model_without_burning_accounts(self):
+        from unittest.mock import patch
+        from io import BytesIO
+        from reviewforge import CompatibleAPI
+        calls=[]
+        class Response:
+            def __init__(self,model):self.model=model
+            def __enter__(self):return BytesIO(json.dumps({'choices':[{'finish_reason':'length' if self.model=='critic' else 'stop','message':{'content':'' if self.model=='critic' else 'ok','reasoning_content':'hidden'}}]}).encode())
+            def __exit__(self,*args):return False
+        def opener(req,timeout):
+            model=json.loads(req.data)['model'];calls.append(model);return Response(model)
+        env={'RF_API_KEYS':'reasoning-test-a,reasoning-test-b,reasoning-test-c','RF_BASE_URL':'https://reasoning.invalid','RF_WRITER_MODEL':'writer','RF_REVIEWER_MODEL':'critic','RF_FALLBACK_MODEL':'critic'}
+        with patch.dict('os.environ',env),patch('reviewforge.urllib.request.urlopen',side_effect=opener):
+            api=CompatibleAPI();self.assertEqual(api.chat('s','u',role='reviewer'),'ok');self.assertEqual(api.key_cooldowns,{})
+        self.assertEqual(calls,['critic','writer'])
     def test_empty_reviewer_response_uses_available_writer_as_labeled_fallback(self):
         from unittest.mock import patch
         from io import BytesIO
@@ -121,3 +136,31 @@ class TestResponseDeadline(unittest.TestCase):
    def read1(self,n):return b' '
   with patch('reviewforge.time.time',side_effect=[0,2]):
    with self.assertRaises(TimeoutError):read_response_body(Response(),1,150)
+class TestWholeUnitRouteBudget(unittest.TestCase):
+ def test_large_call_budget_reaches_transport_with_bounded_route_timeout(self):
+  from unittest.mock import patch
+  from io import BytesIO
+  import time
+  from reviewforge import CompatibleAPI
+  class Response:
+   def __enter__(self):return BytesIO(b'{"choices":[{"message":{"content":"ok"}}]}')
+   def __exit__(self,*a):pass
+  env={'RF_API_KEYS':'stage-budget-test','RF_BASE_URL':'https://example.invalid','RF_WRITER_MODEL':'writer','RF_FALLBACK_MODEL':'writer'}
+  observed=[]
+  def opener(req,timeout):observed.append(timeout);return Response()
+  with patch.dict('os.environ',env),patch('reviewforge.urllib.request.urlopen',side_effect=opener):
+   api=CompatibleAPI();api.call_timeout=600;api.request_timeout=300;api.deadline=time.time()+600;self.assertEqual(api.chat('s','u'),'ok')
+  self.assertGreater(observed[0],299);self.assertLessEqual(observed[0],300)
+ def test_short_call_retains_its_full_180_second_response_budget(self):
+  from unittest.mock import patch
+  import time
+  from reviewforge import CompatibleAPI
+  class Response:
+   def __enter__(self):return self
+   def __exit__(self,*a):pass
+  env={'RF_API_KEYS':'short-budget-test','RF_BASE_URL':'https://example.invalid','RF_WRITER_MODEL':'writer','RF_FALLBACK_MODEL':'writer'}
+  captured=[]
+  def body(resp,deadline,timeout):captured.append(deadline-time.time());return b'{"choices":[{"message":{"content":"ok"}}]}'
+  with patch.dict('os.environ',env),patch('reviewforge.urllib.request.urlopen',return_value=Response()),patch('reviewforge.read_response_body',side_effect=body):
+   CompatibleAPI().chat('s','u')
+  self.assertGreater(captured[0],179)

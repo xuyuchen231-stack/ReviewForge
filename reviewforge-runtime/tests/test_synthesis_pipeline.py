@@ -3,6 +3,11 @@ from pathlib import Path
 from synthesis_pipeline import initialize, audit_contract, revise_unit, review_verdict, CRITERIA
 
 class SynthesisTests(unittest.TestCase):
+ def test_grounded_negative_review_remains_a_scientific_rejection(self):
+  from synthesis_pipeline import validate_review_response
+  verdict={'accept':False,'issues':[],'criteria':{k:{'status':'fail','passages':['Actual text'],'explanation':'Comparison is insufficient.'} for k in CRITERIA}}
+  self.assertTrue(validate_review_response(verdict,'Actual text'))
+  self.assertFalse(review_verdict(verdict,'Actual text')[0])
  def test_bibliography_is_not_a_writing_unit(self):
   from synthesis_pipeline import units
   text='\\begin{document}\n\\section{X}\n\\subsection{Y}\nProse.\n\\begin{thebibliography}{99}\n\\bibitem{A} Reference\n\\end{thebibliography}\n\\end{document}'
@@ -129,3 +134,14 @@ class SynthesisTests(unittest.TestCase):
   base={'accept':False,'issues':[],'criteria':{k:{'status':'fail','explanation':'Concrete problem','passages':['text']} for k in CRITERIA}}
   for extra in [{'issues':[None]},{'issues':[{'id':'A','severity':'major'}]},{'resolved_issue_ids':'A'},{'resolutions':[{'issue_id':'A'}]}]:
    self.assertFalse(review_schema({**base,**extra}))
+ def test_writer_receives_explicit_original_citation_inventory_for_repairs(self):
+  with tempfile.TemporaryDirectory() as t:
+   w=self.workspace(t);u=self.prepared(w);calls=[0]
+   def chat(s,p,r):
+    if r=='writer':
+     self.assertEqual(p['required_citation_keys'],['A','B']);calls[0]+=1
+     return self.passing_chat(s,p,r).replace(r'\cite{A,B}',r'\cite{A}') if calls[0]==1 else self.passing_chat(s,p,r)
+    return self.passing_chat(s,p,r)
+   result=revise_unit(w,u['id'],chat,max_rounds=2)
+   self.assertEqual(result['status'],'model_review_passed')
+   self.assertIn('B',result['history'][0]['problems'][0])

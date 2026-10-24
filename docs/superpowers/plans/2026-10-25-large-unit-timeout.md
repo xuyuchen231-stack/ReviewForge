@@ -1,0 +1,11 @@
+# Large-subsection timeout investigation — 2026-10-25 (Pacific/Auckland)
+
+The production checkpoint had completed evidence extraction for a 19-study unit, then repeated the same writing request with a 180-second aggregate API cap. The three provider failures did not consume scientific visits; one previously accepted unit and the extraction cache remained intact.
+
+Changes: retain the 180-second small-request cap, but allow 600 seconds for whole-unit writing/review and large payloads, with 300 seconds per route and the session deadline taking precedence. Heartbeats show elapsed request time and budget. Deduplicate repeated long evidence quotations only if the request becomes smaller; source identities and locators remain distinct. The actual large-unit request did not shrink, so no compression performance improvement is claimed.
+
+The writer now receives the required original citation inventory and all original headings, including inline sibling headings. A missing citation remains a structural rejection. Reviewer quotations must match exact candidate substrings; a malformed review retries locally rather than spending a manuscript rewrite. Grounded negative scientific reviews still fail. Empty responses with finish_reason=length switch models rather than repeating the same exhausted model across accounts; account health is unchanged.
+
+Verification: 115 runtime tests and 11 quality-system tests passed, including red/green reproductions for reviewer quotation retry and reasoning-only model fallback. Independent read-only review found no critical issue in the changed deadlines, fallback or grounding validator. Git whitespace checks passed.
+
+Live diagnostic: on an isolated frozen copy, the 19-study writer completed beyond the old 180-second cap. Real review and revision exposed and preserved a missing original citation; the later candidate restored it and passed the structural gate. A subsequent reviewer request returned reasoning-only output exhaustion across accounts followed by a fallback timeout. This is an external-service failure, not scientific acceptance. The revised routing is being checked on the saved candidate. Original manuscripts and private evidence remain local; no nine-hour production run was launched.

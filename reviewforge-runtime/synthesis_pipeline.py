@@ -46,6 +46,9 @@ REVIEWER+=''' For a declared bridge unit, assess whether its explicit transition
 fulfilled; do not demand artificial studies or a full comparative essay. Explain the scoped
 application of each criterion using actual bridge passages. Empirical claims still require sources.'''
 
+WRITER+=''' The required_citation_keys inventory is mandatory. Every original heading listed in original_headings belongs to this revision scope even when it was inline in the source. Resolve review findings in place; never relocate protected formulas, citations or existing material to an unwritten other section. Add evidence-based explanation rather than deleting protected content.'''
+REVIEWER+=''' Treat every original_headings entry as part of the supplied source unit. Require in-place study-based integration rather than relocation or deletion of protected formulas/citations. The unit may contain an existing inline sibling heading; assess its original content rather than assuming it was newly added.'''
+
 def digest(text):return hashlib.sha256(text.encode('utf-8')).hexdigest()
 def read(path):return json.loads(Path(path).read_text(encoding='utf-8'))
 
@@ -175,6 +178,18 @@ def review_schema(verdict):
     resolutions=verdict.get('resolutions',[])
     return isinstance(resolutions,list) and all(isinstance(r,dict) and isinstance(r.get('issue_id'),str) and isinstance(r.get('explanation'),str) and isinstance(r.get('passages'),list) and all(isinstance(q,str) for q in r['passages']) for r in resolutions)
 
+def validate_review_response(verdict,candidate):
+    """Retry malformed review evidence without spending a manuscript revision."""
+    if not review_schema(verdict):return False
+    for key in CRITERIA:
+        passages=verdict['criteria'][key]['passages']
+        if not passages or any(not q.strip() or q not in candidate for q in passages):
+            raise ValueError('Review criterion '+key+' must quote exact nonempty candidate substrings; no paraphrase or ellipses.')
+    for resolution in verdict.get('resolutions',[]):
+        if not resolution['passages'] or any(not q.strip() or q not in candidate for q in resolution['passages']):
+            raise ValueError('Resolution must quote exact nonempty candidate substrings; no paraphrase or ellipses.')
+    return True
+
 def review_verdict(verdict,candidate,prior_major=()):
     issues=[]
     if not isinstance(verdict,dict):return False,['invalid_review']
@@ -219,7 +234,7 @@ def revise_unit(workspace,unit_id,chat,max_rounds=3,require_calibration=True):
     if len(u['body'])>60000:raise ValueError('Unit exceeds context budget; propose an argument-based split, not silent truncation.')
     keys=set(argument['study_keys'])|citekeys(u['body'])
     evidence=unit_evidence(ws,u,argument)
-    payload={'argument_plan':argument,'body':u['body'],'study_comparisons':[r for r in matrix['studies'] if r['citekey'] in keys],
+    payload={'argument_plan':argument,'body':u['body'],'required_citation_keys':sorted(citekeys(u['body'])),'original_headings':re.findall(r'\\(?:section|subsection|subsubsection|paragraph)\*?\{[^}]+\}',u['body']),'study_comparisons':[r for r in matrix['studies'] if r['citekey'] in keys],
              'evidence_context':evidence,'calibrated_preferences':calibration.get('preferences',[]),'feedback':[],
              'scope':'Whole subsection including all subordinate headings; introductions/bridges have a distinct function.'}
     if len(json.dumps(payload))>180000:raise ValueError('Evidence exceeds context budget; curate relevant source locations without silently dropping comparison evidence.')
@@ -238,7 +253,9 @@ def revise_unit(workspace,unit_id,chat,max_rounds=3,require_calibration=True):
             payload['active_issue_details']=[i for h in history for i in h.get('review',{}).get('issues',[]) if isinstance(i,dict) and i.get('id') in open_major]
             payload['feedback']={'previous_run':prior.get('run_id'),'previous_review':history[-1] if history else {},'contract_changed':prior.get('contract_sha256')!=contract_digest(plan,matrix,evidence,unit_id)}
             previous_text=folder/(unit_id+'.tex')
-            if previous_text.exists():payload['previous_candidate']=previous_text.read_text(encoding='utf-8')
+            if previous_text.exists():
+                payload['previous_candidate']=previous_text.read_text(encoding='utf-8')
+                payload['missing_original_citation_keys']=sorted(citekeys(u['body'])-citekeys(payload['previous_candidate']))
     for attempt in range(1,max_rounds+1):
         # Any API exception exits immediately; already saved attempts survive.
         candidate=chat(WRITER,payload,'writer').strip()

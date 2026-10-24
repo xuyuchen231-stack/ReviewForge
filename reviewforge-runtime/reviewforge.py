@@ -109,7 +109,7 @@ class CompatibleAPI:
         models = [preferred] + ([self.fallback_model] if self.fallback_model != preferred else [])
         if role=='reviewer' and self.model not in models:models.append(self.model)
         failures = []
-        call_deadline=min(getattr(self,'deadline',float('inf')),time.time()+180)
+        call_deadline=min(getattr(self,'deadline',float('inf')),time.time()+max(1,min(1800,getattr(self,'call_timeout',180))))
         for model in models:
             body = json.dumps({'model': model, 'messages': [{'role': 'system', 'content': system}, {'role': 'user', 'content': user}], 'temperature': 0.2, 'max_tokens': self.max_tokens}).encode()
             # Explicit user opt-in to independently authorized accounts.
@@ -122,8 +122,9 @@ class CompatibleAPI:
                 key = self.keys[key_index]
                 req = urllib.request.Request(self.base + '/chat/completions', data=body, headers={'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json'}, method='POST')
                 try:
+                    attempt_deadline=min(call_deadline,time.time()+getattr(self,'request_timeout',150)) if getattr(self,'call_timeout',180)>180 else call_deadline
                     with urllib.request.urlopen(req, timeout=max(.1,min(getattr(self,'request_timeout',150),call_deadline-time.time()))) as resp:
-                        raw = read_response_body(resp,call_deadline,getattr(self,'request_timeout',150))
+                        raw = read_response_body(resp,attempt_deadline,getattr(self,'request_timeout',150))
                         if not raw.strip():raise ValueError('Empty upstream body; bytes='+str(len(raw)))
                         try:data=json.loads(raw)
                         except json.JSONDecodeError as error:raise ValueError('Invalid upstream JSON; bytes='+str(len(raw))+'; position='+str(error.pos)) from None
@@ -166,6 +167,9 @@ class CompatibleAPI:
                 except Exception as exc:
                     detail=('; '+str(exc)) if isinstance(exc,ValueError) and str(exc).startswith(('Empty API response;','Empty upstream body;','Invalid upstream JSON;')) else ''
                     failures.append(model + ': ' + type(exc).__name__+detail)
+                    # An exhausted model output budget is not an account outage.
+                    # Preserve time for another model instead of repeating it per key.
+                    if detail.startswith('; Empty API response; finish_reason=length;'):break
                     if detail:continue
                     break
         if (failures and all('HTTP 429' in f for f in failures)) or (not failures and self.key_cooldowns and all(self.key_cooldowns.get(i,0)>time.time() for i in range(len(self.keys)))):

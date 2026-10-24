@@ -192,7 +192,7 @@ class AutonomousTests(unittest.TestCase):
  def test_reviewer_transport_and_format_recovery_reuses_writer_draft(self):
   from unittest.mock import patch
   from synthesis_pipeline import CRITERIA
-  for mode in ('format','outage'):
+  for mode in ('format','outage','grounding'):
    class API:
     def __init__(self):self.writes=0;self.reviews=0
     def chat(self,system,user,role='writer'):
@@ -203,6 +203,7 @@ class AutonomousTests(unittest.TestCase):
      self.reviews+=1
      if self.reviews==1:
       if mode=='outage':raise RuntimeError('API attempts failed: simulated reviewer outage')
+      if mode=='grounding':return json.dumps({'accept':True,'issues':[],'criteria':{k:{'status':'pass','explanation':'Grounded mock judgment','passages':['This passage was invented']} for k in CRITERIA}})
       return '{"accept":true,"issues":[],"criteria":[]}'
      return json.dumps({'accept':True,'issues':[],'criteria':{k:{'status':'pass','explanation':'Grounded mock judgment','passages':[p['candidate'][-40:]]} for k in CRITERIA}})
    with tempfile.TemporaryDirectory() as t:
@@ -222,10 +223,32 @@ class AutonomousTests(unittest.TestCase):
    self.assertFalse((out/'review_zh.tex').exists());self.assertFalse((out/'output/review_en.pdf').exists())
  def test_source_ids_materialize_exact_immutable_evidence(self):
   from autonomous_review import indexed_source,materialize_evidence
-  packet={'citekey':'A','chunks':[{'locator':'offset 0','text':'PDF text contains �C unusual punctuation, and this is an exact source sentence.'}]}
+  packet={'citekey':'A','chunks':[{'locator':'offset 0','text':'PDF text contains 锟紺 unusual punctuation, and this is an exact source sentence.'}]}
   indexed=indexed_source(packet);identifier=indexed['evidence_spans'][0]['id']
   row={'citekey':'A','fields':{'axis':{'status':'supported','value':'A bounded interpretation','evidence_ids':[identifier]}}}
   result=materialize_evidence(row,indexed)
   self.assertEqual(result['fields']['axis']['excerpt'],packet['chunks'][0]['text'])
   row['fields']['axis']['evidence_ids']=['invented']
   with self.assertRaises(ValueError):materialize_evidence(row,indexed)
+ def test_repeated_source_quotes_are_deduplicated_without_losing_values(self):
+  from autonomous_review import compact_evidence_payload
+  payload={'study_comparisons':[{'citekey':'A','fields':{'x':{'value':'one','locator':'p1','excerpt':'Exact source quote '*30},'y':{'value':'two','locator':'p1','excerpt':'Exact source quote '*30}}}]}
+  result=compact_evidence_payload(payload);fields=result['study_comparisons'][0]['fields']
+  self.assertEqual(fields['x']['excerpt_ref'],fields['y']['excerpt_ref']);self.assertEqual(len(result['source_quotes']),1)
+  self.assertEqual(result['source_quotes'][fields['x']['excerpt_ref']]['excerpt'],'Exact source quote '*30)
+  self.assertEqual(payload['study_comparisons'][0]['fields']['x']['excerpt'],'Exact source quote '*30)
+ def test_whole_unit_request_gets_stage_budget_but_never_exceeds_run_deadline(self):
+  class API:
+   def chat(self,*a,**k):
+    self.observed_remaining=self.deadline-time.time();return 'ok'
+  with tempfile.TemporaryDirectory() as t:
+   api=API();state={'deadline':time.time()+3600}
+   checkpoint_call(api,state,Path(t)/'state.json','s',{'body':'x','study_comparisons':[]},'writer')
+   self.assertGreater(api.observed_remaining,300)
+   state['deadline']=time.time()+10
+   checkpoint_call(api,state,Path(t)/'state.json','s',{'body':'x','study_comparisons':[]},'writer')
+   self.assertLessEqual(api.observed_remaining,10)
+ def test_evidence_compaction_never_increases_large_payload_size(self):
+  from autonomous_review import compact_evidence_payload
+  p={'study_comparisons':[{'citekey':'A','fields':{str(i):{'excerpt':'Unique quote '+str(i),'locator':'p'+str(i)} for i in range(20)}}]}
+  self.assertLessEqual(len(json.dumps(compact_evidence_payload(p))),len(json.dumps(p)))
