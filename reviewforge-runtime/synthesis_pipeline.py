@@ -47,6 +47,7 @@ fulfilled; do not demand artificial studies or a full comparative essay. Explain
 application of each criterion using actual bridge passages. Empirical claims still require sources.'''
 
 WRITER+=''' The required_citation_keys inventory is mandatory. Every original heading listed in original_headings belongs to this revision scope even when it was inline in the source. Resolve review findings in place; never relocate protected formulas, citations or existing material to an unwritten other section. Add evidence-based explanation rather than deleting protected content.'''
+WRITER+=''' Source locators, normalized source text offsets, span IDs and extraction bookkeeping belong only in evidence/review records, never in publication prose. Cite studies with the supplied citation keys. Report access limitations where scientifically necessary without describing the tool workflow. Scope negative claims to the studies and accessible evidence actually examined; do not equate incomplete reporting with evidence that a method or measurement does not exist.'''
 REVIEWER+=''' Treat every original_headings entry as part of the supplied source unit. Require in-place study-based integration rather than relocation or deletion of protected formulas/citations. The unit may contain an existing inline sibling heading; assess its original content rather than assuming it was newly added.'''
 
 def digest(text):return hashlib.sha256(text.encode('utf-8')).hexdigest()

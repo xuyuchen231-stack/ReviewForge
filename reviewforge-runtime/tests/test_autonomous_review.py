@@ -3,6 +3,24 @@ from pathlib import Path
 from autonomous_review import RunLock, bootstrap, choose_task, assemble, source_packet, checkpoint_call, run_review
 
 class AutonomousTests(unittest.TestCase):
+ def test_coherence_uses_the_same_validated_candidates_as_assembly(self):
+  from autonomous_review import coherence_review
+  from synthesis_pipeline import units
+  with tempfile.TemporaryDirectory() as t:
+   ws=Path(t);original=self.source(ws);run,state=bootstrap(ws,9);expected=units(original)[0]['body'];folder=run/'synthesis_candidates/accepted';folder.mkdir(parents=True);(folder/'unit_001.tex').write_text('Unreviewed stale candidate')
+   class API:
+    max_tokens=1000
+    def chat(api,system,user,role):
+     self.assertEqual(json.loads(user)['units'][0]['text'],expected);return json.dumps({'issues':[]})
+   self.assertEqual(coherence_review(run,state,API()),[])
+ def test_resume_requeues_completed_tasks_whose_accepted_candidate_is_invalid(self):
+  from autonomous_review import reconcile_completed_tasks
+  with tempfile.TemporaryDirectory() as t:
+   ws=Path(t);before=self.source(ws);run,state=bootstrap(ws,9);key=next(iter(state['tasks']))
+   state['tasks'][key].update(status='completed',visits=3)
+   reconcile_completed_tasks(run,state,max_visits=3)
+   self.assertEqual(state['tasks'][key]['status'],'retry');self.assertEqual(state['tasks'][key]['visits'],2)
+   self.assertEqual(state['tasks'][key]['last_result'],'accepted_candidate_invalidated');self.assertEqual((ws/'review_en.tex').read_text(),before)
  def test_coherence_transport_failure_has_a_bounded_recovery_attempt(self):
   from autonomous_review import coherence_review
   class API:

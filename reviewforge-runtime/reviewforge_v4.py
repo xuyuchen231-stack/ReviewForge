@@ -219,6 +219,7 @@ def heading_change_log(old,new):
 
 
 def gate_block(old,new):
+ if re.search(r'normalized source text offset\s+\d',new,re.I):return False,'Internal source locator leaked into narrative; keep provenance in evidence records and citation keys in the manuscript'
  if not new.strip() or len(new)<max(80,int(len(old)*.72)):
   return False,'Output empty or likely truncated'
  if cite_keys(old)-cite_keys(new):return False,'Existing citations removed: '+', '.join(sorted(cite_keys(old)-cite_keys(new)))

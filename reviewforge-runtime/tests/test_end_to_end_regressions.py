@@ -3,6 +3,11 @@ from pathlib import Path
 from unittest.mock import patch
 
 class EndToEndRegressions(unittest.TestCase):
+ def test_internal_source_locations_do_not_leak_into_manuscript_prose(self):
+  from reviewforge_v4 import gate_block
+  old='A bounded comparison of validation conditions. '*8
+  self.assertFalse(gate_block(old,old+' (normalized source text offset 23400 + 279 chars)')[0])
+  self.assertTrue(gate_block(old,old+' (p. 5; 279 observations)')[0])
  def test_assembly_retains_original_when_an_old_accepted_unit_is_malformed(self):
   from autonomous_review import bootstrap,assemble
   from synthesis_pipeline import initialize,units,digest,contract_digest,matrix_for_unit,unit_evidence,read
@@ -19,6 +24,8 @@ class EndToEndRegressions(unittest.TestCase):
    atomic_json(folder/(key+'.json'),{'status':'model_review_passed','source_sha256':digest((run/'review_en.tex').read_text(encoding='utf-8')),'unit_source_sha256':u['source_sha256'],'candidate_sha256':digest(bad),'contract_sha256':contract_digest(plan,matrix,unit_evidence(run,u,arg),key),'open_major_issues':[]})
    report=assemble(run,state);self.assertEqual(report['accepted_units'],0)
    self.assertIn(key,report['invalid_cached_candidates']);self.assertNotIn('Missing end.',Path(report['english']).read_text(encoding='utf-8'))
+   atomic_json(folder/(key+'.json'),['invalid review object'])
+   self.assertEqual(assemble(run,state)['accepted_units'],0)
  def test_all_supported_citation_commands_are_protected(self):
   from reviewforge_v4 import gate_block
   for command in ('citep','parencite','textcite','autocite','footcite','supercite'):

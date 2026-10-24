@@ -375,19 +375,34 @@ def prepare_unit(workspace,run,state,unit,api):
         feedback=report['issues']
     raise ValueError('Automatic evidence/argument contract still fails: '+str(feedback)[:1200])
 
+def current_accepted_candidate(run,unit,original):
+    from reviewforge_v4 import gate_block
+    run=Path(run);path=run/'synthesis_candidates/accepted'/(unit['id']+'.tex')
+    try:
+        body=path.read_text(encoding='utf-8');record=read(path.with_suffix('.json'));plan=read(run/'synthesis_plan.json')
+        if not isinstance(record,dict) or not isinstance(plan,dict):return None
+        argument=next(u for u in plan['units'] if u['id']==unit['id'])
+        expected=contract_digest(plan,matrix_for_unit(run,unit['id']),unit_evidence(run,unit,argument),unit['id'])
+        if record.get('status')!='model_review_passed' or record.get('open_major_issues') or record.get('contract_sha256')!=expected or record.get('source_sha256')!=digest(original) or record.get('unit_source_sha256')!=unit['source_sha256'] or record.get('candidate_sha256')!=digest(body) or not gate_block(unit['body'],body)[0]:return None
+        return body
+    except (OSError,ValueError,TypeError,KeyError,AttributeError,StopIteration):return None
+
+def reconcile_completed_tasks(run,state,max_visits):
+    original=(Path(run)/'review_en.tex').read_text(encoding='utf-8')
+    for unit in units(original):
+        task=state['tasks'].get(unit['id'],{})
+        if task.get('status')=='completed' and current_accepted_candidate(run,unit,original) is None:
+            task.update(status='retry',visits=min(task.get('visits',0),max_visits-1),last_result='accepted_candidate_invalidated',in_flight=False)
+            state['coherence_rounds']=0
+
 def assemble(run,state):
     from reviewforge_v4 import gate_block
     run=Path(run);original=(run/'review_en.tex').read_text(encoding='utf-8');candidate=original;accepted=[];invalid=[]
     for unit in reversed(units(original)):
         folder=run/'synthesis_candidates/accepted';path=folder/(unit['id']+'.tex');review=path.with_suffix('.json')
         if not path.exists() or not review.exists():continue
-        body=path.read_text(encoding='utf-8');record=read(review)
-        plan=read(run/'synthesis_plan.json');matrix=matrix_for_unit(run,unit['id'])
-        argument=next(u for u in plan['units'] if u['id']==unit['id'])
-        current_contract=contract_digest(plan,matrix,unit_evidence(run,unit,argument),unit['id'])
-        if record.get('contract_sha256')!=current_contract or record.get('open_major_issues'):
-            invalid.append(unit['id']);continue
-        if record.get('status')!='model_review_passed' or record.get('source_sha256')!=digest(original) or record.get('unit_source_sha256')!=unit['source_sha256'] or record.get('candidate_sha256')!=digest(body) or not gate_block(unit['body'],body)[0]:invalid.append(unit['id']);continue
+        body=current_accepted_candidate(run,unit,original)
+        if body is None:invalid.append(unit['id']);continue
         candidate=candidate[:unit['start']]+body+candidate[unit['end']:];accepted.append(unit['id'])
     def content(tex):return tex.split(r'\begin{document}',1)[-1].rsplit(r'\end{document}',1)[0]
     ok,reason=gate_block(content(original),content(candidate))
@@ -420,8 +435,8 @@ def coherence_review(run,state,api):
     """Review cross-unit consistency; actionable findings re-enter the same queue."""
     base=(run/'review_en.tex').read_text(encoding='utf-8');packets=[]
     for unit in units(base):
-        candidate=run/'synthesis_candidates/accepted'/(unit['id']+'.tex')
-        body=candidate.read_text(encoding='utf-8') if candidate.exists() else unit['body']
+        body=current_accepted_candidate(run,unit,base)
+        if body is None:body=unit['body']
         packets.append({'unit_id':unit['id'],'heading':unit['heading'],'text':body})
     scope='complete_units'
     if sum(len(p['text']) for p in packets)>130000:
@@ -469,6 +484,7 @@ def run_review(workspace,hours=9,reserve_minutes=40,max_visits=3,new_run=False,t
     ws=Path(workspace).resolve()
     with RunLock(ws/'autonomous.lock'):
         run,state=bootstrap(ws,hours,new_run);path=run/'autonomous_state.json'
+        reconcile_completed_tasks(run,state,max_visits)
         state['work_deadline']=state['deadline']-min(reserve_minutes*60,hours*3600*.15)
         api=api_factory();api.max_tokens=int(os.environ.get('RF_AUTO_OUTPUT_TOKENS','6500'))
         stop=threading.Event();thread=threading.Thread(target=heartbeat,args=(stop,state,run),daemon=True);thread.start()
