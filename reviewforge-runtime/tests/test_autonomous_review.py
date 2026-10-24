@@ -165,3 +165,11 @@ class AutonomousTests(unittest.TestCase):
    self.assertEqual(result['studies'][0]['value'],'literal } in text')
    self.assertEqual(state['requests_attempted'],1)
    self.assertEqual(state['format_normalization'],'surplus_closing_delimiters')
+ def test_indexed_extraction_maps_only_requested_axes(self):
+  from autonomous_review import normalize_study
+  row={'citekey':'A','comparisons':[{'axis_index':0,'status':'not_accessible','value':''},{'axis_index':1,'status':'supported','value':'bounded','locator':'p1','excerpt':'quoted'}]}
+  result=normalize_study(row,['long axis one','long axis two'])
+  self.assertEqual(set(result['fields']),{'long axis one','long axis two'})
+  self.assertEqual(result['fields']['long axis two']['excerpt'],'quoted')
+  row['comparisons'].append({'axis_index':9,'status':'supported'})
+  with self.assertRaises(ValueError):normalize_study(row,['long axis one','long axis two'])

@@ -64,6 +64,20 @@ def extract_json(content):
     return json.loads(content)
 
 
+def read_response_body(response,deadline,timeout):
+    """Read chunks so gateway keepalive bytes cannot reset an overall request budget."""
+    chunks=[]
+    while True:
+        remaining=deadline-time.time()
+        if remaining<=0:raise TimeoutError('API response time budget reached')
+        sock=getattr(getattr(getattr(response,'fp',None),'raw',None),'_sock',None)
+        if sock is not None:sock.settimeout(max(.1,min(timeout,remaining)))
+        reader=getattr(response,'read1',None) or response.read
+        chunk=reader(65536)
+        if not chunk:break
+        chunks.append(chunk)
+    return b''.join(chunks)
+
 class CompatibleAPI:
     def __init__(self):
         raw_keys = os.environ.get('RF_API_KEYS', '')
@@ -95,20 +109,21 @@ class CompatibleAPI:
         models = [preferred] + ([self.fallback_model] if self.fallback_model != preferred else [])
         if role=='reviewer' and self.model not in models:models.append(self.model)
         failures = []
+        call_deadline=min(getattr(self,'deadline',float('inf')),time.time()+180)
         for model in models:
             body = json.dumps({'model': model, 'messages': [{'role': 'system', 'content': system}, {'role': 'user', 'content': user}], 'temperature': 0.2, 'max_tokens': self.max_tokens}).encode()
             # Explicit user opt-in to independently authorized accounts.
             allow_rate_failover = os.environ.get('RF_ALLOW_RATE_LIMIT_FAILOVER') == '1'
             key_order = list(range(self.key_index, len(self.keys))) + list(range(0, self.key_index))
             for key_index in key_order:
-                if time.time()>=getattr(self,'deadline',float('inf')):raise TimeoutError('API time budget reached')
+                if time.time()>=call_deadline:raise TimeoutError('API time budget reached')
                 if self.key_cooldowns.get(key_index, 0) > time.time():
                     continue
                 key = self.keys[key_index]
                 req = urllib.request.Request(self.base + '/chat/completions', data=body, headers={'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json'}, method='POST')
                 try:
-                    with urllib.request.urlopen(req, timeout=max(.1,min(getattr(self,'request_timeout',150),getattr(self,'deadline',float('inf'))-time.time()))) as resp:
-                        raw = resp.read()
+                    with urllib.request.urlopen(req, timeout=max(.1,min(getattr(self,'request_timeout',150),call_deadline-time.time()))) as resp:
+                        raw = read_response_body(resp,call_deadline,getattr(self,'request_timeout',150))
                         if not raw.strip():raise ValueError('Empty upstream body; bytes='+str(len(raw)))
                         try:data=json.loads(raw)
                         except json.JSONDecodeError as error:raise ValueError('Invalid upstream JSON; bytes='+str(len(raw))+'; position='+str(error.pos)) from None

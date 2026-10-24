@@ -113,3 +113,11 @@ class TestWhitespaceResponse(unittest.TestCase):
   responses=[Response(b'\n'),Response(b'{"choices":[{"message":{"content":"ok"}}]}')]
   with patch.dict('os.environ',env),patch('reviewforge.urllib.request.urlopen',side_effect=responses):
    api=CompatibleAPI();self.assertEqual(api.chat('s','u'),'ok');self.assertEqual(api.last_key_slot,2)
+class TestResponseDeadline(unittest.TestCase):
+ def test_periodic_bytes_cannot_extend_total_response_deadline(self):
+  from reviewforge import read_response_body
+  from unittest.mock import patch
+  class Response:
+   def read1(self,n):return b' '
+  with patch('reviewforge.time.time',side_effect=[0,2]):
+   with self.assertRaises(TimeoutError):read_response_body(Response(),1,150)
