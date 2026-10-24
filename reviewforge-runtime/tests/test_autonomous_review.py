@@ -102,3 +102,66 @@ class AutonomousTests(unittest.TestCase):
    run=Path(report['report']).parent.parent;state=json.loads((run/'autonomous_state.json').read_text())
    self.assertEqual(state['requests_attempted'],3);self.assertEqual(state['calls'],0)
    self.assertTrue(all(row['visits']==0 for row in state['tasks'].values()))
+ def test_request_timeout_is_provider_failure_not_run_deadline(self):
+  class API:
+   def chat(self,*a,**k):raise TimeoutError('API time budget reached')
+  with tempfile.TemporaryDirectory() as t:
+   with self.assertRaisesRegex(RuntimeError,'API attempts failed: request timeout'):
+    checkpoint_call(API(),{'deadline':time.time()+3600},Path(t)/'state.json','s',{},'writer')
+ def test_no_translation_or_build_for_unchanged_original(self):
+  from unittest.mock import patch
+  class API:
+   def chat(self,*a,**k):raise AssertionError('No API expected')
+  with tempfile.TemporaryDirectory() as t:
+   w=Path(t);self.source(w);run,state=bootstrap(w,9)
+   for task in state['tasks'].values():task.update(status='retry',visits=3)
+   (run/'autonomous_state.json').write_text(json.dumps(state))
+   with patch('reviewforge_v4.generate_chinese_body') as translation,patch('reviewforge_v4.compile_tex') as build:
+    report=run_review(w,api_factory=API)
+   translation.assert_not_called();build.assert_not_called()
+   self.assertEqual(report['accepted_units'],0)
+ def test_planning_extracts_sources_separately_and_caches_progress(self):
+  from autonomous_review import prepare_unit,read,units
+  class API:
+   def __init__(self):self.requests=[]
+   def chat(self,system,user,role='writer'):
+    p=json.loads(user);self.requests.append(p)
+    if 'required_original_keys' in p:
+     assert len(json.dumps(p))<15000
+     return json.dumps({'argument':{'question':'What is supported?','thesis':'Support is bounded.','comparison_axes':['reported_finding'],'study_keys':['A'],'paragraph_plan':[{'role':'comparison','point':'Discuss bounds','study_keys':['A']}],'synthesis_claim':'A bounded inference.','limitations':'Only one source.','open_question':'What transfers?','sparse_evidence_reason':'Single-study fixture','kind':'core'}})
+    assert len(p['sources'])==1
+    return json.dumps({'studies':[{'citekey':'A','fields':{'reported_finding':{'status':'supported','value':'A bounded finding','locator':'p1','excerpt':'A quoted finding'}}}]})
+  with tempfile.TemporaryDirectory() as t:
+   w=Path(t);self.source(w);run,state=bootstrap(w,9);unit=units((run/'review_en.tex').read_text())[0];api=API()
+   prepare_unit(w,run,state,unit,api);self.assertEqual(len(api.requests),2)
+   prepare_unit(w,run,state,unit,api);self.assertEqual(len(api.requests),2)
+ def test_truncated_structured_output_retried_and_never_accepted(self):
+  from autonomous_review import structured_call
+  class API:
+   def __init__(self):self.calls=0;self.max_tokens=1000
+   def chat(self,*a,**k):
+    self.calls+=1;self.last_finish_reason='length' if self.calls==1 else 'stop'
+    return '{"argument":' if self.calls==1 else '{"argument":{"question":"bounded"}}'
+  with tempfile.TemporaryDirectory() as t:
+   api=API();result=structured_call(api,{'deadline':time.time()+3600},Path(t)/'state.json','s',{},'argument')
+   self.assertEqual(result['argument']['question'],'bounded');self.assertEqual(api.calls,2)
+   self.assertGreater(api.max_tokens,1000)
+ def test_malformed_json_does_not_reset_provider_failure_streak(self):
+  from autonomous_review import structured_call
+  class API:
+   max_tokens=1000
+   def chat(self,*a,**k):return '{"studies": invalid}'
+  with tempfile.TemporaryDirectory() as t:
+   state={'deadline':time.time()+3600,'consecutive_provider_failures':2}
+   with self.assertRaisesRegex(RuntimeError,'invalid structured'):
+    structured_call(API(),state,Path(t)/'state.json','s',{},'studies')
+   self.assertEqual(state['consecutive_provider_failures'],2)
+ def test_surplus_closing_brace_is_normalized_without_changing_json_values(self):
+  from autonomous_review import structured_call
+  class API:
+   def chat(self,*a,**k):return '{"studies":[{"citekey":"A","value":"literal } in text"}]}}'
+  with tempfile.TemporaryDirectory() as t:
+   state={'deadline':time.time()+3600};result=structured_call(API(),state,Path(t)/'state.json','s',{},'studies')
+   self.assertEqual(result['studies'][0]['value'],'literal } in text')
+   self.assertEqual(state['requests_attempted'],1)
+   self.assertEqual(state['format_normalization'],'surplus_closing_delimiters')

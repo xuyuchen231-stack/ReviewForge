@@ -1,0 +1,9 @@
+# Incident: stalled autonomous planning and premature delivery
+
+Observed locally on 2026-10-24. The largest prioritized unit requested one argument plan plus a full 19-source comparison matrix in a single approximately117 KB HTTP request. A reproduction returned HTTP success with a one-byte whitespace body, causing transport JSON decoding failure. A separate source extraction returned a complete JSON object with an extra closing brace. A later live extraction returned valid JSON; its five fields passed source quotation checks. Service 503 responses were also observed; their upstream cause was not established.
+
+The deterministic scheduling defect was that a per-call fallback deadline raised TimeoutError and the runner treated it as total-session exhaustion. It assembled zero accepted units and began translating the unchanged original. Earlier HTTP-success responses also reset failure streaks before structured content was validated.
+
+Changes: compact argument planning followed by one-source extraction, content-bound caches, preserved local raw responses and finish metadata, bounded retry for invalid/truncated JSON, narrow normalization of surplus trailing closing delimiters, whitespace/malformed transport diagnostics and account fallback, separation of request timeout from session deadline, and no translation/build when there are zero accepted units. Structured validation failure does not reset the provider-failure streak. Scientific source checks remain mandatory.
+
+Verification: 91 runtime tests and11 quality tests pass. Live compact planning produced17 selected study keys, five axes and six paragraph roles. Live single-source extraction passed schema and quote checks. This does not certify a complete manuscript or guarantee upstream availability. No nine-hour production run was launched after the fix. Local evidence, raw responses, credentials and manuscripts are excluded from Git.

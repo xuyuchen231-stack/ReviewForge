@@ -100,3 +100,16 @@ class TestEmptyDiagnostics(unittest.TestCase):
   with patch.dict('os.environ',env),patch('reviewforge.urllib.request.urlopen',return_value=Response()):
    with self.assertRaisesRegex(RuntimeError,'finish_reason=length') as caught:CompatibleAPI().chat('s','u')
    self.assertNotIn('private reasoning',str(caught.exception))
+class TestWhitespaceResponse(unittest.TestCase):
+ def test_whitespace_body_tries_another_account_and_reports_metadata(self):
+  from unittest.mock import patch
+  from io import BytesIO
+  from reviewforge import CompatibleAPI
+  class Response:
+   def __init__(self,raw):self.raw=raw
+   def __enter__(self):return BytesIO(self.raw)
+   def __exit__(self,*a):pass
+  env={'RF_API_KEYS':'whitespace-1,whitespace-2','RF_BASE_URL':'https://example.invalid','RF_WRITER_MODEL':'model','RF_FALLBACK_MODEL':'model'}
+  responses=[Response(b'\n'),Response(b'{"choices":[{"message":{"content":"ok"}}]}')]
+  with patch.dict('os.environ',env),patch('reviewforge.urllib.request.urlopen',side_effect=responses):
+   api=CompatibleAPI();self.assertEqual(api.chat('s','u'),'ok');self.assertEqual(api.last_key_slot,2)

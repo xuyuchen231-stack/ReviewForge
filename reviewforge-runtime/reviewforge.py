@@ -108,12 +108,16 @@ class CompatibleAPI:
                 req = urllib.request.Request(self.base + '/chat/completions', data=body, headers={'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json'}, method='POST')
                 try:
                     with urllib.request.urlopen(req, timeout=max(.1,min(getattr(self,'request_timeout',150),getattr(self,'deadline',float('inf'))-time.time()))) as resp:
-                        data = json.load(resp)
+                        raw = resp.read()
+                        if not raw.strip():raise ValueError('Empty upstream body; bytes='+str(len(raw)))
+                        try:data=json.loads(raw)
+                        except json.JSONDecodeError as error:raise ValueError('Invalid upstream JSON; bytes='+str(len(raw))+'; position='+str(error.pos)) from None
                     result = data['choices'][0]['message']['content']
                     if not isinstance(result, str) or not result.strip():
                         choice=data['choices'][0];message=choice.get('message',{})
                         raise ValueError('Empty API response; finish_reason='+str(choice.get('finish_reason','unknown'))+'; reasoning_chars='+str(len(message.get('reasoning_content') or message.get('reasoning') or '')))
                     self.key_index = key_index
+                    self.last_finish_reason=data['choices'][0].get('finish_reason')
                     self.last_model=model
                     self.last_key_slot=key_index+1
                     return result
@@ -145,7 +149,7 @@ class CompatibleAPI:
                     failures.append(model + ': HTTP ' + str(exc.code))
                     break
                 except Exception as exc:
-                    detail=('; '+str(exc)) if isinstance(exc,ValueError) and str(exc).startswith('Empty API response;') else ''
+                    detail=('; '+str(exc)) if isinstance(exc,ValueError) and str(exc).startswith(('Empty API response;','Empty upstream body;','Invalid upstream JSON;')) else ''
                     failures.append(model + ': ' + type(exc).__name__+detail)
                     if detail:continue
                     break
