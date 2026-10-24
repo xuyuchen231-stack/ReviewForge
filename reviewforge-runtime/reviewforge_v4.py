@@ -272,7 +272,8 @@ def review_blocks(api,tex,head,body,papers,ws,index,state,state_path):
   if record_path.exists():
    try:
     saved=json.loads(record_path.read_text(encoding='utf-8'))
-    if saved.get('source_sha256')==fingerprint and saved.get('evidence_sha256')==evidence_fingerprint and saved.get('accepted') and gate_block(original,saved.get('candidate',''))[0]:
+    already_applied=hashlib.sha256(saved.get('candidate','').encode('utf-8')).hexdigest()==fingerprint
+    if (saved.get('source_sha256')==fingerprint or already_applied) and saved.get('evidence_sha256')==evidence_fingerprint and saved.get('accepted') and gate_block(original,saved.get('candidate',''))[0]:
      output.append(saved['candidate'])
      state['active_block']=number
      atomic_json(state_path,state)
@@ -282,8 +283,8 @@ def review_blocks(api,tex,head,body,papers,ws,index,state,state_path):
    state['status']='paused_deadline';atomic_json(state_path,state)
    return None
   # Never send a block containing structural environments for destructive rewriting.
-  if re.search(r'\\begin\{(?:figure|table|equation|align|gather|tikzpicture)\*?\}|\\includegraphics',original):
-   atomic_json(record_path,{'source_sha256':fingerprint,'accepted':True,'candidate':original,'mode':'protected_original'})
+  if re.search(r'\\begin\{(?:figure|table|equation|align|gather|tikzpicture)\*?\}|\\includegraphics|\\\[|\$\$',original):
+   atomic_json(record_path,{'source_sha256':fingerprint,'accepted':True,'candidate':original,'mode':'protected_original','evidence_sha256':evidence_fingerprint})
    output.append(original)
    continue
   context=load_context(ws,original,head)
@@ -332,9 +333,22 @@ def review_blocks(api,tex,head,body,papers,ws,index,state,state_path):
    except Exception as e:
     message=type(e).__name__+': '+str(e)[:300]
     last_error=message
+    if 'API attempts failed:' in str(e) or isinstance(e,(ConnectionError,TimeoutError)):
+     atomic_json(record_path,{'source_sha256':fingerprint,'accepted':False,'mode':'api_error','last_error':message,'attempt':attempt})
+     state.update(status='paused_api_error',last_error=message)
+     atomic_json(state_path,state)
+     print(f'Paused section {index+1} block {number}: API unavailable; checkpoint saved. This is not a scientific review rejection.',flush=True)
+     return None
     if '429' in str(e):
      rate_count+=1
      delay=min(1800,60*2**min(rate_count-1,4))
+     retry_after=re.search(r'Retry-After:\s*(\d+)',str(e),re.I)
+     if retry_after:delay=max(delay,int(retry_after.group(1)))
+     if delay>60:
+      state.update(status='paused_rate_limit',last_error=message,retry_not_before_epoch=time.time()+delay)
+      atomic_json(state_path,state)
+      print(f'Provider rate limit: checkpoint saved; retry after {delay} seconds.',flush=True)
+      return None
      if time.time()+delay>=state['deadline']:
       state['status']='paused_rate_limit';state['last_error']=message;atomic_json(state_path,state)
       return None
@@ -540,6 +554,11 @@ def run_v4(ws=WORK,hours=9,resume=False,minimum=60,skip_search=False,skip_transl
   if time.time()>=state.get('deadline',0):
    state['deadline']=time.time()+hours*3600
   atomic_json(state_path,state)
+  if time.time()<state.get('retry_not_before_epoch',0):
+   state['status']='paused_rate_limit';atomic_json(state_path,state)
+   remaining=int(state['retry_not_before_epoch']-time.time())+1
+   print(f'Provider cooldown active: retry after {remaining} seconds. No model call made.',flush=True)
+   return state
  else:
   if state_path.exists():raise GateError('Existing checkpoint: choose --resume or archive it')
   start=time.time(); state={'started':start,'deadline':start+hours*3600,'stage':'literature','section':0,'calls':0,'history':[]}

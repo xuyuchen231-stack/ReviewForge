@@ -9,6 +9,53 @@ import reviewforge_v4 as rf
 
 
 class RepairResumeTests(unittest.TestCase):
+    def test_resume_respects_persisted_provider_cooldown_without_api_setup(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ws=Path(tmp)
+            (ws/'v4_state.json').write_text(json.dumps({'stage':'writing','section':2,'calls':7,'deadline':time.time()+100,'retry_not_before_epoch':time.time()+3600}))
+            with patch.object(rf,'CompatibleAPI',side_effect=AssertionError('API setup during cooldown')):
+                result=rf.run_v4(ws,resume=True)
+            self.assertEqual(result['status'],'paused_rate_limit')
+            self.assertEqual(result['calls'],7)
+
+    def test_accepted_candidate_already_in_manuscript_is_reused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ws=Path(tmp);(ws/'reports').mkdir()
+            state={'deadline':time.time()+60,'calls':0}
+            original='Original detailed methodological explanation. '*8
+            candidate=('Improved detailed methodological explanation. '*8).strip()
+            with patch.object(rf,'write_section',return_value=candidate),patch.object(rf,'review_section',return_value={'accept':True}):
+                self.assertEqual(rf.review_blocks(None,'','Methods',original,[],ws,0,state,ws/'state.json'),candidate)
+            calls=state['calls']
+            with patch.object(rf,'write_section',side_effect=AssertionError('Accepted manuscript block rewritten')) as writer:
+                self.assertEqual(rf.review_blocks(None,'','Methods',candidate,[],ws,0,state,ws/'state.json'),candidate)
+            writer.assert_not_called()
+            self.assertEqual(state['calls'],calls)
+
+    def test_transport_failure_pauses_without_quarantining_scientific_content(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ws=Path(tmp); (ws/'reports').mkdir()
+            state={'deadline':time.time()+60,'calls':0}
+            body='A scientifically meaningful explanation. '*8
+            with patch.object(rf,'write_section',side_effect=RuntimeError('API attempts failed: model: URLError')) as writer:
+                result=rf.review_blocks(None,'','Methods',body,[],ws,0,state,ws/'state.json')
+            self.assertIsNone(result)
+            self.assertEqual(writer.call_count,1)
+            self.assertEqual(state['status'],'paused_api_error')
+            self.assertFalse((ws/'reports/repair_queue.json').exists())
+            record=json.loads((ws/'revisions/section_01_blocks/block_001.json').read_text())
+            self.assertEqual(record['mode'],'api_error')
+
+    def test_display_math_block_preserved_without_model_reformatting(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ws=Path(tmp); (ws/'reports').mkdir()
+            state={'deadline':time.time()+60,'calls':0}
+            body='A physical balance is retained.\n\\[ dX/dt = r(X) \\]\n'
+            with patch.object(rf,'write_section',side_effect=AssertionError('Protected display sent to model')):
+                result=rf.review_blocks(None,'','Methods',body,[],ws,0,state,ws/'state.json')
+            self.assertEqual(result,body)
+            self.assertEqual(state['section_pending_repairs']['items'],[])
+
     def test_missing_source_anchors_pause_before_any_model_request(self):
         with tempfile.TemporaryDirectory() as tmp:
             ws=Path(tmp); (ws/'reports').mkdir()
