@@ -74,6 +74,15 @@ class CompatibleAPI:
         self.key_index = 0
         self.key_cooldowns = {}
         self.base = os.environ.get('RF_BASE_URL','').rstrip('/')
+        self.health_path = Path(os.environ.get('RF_ACCOUNT_HEALTH_FILE',str(Path.home()/'.reviewforge'/'account_health.json')))
+        self.cooldown_seconds = max(60,int(os.environ.get('RF_ACCOUNT_COOLDOWN_SECONDS','36000')))
+        try:
+            health=json.loads(self.health_path.read_text(encoding='utf-8'))
+        except FileNotFoundError:health={}
+        for i,key in enumerate(self.keys):
+            slot=hashlib.sha256((self.base+'\0'+key).encode()).hexdigest()
+            until=health.get(slot,{}).get('retry_after_epoch',0)
+            if until>time.time():self.key_cooldowns[i]=until
         self.model = os.environ.get('RF_WRITER_MODEL',os.environ.get('RF_MODEL','mimo-v2.6-flash:free'))
         self.reviewer_model = os.environ.get('RF_REVIEWER_MODEL','deepseek-v4.1-flash:free')
         self.fallback_model = os.environ.get('RF_FALLBACK_MODEL','deepseek-v4.1-flash:free')
@@ -87,7 +96,7 @@ class CompatibleAPI:
         failures = []
         for model in models:
             body = json.dumps({'model': model, 'messages': [{'role': 'system', 'content': system}, {'role': 'user', 'content': user}], 'temperature': 0.2, 'max_tokens': self.max_tokens}).encode()
-            # Only opt in when the provider explicitly permits independent-account failover.
+            # Explicit user opt-in to independently authorized accounts.
             allow_rate_failover = os.environ.get('RF_ALLOW_RATE_LIMIT_FAILOVER') == '1'
             key_order = list(range(self.key_index, len(self.keys))) + list(range(0, self.key_index))
             for key_index in key_order:
@@ -107,13 +116,19 @@ class CompatibleAPI:
                     if exc.code == 429:
                         retry = exc.headers.get('Retry-After', '')
                         if allow_rate_failover and len(self.keys) > 1:
-                            # Independent accounts only, with explicit provider permission.
-                            # Preserve each account's cooldown and never log key material.
+                            # A 429 is temporary unavailability, not token exhaustion.
                             try:
-                                delay = max(60, int(float(retry)))
+                                delay = max(self.cooldown_seconds, int(float(retry)))
                             except (TypeError, ValueError):
-                                delay = 60
+                                delay = self.cooldown_seconds
                             self.key_cooldowns[key_index] = time.time() + delay
+                            try:
+                                health=json.loads(self.health_path.read_text(encoding='utf-8'))
+                            except FileNotFoundError:health={}
+                            slot=hashlib.sha256((self.base+'\0'+key).encode()).hexdigest()
+                            health[slot]={'status':'temporary_rate_limit','retry_after_epoch':self.key_cooldowns[key_index]}
+                            atomic_json(self.health_path,health)
+                            print('API account slot '+str(key_index+1)+' temporarily rate-limited; trying another available account.',flush=True)
                             failures.append('HTTP 429 (key slot ' + str(key_index + 1) + ')')
                             continue
                         raise RuntimeError('Provider rate limit (429); respect Retry-After: ' + retry) from None
@@ -128,7 +143,8 @@ class CompatibleAPI:
                     failures.append(model + ': ' + type(exc).__name__)
                     break
         if (failures and all('HTTP 429' in f for f in failures)) or (not failures and self.key_cooldowns and all(self.key_cooldowns.get(i,0)>time.time() for i in range(len(self.keys)))):
-            delay = max(60, int(min(self.key_cooldowns.values()) - time.time())) if self.key_cooldowns else 60
+            active_cooldowns=[until for until in self.key_cooldowns.values() if until>time.time()]
+            delay = max(60, int(min(active_cooldowns) - time.time())+1) if active_cooldowns else 60
             raise RuntimeError('Provider rate limit (429); respect Retry-After: ' + str(delay))
         raise RuntimeError('API attempts failed: ' + '; '.join(failures))
 
