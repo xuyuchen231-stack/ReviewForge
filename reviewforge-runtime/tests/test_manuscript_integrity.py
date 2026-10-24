@@ -30,6 +30,12 @@ class IntegrityTests(unittest.TestCase):
             self.assertEqual(result["languages"]["en"]["missing_bibliography_keys"], [])
             self.assertEqual(result["languages"]["en"]["bibliography_mode"], "manual")
 
+    def test_external_bib_does_not_hide_missing_manual_entries(self):
+        with tempfile.TemporaryDirectory() as t:
+            ws=Path(t);(ws/'review_en.tex').write_text(r'\cite{B}\begin{thebibliography}{9}\bibitem{A} Existing\end{thebibliography}')
+            (ws/'references.bib').write_text('@article{B,title={External but not used}}')
+            self.assertEqual(analyze(ws)['languages']['en']['missing_bibliography_keys'],['B'])
+
 
 if __name__ == "__main__":
     unittest.main()

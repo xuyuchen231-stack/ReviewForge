@@ -1,0 +1,11 @@
+# Comprehensive runtime verification — 2026-10-25 (Pacific/Auckland)
+
+The user requested a complete check before another nine-hour launch. This audit used systematic debugging, deterministic fault injection, an independent read-only code review and a bounded live pipeline on a separate frozen manuscript.
+
+Resolved: per-unit study snapshots replace shared evidence-contract churn; plan and study caches validate before reuse; extraction selects immutable source-span IDs and code inserts exact original quotations; local source-record repair preserves progress; malformed reviewer responses retry without consuming scientific revisions; grounded resolved issues do not resurrect; reviewer drafts resume without another writer request; blocked evidence is rechecked on resume; account failures pause with locally assembled partial work; coherence failure is explicit; stale bilingual outputs and metadata are quarantined; English builds before separately budgeted translation; only referenced dependencies are packaged; manual bibliography checks no longer count unused external BibTeX records as inline references.
+
+Verification: 107 runtime tests plus 11 quality-system tests passed. Independent final review found no remaining critical issue in the reviewed changes. Skill validation and Git whitespace checks passed.
+
+Live verification: a real, complete two-citation subsection selected four supplied studies, built evidence records, wrote a complete candidate, recovered from a truncated reviewer response and received model_review_passed. The accepted candidate passed source, contract, citation and TeX structural gates and was assembled into a full manuscript candidate. The assembled English PDF compiled successfully with zero undefined citations. Nine overfull boxes occur in unchanged original display equations outside the modified subsection; they remain a reported layout limitation, not a false readiness pass. No expert approval or submission readiness was asserted.
+
+The validated unit was imported into the active local checkpoint only after source, contract and candidate hashes matched; the original manuscript hash was unchanged. No nine-hour production job was launched by this verification. Private manuscripts, primary sources, raw API responses, credentials and generated PDFs remain excluded from Git.

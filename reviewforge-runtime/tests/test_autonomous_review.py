@@ -68,8 +68,9 @@ class AutonomousTests(unittest.TestCase):
     def chat(self,*a,**k):return json.dumps({'issues':[{'unit_id':key,'id':'contradiction','severity':'major','passage':body[-40:],'reason':'Inconsistent conclusion','required_change':'Reconcile conclusion'}]})
    state['deadline']=time.time()+30;state['work_deadline']=state['deadline'];coherence_review(run,state,GlobalAPI())
    self.assertEqual(assemble(run,state)['accepted_units'],1)
-   matrix=json.loads((run/'study_comparisons.json').read_text());matrix['studies'][0]['fields']['reported_finding']['value']='Changed evidence contract'
-   (run/'study_comparisons.json').write_text(json.dumps(matrix))
+   remaining=next(i for i in report['accepted_ids'] if i!=key);snapshot=run/'unit_studies'/(remaining+'.json')
+   matrix=json.loads(snapshot.read_text());matrix['studies'][0]['fields']['reported_finding']['value']='Changed evidence contract'
+   snapshot.write_text(json.dumps(matrix))
    self.assertEqual(assemble(run,state)['accepted_units'],0)
 
  def test_resume_recovers_interrupted_final_visit(self):
@@ -81,7 +82,7 @@ class AutonomousTests(unittest.TestCase):
    self.assertEqual(resumed['tasks'][key]['visits'],2)
  def test_assembly_keeps_pdf_and_input_assets_without_overwriting_candidate(self):
   with tempfile.TemporaryDirectory() as t:
-   w=Path(t);self.source(w);(w/'figure.pdf').write_bytes(b'figure');(w/'extra.tex').write_text('extra')
+   w=Path(t);self.source(w);p=w/'review_en.tex';p.write_text(p.read_text().replace(r'\end{document}',r'\includegraphics{figure}\input{extra}\end{document}'));(w/'figure.pdf').write_bytes(b'figure');(w/'extra.tex').write_text('extra')
    run,state=bootstrap(w,9);result=assemble(run,state);output=Path(result['english']).parent
    self.assertTrue((output/'figure.pdf').exists());self.assertTrue((output/'extra.tex').exists())
  def test_scoped_contract_ignores_unrelated_units_but_tracks_relevant_evidence(self):
@@ -173,3 +174,58 @@ class AutonomousTests(unittest.TestCase):
   self.assertEqual(result['fields']['long axis two']['excerpt'],'quoted')
   row['comparisons'].append({'axis_index':9,'status':'supported'})
   with self.assertRaises(ValueError):normalize_study(row,['long axis one','long axis two'])
+ def test_cached_invalid_plan_is_rejected_before_use(self):
+  from autonomous_review import validate_argument
+  with self.assertRaises(ValueError):validate_argument({'argument':{'study_keys':[]}}, {'A'}, {'A'})
+ def test_source_validation_checks_cached_fields_and_exact_quotes(self):
+  from autonomous_review import validate_study
+  packet={'citekey':'A','chunks':[{'text':'An exact source quote'}]}
+  bad={'citekey':'A','fields':{'axis':{'status':'supported','value':'claim','locator':'p1','excerpt':'Invented quote'}}}
+  with self.assertRaises(ValueError):validate_study(bad,['axis'],packet)
+  bad['fields']['axis']['excerpt']='exact source quote';validate_study(bad,['axis'],packet)
+
+ def test_assembly_does_not_copy_unrelated_private_project_files(self):
+  with tempfile.TemporaryDirectory() as t:
+   w=Path(t);self.source(w);private=w/'autonomous_diagnostics';private.mkdir();(private/'unrelated.tex').write_text('unrelated manuscript')
+   run,state=bootstrap(w,9);result=assemble(run,state)
+   self.assertFalse((Path(result['english']).parent/'autonomous_diagnostics/unrelated.tex').exists())
+ def test_reviewer_transport_and_format_recovery_reuses_writer_draft(self):
+  from unittest.mock import patch
+  from synthesis_pipeline import CRITERIA
+  for mode in ('format','outage'):
+   class API:
+    def __init__(self):self.writes=0;self.reviews=0
+    def chat(self,system,user,role='writer'):
+     p=json.loads(user)
+     if 'required_original_keys' in p:
+      return json.dumps({'argument':{'question':'What is supported?','thesis':'Bounded evidence.','comparison_axes':['finding'],'study_keys':['A'],'paragraph_plan':[{'role':'comparison','point':'Assess bounds'}],'synthesis_claim':'Bounded inference.','limitations':'One source.','open_question':'What transfers?','sparse_evidence_reason':'Fixture single study','kind':'core'},'studies':[{'citekey':'A','fields':{'finding':{'status':'supported','value':'Bounded','locator':'p1','excerpt':'A quoted finding'}}}]})
+     if role=='writer':self.writes+=1;return p['body']+'\n'+('A bounded comparison of assumptions and observed evidence. '*4)
+     self.reviews+=1
+     if self.reviews==1:
+      if mode=='outage':raise RuntimeError('API attempts failed: simulated reviewer outage')
+      return '{"accept":true,"issues":[],"criteria":[]}'
+     return json.dumps({'accept':True,'issues':[],'criteria':{k:{'status':'pass','explanation':'Grounded mock judgment','passages':[p['candidate'][-40:]]} for k in CRITERIA}})
+   with tempfile.TemporaryDirectory() as t:
+    w=Path(t);self.source(w);api=API()
+    with patch('autonomous_review.heartbeat'),patch('threading.Event.wait',return_value=False):
+     report=run_review(w,hours=.001,reserve_minutes=0,max_visits=1,translate=False,api_factory=lambda:api)
+    self.assertEqual(report['accepted_units'],2);self.assertEqual(api.writes,2)
+ def test_blocked_evidence_is_rechecked_on_resume(self):
+  with tempfile.TemporaryDirectory() as t:
+   w=Path(t);self.source(w);run,state=bootstrap(w,9);key=next(iter(state['tasks']));state['tasks'][key].update(status='blocked_evidence',visits=3)
+   (run/'autonomous_state.json').write_text(json.dumps(state));_,resumed=bootstrap(w,9)
+   self.assertEqual(resumed['tasks'][key]['status'],'retry');self.assertLess(resumed['tasks'][key]['visits'],3)
+ def test_assembly_quarantines_stale_outputs_even_without_delivery(self):
+  with tempfile.TemporaryDirectory() as t:
+   w=Path(t);self.source(w);run,state=bootstrap(w,9);out=run/'output';out.mkdir();(out/'review_zh.tex').write_text('stale translation');(out/'output').mkdir();(out/'output/review_en.pdf').write_bytes(b'stale')
+   assemble(run,state)
+   self.assertFalse((out/'review_zh.tex').exists());self.assertFalse((out/'output/review_en.pdf').exists())
+ def test_source_ids_materialize_exact_immutable_evidence(self):
+  from autonomous_review import indexed_source,materialize_evidence
+  packet={'citekey':'A','chunks':[{'locator':'offset 0','text':'PDF text contains �C unusual punctuation, and this is an exact source sentence.'}]}
+  indexed=indexed_source(packet);identifier=indexed['evidence_spans'][0]['id']
+  row={'citekey':'A','fields':{'axis':{'status':'supported','value':'A bounded interpretation','evidence_ids':[identifier]}}}
+  result=materialize_evidence(row,indexed)
+  self.assertEqual(result['fields']['axis']['excerpt'],packet['chunks'][0]['text'])
+  row['fields']['axis']['evidence_ids']=['invented']
+  with self.assertRaises(ValueError):materialize_evidence(row,indexed)

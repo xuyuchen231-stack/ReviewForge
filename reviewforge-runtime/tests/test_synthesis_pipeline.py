@@ -100,3 +100,32 @@ class SynthesisTests(unittest.TestCase):
    result=revise_unit(w,u['id'],self.passing_chat,max_rounds=1)
    self.assertEqual(result['status'],'needs_revision')
    self.assertIn('previous_major_issues_unresolved',str(result))
+ def test_unit_study_snapshot_is_stable_when_other_unit_updates_catalogue(self):
+  from synthesis_pipeline import matrix_for_unit,contract_digest,unit_evidence,read,units
+  with tempfile.TemporaryDirectory() as t:
+   w=self.workspace(t);u=self.prepared(w);matrix=read(w/'study_comparisons.json');folder=w/'unit_studies';folder.mkdir();(folder/(u['id']+'.json')).write_text(json.dumps(matrix))
+   plan=read(w/'synthesis_plan.json');actual=next(x for x in units((w/'review_en.tex').read_text()) if x['id']==u['id']);before=contract_digest(plan,matrix_for_unit(w,u['id']),unit_evidence(w,actual,u),u['id'])
+   matrix['studies'][0]['fields']['unrelated_axis']={'status':'supported','value':'Other-unit interpretation'};(w/'study_comparisons.json').write_text(json.dumps(matrix))
+   self.assertEqual(before,contract_digest(plan,matrix_for_unit(w,u['id']),unit_evidence(w,actual,u),u['id']))
+   self.assertTrue(audit_contract(w,u['id'])['ready'])
+ def test_reviewer_schema_errors_are_safe_rejections(self):
+  for malformed in [{'accept':True,'issues':[],'criteria':[]},{'accept':True,'issues':[],'criteria':{'question_answered':[]}}]:
+   self.assertFalse(review_verdict(malformed,'Actual prose')[0])
+ def test_grounded_resolutions_do_not_resurrect_on_later_rounds(self):
+  with tempfile.TemporaryDirectory() as t:
+   w=self.workspace(t);u=self.prepared(w);rounds=[0]
+   def chat(s,p,r):
+    if r=='writer':return self.passing_chat(s,p,r)
+    rounds[0]+=1;v=json.loads(self.passing_chat(s,p,r));n=rounds[0];v['accept']=n==3
+    if n<3:v['issues']=[{'id':'A' if n==1 else 'B','severity':'major','locator':p['candidate'][-40:],'reason':'Specific problem','required_evidence_or_change':'Repair this problem'}]
+    if n>1:
+     key='A' if n==2 else 'B';v['resolved_issue_ids']=[key];v['resolutions']=[{'issue_id':key,'explanation':'Resolved in quoted text','passages':[p['candidate'][-40:]]}]
+    return json.dumps(v)
+   self.assertEqual(revise_unit(w,u['id'],chat,max_rounds=1)['status'],'needs_revision')
+   second=revise_unit(w,u['id'],chat,max_rounds=1);self.assertEqual(second['open_major_issues'],['B'])
+   self.assertEqual(revise_unit(w,u['id'],chat,max_rounds=1)['status'],'model_review_passed')
+ def test_review_schema_rejects_malformed_issues_and_resolutions(self):
+  from synthesis_pipeline import review_schema
+  base={'accept':False,'issues':[],'criteria':{k:{'status':'fail','explanation':'Concrete problem','passages':['text']} for k in CRITERIA}}
+  for extra in [{'issues':[None]},{'issues':[{'id':'A','severity':'major'}]},{'resolved_issue_ids':'A'},{'resolutions':[{'issue_id':'A'}]}]:
+   self.assertFalse(review_schema({**base,**extra}))

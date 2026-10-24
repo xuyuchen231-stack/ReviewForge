@@ -49,6 +49,15 @@ application of each criterion using actual bridge passages. Empirical claims sti
 def digest(text):return hashlib.sha256(text.encode('utf-8')).hexdigest()
 def read(path):return json.loads(Path(path).read_text(encoding='utf-8'))
 
+def matrix_for_unit(workspace,unit_id,fallback=None):
+    snapshot=Path(workspace)/'unit_studies'/(unit_id+'.json')
+    matrix=read(snapshot) if snapshot.exists() else (fallback if fallback is not None else read(Path(workspace)/'study_comparisons.json'))
+    matrix=json.loads(json.dumps(matrix))
+    for row in matrix.get('studies',[]):
+        source=(Path(workspace)/row.get('source_text_file','')).resolve()
+        if source.is_relative_to(Path(workspace).resolve()) and source.is_file():row['source_text_sha256']=hashlib.sha256(source.read_bytes()).hexdigest()
+    return matrix
+
 def contract_digest(plan,matrix,evidence,unit_id=None):
     # User approval metadata changes after a sample review; its scientific contract must not.
     scientific_plan={k:v for k,v in plan.items() if k!='calibration'}
@@ -111,6 +120,9 @@ def audit_contract(workspace,unit_id=None):
     if not selected:issues.append('unit_not_found')
     for u in selected:
         prefix=u.get('id','unknown')+':'
+        scoped=matrix_for_unit(ws,u.get('id','unknown'),matrix);scoped_rows=scoped.get('studies',[])
+        bykey={r.get('citekey'):r for r in scoped_rows}
+        if len(bykey)!=len(scoped_rows):issues.append(prefix+'duplicate_study_records')
         actual=found.get(u.get('id'))
         if not actual or actual['source_sha256']!=u.get('source_sha256'):issues.append(prefix+'stale_unit');continue
         if u.get('kind')=='bridge':
@@ -149,6 +161,20 @@ def audit_contract(workspace,unit_id=None):
                             issues.append(prefix+'field_excerpt_not_matched:'+key+':'+axis)
     return {'ready':not issues,'issues':issues,'semantic_verification':False,'note':'Contract and excerpt checks only; no automatic depth/entailment certification.'}
 
+def grounded_resolutions(verdict,candidate):
+    claimed=verdict.get('resolved_issue_ids',[]);resolutions=verdict.get('resolutions',[])
+    if not isinstance(claimed,list) or not isinstance(resolutions,list):return set()
+    proven={r['issue_id'] for r in resolutions if isinstance(r,dict) and isinstance(r.get('issue_id'),str) and r.get('explanation') and isinstance(r.get('passages'),list) and r['passages'] and all(isinstance(q,str) and q.strip() and q in candidate for q in r['passages'])}
+    return proven&{x for x in claimed if isinstance(x,str)}
+
+def review_schema(verdict):
+    if not (isinstance(verdict,dict) and type(verdict.get('accept')) is bool and isinstance(verdict.get('issues'),list) and isinstance(verdict.get('criteria'),dict)):return False
+    if any(not isinstance(i,dict) or i.get('severity') not in ('major','minor') or any(not isinstance(i.get(k),str) or not i[k].strip() for k in ('id','locator','reason','required_evidence_or_change')) for i in verdict['issues']):return False
+    if not all(isinstance(verdict['criteria'].get(k),dict) and verdict['criteria'][k].get('status') in ('pass','fail') and isinstance(verdict['criteria'][k].get('passages'),list) and all(isinstance(q,str) for q in verdict['criteria'][k]['passages']) and isinstance(verdict['criteria'][k].get('explanation'),str) for k in CRITERIA):return False
+    if not isinstance(verdict.get('resolved_issue_ids',[]),list) or any(not isinstance(i,str) for i in verdict.get('resolved_issue_ids',[])):return False
+    resolutions=verdict.get('resolutions',[])
+    return isinstance(resolutions,list) and all(isinstance(r,dict) and isinstance(r.get('issue_id'),str) and isinstance(r.get('explanation'),str) and isinstance(r.get('passages'),list) and all(isinstance(q,str) for q in r['passages']) for r in resolutions)
+
 def review_verdict(verdict,candidate,prior_major=()):
     issues=[]
     if not isinstance(verdict,dict):return False,['invalid_review']
@@ -156,8 +182,11 @@ def review_verdict(verdict,candidate,prior_major=()):
     if not isinstance(verdict.get('issues'),list):issues.append('missing_issue_inventory')
     elif any(not isinstance(i,dict) or i.get('severity') not in ('major','minor') or not all(i.get(f) for f in ('id','locator','reason','required_evidence_or_change')) for i in verdict['issues']):issues.append('invalid_issue')
     elif any(i['severity']=='major' for i in verdict['issues']):issues.append('major_issues_open')
+    criteria=verdict.get('criteria',{})
+    if not isinstance(criteria,dict):return False,issues+['invalid_criteria_schema']
     for key in CRITERIA:
-        item=verdict.get('criteria',{}).get(key,{})
+        item=criteria.get(key,{})
+        if not isinstance(item,dict):issues.append('invalid_criterion:'+key);continue
         quotes=item.get('passages',[])
         if item.get('status')!='pass' or not item.get('explanation') or not isinstance(quotes,list) or not quotes or any(not isinstance(q,str) or not q.strip() or q not in candidate for q in quotes):
             issues.append('depth_criterion_unsubstantiated:'+key)
@@ -165,8 +194,7 @@ def review_verdict(verdict,candidate,prior_major=()):
     resolutions=verdict.get('resolutions',[])
     if not isinstance(claimed,list) or not isinstance(resolutions,list):issues.append('invalid_resolutions')
     else:
-        proven={r.get('issue_id') for r in resolutions if isinstance(r,dict) and r.get('explanation') and isinstance(r.get('passages'),list) and r['passages'] and all(isinstance(q,str) and q.strip() and q in candidate for q in r['passages'])}
-        if set(prior_major)-set(str(x) for x in claimed) or set(prior_major)-proven:issues.append('previous_major_issues_unresolved')
+        if set(prior_major)-grounded_resolutions(verdict,candidate):issues.append('previous_major_issues_unresolved')
     return not issues,issues
 
 def revise_unit(workspace,unit_id,chat,max_rounds=3,require_calibration=True):
@@ -176,7 +204,7 @@ def revise_unit(workspace,unit_id,chat,max_rounds=3,require_calibration=True):
     text=(ws/'review_en.tex').read_text(encoding='utf-8');plan=read(ws/'synthesis_plan.json')
     u=next(u for u in units(text) if u['id']==unit_id);argument=next(x for x in plan['units'] if x['id']==unit_id)
     calibration=plan.get('calibration',{})
-    matrix=read(ws/'study_comparisons.json')
+    matrix=matrix_for_unit(ws,unit_id)
     if require_calibration and unit_id!=plan.get('sample_unit_id'):
         sample_id=str(plan.get('sample_unit_id'))
         sample=ws/'synthesis_candidates'/'accepted'/(sample_id+'.tex')
@@ -186,7 +214,7 @@ def revise_unit(workspace,unit_id,chat,max_rounds=3,require_calibration=True):
         sample_report=read(review)
         sample_unit=next((x for x in units(text) if x['id']==sample_id),None)
         sample_plan=next((x for x in plan['units'] if x['id']==sample_id),None)
-        if not sample_unit or not sample_plan or sample_report.get('candidate_sha256')!=digest(sample.read_text(encoding='utf-8')) or sample_report.get('source_sha256')!=digest(text) or sample_report.get('contract_sha256')!=contract_digest(plan,matrix,unit_evidence(ws,sample_unit,sample_plan),sample_id):
+        if not sample_unit or not sample_plan or sample_report.get('candidate_sha256')!=digest(sample.read_text(encoding='utf-8')) or sample_report.get('source_sha256')!=digest(text) or sample_report.get('contract_sha256')!=contract_digest(plan,matrix_for_unit(ws,sample_id,matrix),unit_evidence(ws,sample_unit,sample_plan),sample_id):
             raise ValueError('Calibrated sample source, plan or evidence changed; review and calibrate again.')
     if len(u['body'])>60000:raise ValueError('Unit exceeds context budget; propose an argument-based split, not silent truncation.')
     keys=set(argument['study_keys'])|citekeys(u['body'])
@@ -206,9 +234,8 @@ def revise_unit(workspace,unit_id,chat,max_rounds=3,require_calibration=True):
             # A fresh invocation is not permission to forget unfinished review.
             history=prior.get('history',[])
             open_major.update(prior.get('open_major_issues',[]))
-            for item in history:
-                open_major.update(i['id'] for i in item.get('review',{}).get('issues',[]) if isinstance(i,dict) and isinstance(i.get('id'),str) and i.get('severity')=='major')
             payload['open_major_issues']=sorted(open_major)
+            payload['active_issue_details']=[i for h in history for i in h.get('review',{}).get('issues',[]) if isinstance(i,dict) and i.get('id') in open_major]
             payload['feedback']={'previous_run':prior.get('run_id'),'previous_review':history[-1] if history else {},'contract_changed':prior.get('contract_sha256')!=contract_digest(plan,matrix,evidence,unit_id)}
             previous_text=folder/(unit_id+'.tex')
             if previous_text.exists():payload['previous_candidate']=previous_text.read_text(encoding='utf-8')
@@ -227,6 +254,7 @@ def revise_unit(workspace,unit_id,chat,max_rounds=3,require_calibration=True):
             accepted,problems=review_verdict(verdict,candidate,open_major)
         else:accepted=False;problems=[reason];verdict={'accept':False,'issues':[{'severity':'major','reason':reason}]}
         history.append({'run_id':run_id,'attempt':attempt,'candidate_sha256':digest(candidate),'accepted':accepted,'problems':problems,'review':verdict})
+        open_major.difference_update(grounded_resolutions(verdict,candidate))
         open_major.update(i['id'] for i in verdict.get('issues',[]) if isinstance(i,dict) and isinstance(i.get('id'),str) and i.get('severity')=='major')
         result={'status':'model_review_passed' if accepted else 'needs_revision','unit_id':unit_id,'run_id':run_id,'source_sha256':digest(text),
                 'unit_source_sha256':u['source_sha256'],'candidate_sha256':digest(candidate),

@@ -17,6 +17,12 @@ Use the supplied scientific scope and existing depth rubric: compare studies on 
 
 Preserve originals. Freeze inputs into a separate run; bind acceptance to exact source, candidate and unit contract hashes. Invalidate candidates after major coherence findings or changed contracts. Resume interrupted requests without losing drafts. Account rate limits trigger temporary cooldown and configured account failover, not permanent exhaustion. Do not claim full-source retrieval, expert verification, or guaranteed journal acceptance. Consult `reviewforge-runtime/README_AUTONOMOUS_ZH.md` for time, resume and delivery limits.
 
+## Runtime repair verification
+
+When repairing an overnight runtime, do not hand the user another rerun command after only a short API ping or isolated extraction. Verify the complete affected route in a separate manuscript snapshot: planning, evidence, whole-unit writing, reviewer judgment, repair/resume and assembly. Run fault-injection tests for malformed/truncated responses, account cooldown, interrupted drafts, cache validity, issue resolution and stale bilingual outputs. Report exactly which live stages passed and any external blocker; never fabricate a passing scientific review to complete a software test.
+
+Evidence extraction should select immutable, located source-span IDs; code copies exact quotations. Per-unit study snapshots prevent unrelated later evidence extraction from changing an already reviewed contract. Missing evidence remains unresolved. Originals and private source material stay local.
+
 ## Workflow
 For substantive review writing or a request to fix shallow/textbook-like coverage,
 use the **critical-synthesis workflow** below before ordinary prose revision.

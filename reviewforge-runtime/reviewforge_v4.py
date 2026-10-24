@@ -21,7 +21,7 @@ DEFAULT_QUERIES=[
  'hybrid modeling bioprocess neural networks dynamic prediction',
 ]
 BRIEF='''Hybrid Modeling of Microbial Fermentation: Dynamic Prediction under Changing Operating Conditions.
-Write a substantial Q1-oriented academic review on microbial bioreactor-scale mechanistic–data-driven hybrids.
+Write a substantial Q1-oriented academic review on microbial bioreactor-scale mechanistic鈥揹ata-driven hybrids.
 Core: changed feed/induction trajectories; biomass, substrate and product balances; kinetics/parameter/rate/residual learning;
 measurement and PAT, extrapolation, uncertainty, independent validation, identifiability, industrial deployment.
 Prefer precise, evidence-calibrated academic prose. Remove defensive/self-justifying statements; discuss scientific limitations objectively.
@@ -416,7 +416,7 @@ def generate_chinese_body(api,tex,papers,workspace,deadline=None):
  except TranslationError as exc:raise GateError(str(exc)) from exc
 
 
-def compile_tex(ws,basename,reuse=False):
+def compile_tex(ws,basename,reuse=False,timeout_seconds=600):
  """Compile without any LLM calls; fail closed on stale outputs or LaTeX errors."""
  ws=Path(ws).resolve()
  output=ws/'output';output.mkdir(parents=True,exist_ok=True)
@@ -455,7 +455,7 @@ def compile_tex(ws,basename,reuse=False):
         '-file-line-error','-outdir=output',tex.name]
   report['command']=args
   try:
-   p=subprocess.run(args,cwd=ws,capture_output=True,text=True,errors='replace',timeout=600)
+   p=subprocess.run(args,cwd=ws,capture_output=True,text=True,errors='replace',timeout=max(1,min(600,int(timeout_seconds))))
    log=(p.stdout or '')+'\n'+(p.stderr or '')
    logpath=output/(basename+'.log')
    final_log=logpath.read_text(encoding='utf-8',errors='replace') if logpath.exists() else log
@@ -475,7 +475,7 @@ def compile_tex(ws,basename,reuse=False):
     report['visual_status']=visual_status(ws,basename,report['rendered'])
     report['delivery_ready']=report['layout_status']=='PASS' and report['visual_status']=='PASS'
   except subprocess.TimeoutExpired:
-   report['reason']='latexmk timed out after 600 seconds'
+   report['reason']='latexmk timed out after '+str(max(1,min(600,int(timeout_seconds))))+' seconds'
   except OSError as e:
    report['reason']=str(e)
  atomic_json(reports/(basename+'_build.json'),report)

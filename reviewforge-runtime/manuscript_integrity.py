@@ -69,7 +69,7 @@ def analyze(workspace):
         used = citekeys(tex)
         inline = bibkeys(tex)
         # The original review may use a manual thebibliography environment.
-        known = bibkeys(bib) | inline
+        known = inline if inline else bibkeys(bib)
         languages[lang] = {
             "exists": source.is_file(),
             "source_sha256": source_digest(source),
