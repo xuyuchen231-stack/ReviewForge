@@ -221,7 +221,8 @@ def checkpoint_call(api,state,path,system,payload,role):
     remaining=budget-time.time()
     if remaining<=2:raise TimeoutError('Run time budget reached before new request')
     original_bytes=len(json.dumps(payload,ensure_ascii=False).encode('utf-8'));payload=compact_evidence_payload(payload)
-    whole_unit=('body' in payload and 'study_comparisons' in payload) or (role=='reviewer' and 'units' in payload) or len(json.dumps(payload,ensure_ascii=False).encode('utf-8'))>30000
+    whole_unit=(('body' in payload or 'candidate' in payload) and 'study_comparisons' in payload) or (role=='reviewer' and 'units' in payload) or len(json.dumps(payload,ensure_ascii=False).encode('utf-8'))>30000
+    if role=='reviewer':api.max_tokens=max(getattr(api,'max_tokens',0),int(os.environ.get('RF_AUTO_REVIEW_OUTPUT_TOKENS','12000')))
     request_budget=600 if whole_unit else 180
     state['request_budget_seconds']=min(request_budget,int(remaining));state['request_payload_bytes']=len(json.dumps(payload,ensure_ascii=False).encode('utf-8'));state['request_original_bytes']=original_bytes
     state['requests_attempted']=state.get('requests_attempted',0)+1;state['last_request_role']=role;state['last_request_started']=time.time();atomic_json(path,state)
@@ -395,23 +396,15 @@ def assemble(run,state):
     from autonomous_delivery import quarantine_stale_outputs
     stale=quarantine_stale_outputs(run)
     english=output/'review_en.tex';english.write_bytes(candidate.encode('utf-8'))
-    known=set(re.findall(r'\\bibitem(?:\[[^]]*\])?\{([^}]+)\}',candidate));missing=citekeys(candidate)-known;added=[]
     literature=read(run/'literature.json') if (run/'literature.json').exists() else []
     catalogue={p.get('key'):p for p in literature if isinstance(p,dict)}
-    if r'\end{thebibliography}' in candidate:
-        def escape(value):return re.sub(r'([&%$#_{}])',lambda m:'\\'+m.group(1),str(value))
-        entries=[]
-        for key in sorted(missing):
-            p=catalogue.get(key,{})
-            if p.get('metadata_status')!='REGISTERED_METADATA' or not all(p.get(f) for f in ('title','year','doi')):continue
-            entries.append('\\bibitem{'+key+'}\n'+escape('; '.join(p.get('authors',[])))+'. '+escape(p['title'])+'. '+escape(p.get('venue',''))+' ('+str(p['year'])+'). DOI: \\url{https://doi.org/'+p['doi']+'}.\n')
-            added.append(key)
-        candidate=candidate.replace(r'\end{thebibliography}','\n'.join(entries)+'\n'+r'\end{thebibliography}',1)
-        english.write_bytes(candidate.encode('utf-8'))
+    from bibliography_delivery import prepare_inline_bibliography
+    candidate,added,unresolved_bibliography=prepare_inline_bibliography(candidate,catalogue)
+    english.write_bytes(candidate.encode('utf-8'))
     from autonomous_delivery import copy_project_assets
     assets=copy_project_assets(Path(state.get('source_workspace',run.parent.parent)),output,candidate)
     report={'stale_outputs_quarantined':stale,'assets':assets,'english':str(english),'accepted_units':len(accepted),'accepted_ids':sorted(accepted),'invalid_cached_candidates':invalid,'bibliography_added':added,
-            'bibliography_unresolved':sorted(missing-set(added)) if r'\end{thebibliography}' in candidate else [],
+            'bibliography_unresolved':unresolved_bibliography,
             'retained_original_units':[u['id'] for u in units(original) if u['id'] not in accepted],
             'submission_ready':False,'expert_verified':False,'author_approved':False,
             'note':'Only model-passing units replaced in a separate full candidate; originals remain unchanged.'}
@@ -440,7 +433,20 @@ comparison tasks and conclusions that do not develop a common contribution. Resp
 never pretend omitted text was read. Return JSON {"issues":[{"unit_id":str,"id":str,
 "severity":"major"|"minor","passage":exact quotation from that unit,"reason":str,
 "required_change":str}]}. Do not reward length or manufacture issues to keep a program busy.'''
-    verdict=structured_call(api,state,run/'autonomous_state.json',prompt,{'scope':scope,'units':packets},'issues',role='reviewer',validator=lambda d:isinstance(d.get('issues'),list))
+    index={p['unit_id']:p['text'] for p in packets}
+    def validate_coherence(verdict):
+        if not isinstance(verdict.get('issues'),list):return False
+        for issue in verdict['issues']:
+            if not isinstance(issue,dict) or issue.get('unit_id') not in index or issue.get('severity') not in ('major','minor') or any(not isinstance(issue.get(k),str) or not issue[k].strip() for k in ('id','passage','reason','required_change')) or issue['passage'] not in index[issue['unit_id']]:
+                raise ValueError('Coherence issue needs a valid unit ID, severity, reason, required change and exact passage from that unit.')
+        return True
+    for transport_attempt in range(2):
+        try:
+            verdict=structured_call(api,state,run/'autonomous_state.json',prompt,{'scope':scope,'units':packets},'issues',role='reviewer',validator=validate_coherence)
+            break
+        except RuntimeError as exc:
+            if transport_attempt or not str(exc).startswith('API attempts failed:') or state.get('work_deadline',state['deadline'])-time.time()<=30:raise
+            print('Coherence service failure; retrying once with the saved units and remaining budget.',flush=True)
     state.pop('coherence_error',None);issues=verdict.get('issues')
     if not isinstance(issues,list):raise ValueError('Invalid coherence review')
     index={p['unit_id']:p['text'] for p in packets};requeued=[]

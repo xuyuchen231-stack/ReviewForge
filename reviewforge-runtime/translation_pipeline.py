@@ -20,6 +20,10 @@ OPAQUE = re.compile(
     r'tikzpicture|verbatim\*?|lstlisting|thebibliography)\}.*?\\end\{\1\}'
     r'|\\\[.*?\\\]|\\\(.*?\\\)|(?<!\\)\$\$.*?(?<!\\)\$\$|(?<!\\)\$.*?(?<!\\)\$', re.S)
 COMMAND = re.compile(r'\\([A-Za-z]+\*?|.)', re.S)
+# Scientific organism names are identifiers, including when italicized. Keep
+# this explicit rather than treating every capitalized/italic English word as one.
+_SCIENTIFIC_NAMES=('Pichia pastoris','P. pastoris','Komagataella phaffii','K. phaffii','Escherichia coli','E. coli','Saccharomyces cerevisiae','S. cerevisiae','Bacillus subtilis','B. subtilis','Corynebacterium glutamicum','C. glutamicum','Aspergillus niger','A. niger','Yarrowia lipolytica','Y. lipolytica','Pseudomonas putida','P. putida','Pichia','Komagataella','Escherichia','Saccharomyces','Bacillus','Corynebacterium','Aspergillus','Yarrowia','Pseudomonas','Enterobacter')
+SCIENTIFIC_NAMES = re.compile(r'(?<![A-Za-z])(?:'+'|'.join(r'(?:\s+|\\\s+|~)'.join(re.escape(word) for word in name.split()) for name in _SCIENTIFIC_NAMES)+r')(?![A-Za-z])')
 OPAQUE_ARGS = {'cite', 'citep', 'citet', 'parencite', 'textcite', 'autocite',
                'footcite', 'nocite', 'ref', 'eqref', 'autoref', 'cref', 'Cref',
                'label', 'includegraphics', 'bibliography', 'bibliographystyle',
@@ -100,6 +104,9 @@ def mask_tex(text):
             elif text[i] == '}': depth -= 1
             if depth < 0: raise TranslationError('Unmatched closing TeX brace')
             out.append(protect(text[i])); i += 1; continue
+        scientific_name=SCIENTIFIC_NAMES.match(text,i)
+        if scientific_name:
+            out.append(protect(scientific_name.group()));i=scientific_name.end();continue
         number = re.match(r'\d+(?:[.,]\d+)*', text[i:])
         if number:
             out.append(protect(number.group())); i += len(number.group()); continue

@@ -53,6 +53,39 @@ class TestLiveLoopMock(unittest.TestCase):
             self.assertTrue((p/'reports/iteration_0001.json').exists())
 
 class TestModelRouting(unittest.TestCase):
+    def test_timeout_changes_account_for_the_next_model_without_marking_exhaustion(self):
+        from unittest.mock import patch
+        from io import BytesIO
+        from reviewforge import CompatibleAPI
+        seen=[]
+        class Response:
+            def __enter__(self):return BytesIO(b'{"choices":[{"message":{"content":"ok"}}]}')
+            def __exit__(self,*args):return False
+        def opener(req,timeout):
+            model=json.loads(req.data)['model'];seen.append((model,req.get_header('Authorization')))
+            if model=='writer':raise TimeoutError('simulated network timeout')
+            return Response()
+        env={'RF_API_KEYS':'timeout-key-a,timeout-key-b','RF_BASE_URL':'https://timeout.invalid','RF_WRITER_MODEL':'writer','RF_FALLBACK_MODEL':'fallback'}
+        with patch.dict('os.environ',env),patch('reviewforge.urllib.request.urlopen',side_effect=opener):
+            api=CompatibleAPI();self.assertEqual(api.chat('s','u'),'ok');self.assertEqual(api.key_cooldowns,{})
+        self.assertEqual(seen,[('writer','Bearer timeout-key-a'),('fallback','Bearer timeout-key-b')])
+    def test_incomplete_http_response_changes_account_without_cooling_it(self):
+        import http.client
+        from unittest.mock import patch
+        from io import BytesIO
+        from reviewforge import CompatibleAPI
+        seen=[]
+        class Response:
+            def __enter__(self):return BytesIO(b'{"choices":[{"message":{"content":"ok"}}]}')
+            def __exit__(self,*args):return False
+        def opener(req,timeout):
+            seen.append(req.get_header('Authorization'))
+            if len(seen)==1:raise http.client.IncompleteRead(b'partial')
+            return Response()
+        env={'RF_API_KEYS':'incomplete-a,incomplete-b','RF_BASE_URL':'https://incomplete.invalid','RF_WRITER_MODEL':'writer','RF_FALLBACK_MODEL':'fallback'}
+        with patch.dict('os.environ',env),patch('reviewforge.urllib.request.urlopen',side_effect=opener):
+            api=CompatibleAPI();self.assertEqual(api.chat('s','u'),'ok');self.assertEqual(api.key_cooldowns,{})
+        self.assertEqual(seen,['Bearer incomplete-a','Bearer incomplete-b'])
     def test_reasoning_only_length_response_switches_model_without_burning_accounts(self):
         from unittest.mock import patch
         from io import BytesIO

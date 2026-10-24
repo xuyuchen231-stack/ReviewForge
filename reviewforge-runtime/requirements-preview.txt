@@ -1,0 +1,2 @@
+# Optional: PDF preview rendering and its regression test.
+PyMuPDF==1.27.2.2

@@ -2,6 +2,7 @@
 from __future__ import annotations
 import datetime as dt
 import hashlib
+import http.client
 import json
 import os
 from pathlib import Path
@@ -165,6 +166,10 @@ class CompatibleAPI:
                     failures.append(model + ': HTTP ' + str(exc.code))
                     break
                 except Exception as exc:
+                    network_error=isinstance(exc,(TimeoutError,ConnectionError,urllib.error.URLError,http.client.HTTPException))
+                    if network_error and len(self.keys)>1:
+                        self.key_index=(key_index+1)%len(self.keys)
+                        print('API network failure on account slot '+str(key_index+1)+'; next route uses another account.',flush=True)
                     detail=('; '+str(exc)) if isinstance(exc,ValueError) and str(exc).startswith(('Empty API response;','Empty upstream body;','Invalid upstream JSON;')) else ''
                     failures.append(model + ': ' + type(exc).__name__+detail)
                     # An exhausted model output budget is not an account outage.

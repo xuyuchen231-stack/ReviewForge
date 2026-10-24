@@ -1,5 +1,6 @@
 """Local delivery with independent build/translation budgets and no stale bilingual output."""
 import hashlib
+import re
 from pathlib import Path
 import time
 import uuid
@@ -25,6 +26,23 @@ def deliver_outputs(run,state,report,chat,translate=True):
     remaining=state['deadline']-time.time()
     if remaining>30:
         report['review_en_build']=compile_tex(out,'review_en',timeout_seconds=max(1,min(600,int(remaining-15))))
+        build=report['review_en_build'];layout=build.get('layout',{})
+        source=(out/'review_en.tex').read_text(encoding='utf-8')
+        eligible=(build.get('status')=='PASS' and layout.get('overflows') and not layout.get('unresolved') and not layout.get('missing_glyphs') and re.search(r'\\documentclass\s*\[[^]]*\btwocolumn\b[^]]*\]',source) and r'\begin{document}' in source)
+        if eligible and state['deadline']-time.time()>30:
+            # Adapt the exported document only; keep every formula/citation byte intact.
+            original=run/'reports/layout_original_english.tex';original.parent.mkdir(exist_ok=True);original.write_bytes(source.encode('utf-8'))
+            exported=source.replace(r'\begin{document}',r'\begin{document}'+'\n\\onecolumn\n',1)
+            (out/'review_en.tex').write_bytes(exported.encode('utf-8'))
+            report['review_en_build']=compile_tex(out,'review_en',timeout_seconds=max(1,min(600,int(state['deadline']-time.time()-15))))
+            layout=report['review_en_build'].get('layout',{});adjustments=['single_column']
+            tiny_vboxes=layout.get('overflows',[])
+            if report['review_en_build'].get('status')=='PASS' and tiny_vboxes and not layout.get('unresolved') and not layout.get('missing_glyphs') and all(re.search(r'Overfull \\vbox \((\d+(?:\.\d+)?)pt',warning) and float(re.search(r'Overfull \\vbox \((\d+(?:\.\d+)?)pt',warning).group(1))<=3 for warning in tiny_vboxes) and state['deadline']-time.time()>30:
+                exported=exported.replace(r'\begin{document}',r'\addtolength{\textheight}{3pt}'+'\n'+r'\begin{document}',1)
+                (out/'review_en.tex').write_bytes(exported.encode('utf-8'));adjustments.append('text_height_plus_3pt')
+                report['review_en_build']=compile_tex(out,'review_en',timeout_seconds=max(1,min(600,int(state['deadline']-time.time()-15))))
+            report['layout_adaptation']={'adjustments':adjustments,'original_sha256':hashlib.sha256(source.encode()).hexdigest(),'export_sha256':hashlib.sha256(exported.encode()).hexdigest(),'original_export':str(original.relative_to(run)),'reason':'Preserve readable original mathematics without column overflow; original manuscript unchanged.'}
+            atomic_json(run/'reports/layout_adaptation.json',report['layout_adaptation'])
     report['translation']='not_run_time_budget_or_disabled'
     if not translate or state['deadline']-time.time()<=120:return report
     remaining=state['deadline']-time.time();build_reserve=min(600,max(30,remaining*.25))
@@ -34,7 +52,7 @@ def deliver_outputs(run,state,report,chat,translate=True):
         def chat(self,system,user,role='writer'):return chat(system,{'translation_request':user},role)
     english=(out/'review_en.tex').read_text(encoding='utf-8')
     try:
-        chinese=generate_chinese_body(API(),english,[],out,deadline=translation_deadline)
+        chinese=generate_chinese_body(API(),english,[],out,deadline=translation_deadline,context_workspace=run)
         (out/'review_zh.tex').write_bytes(chinese.encode('utf-8'))
         report['translation']='generated'
         atomic_json(out/'translation_provenance.json',{'english_sha256':hashlib.sha256(english.encode()).hexdigest(),'chinese_sha256':hashlib.sha256(chinese.encode()).hexdigest(),'expert_verified':False})

@@ -267,7 +267,10 @@ def revise_unit(workspace,unit_id,chat,max_rounds=3,require_calibration=True):
         unknown=citekeys(candidate)-keys
         if unknown:structural=False;reason='Citations outside supplied evidence: '+','.join(sorted(unknown))
         if structural:
-            verdict=extract_json(chat(REVIEWER,{**payload,'candidate':candidate},'reviewer'))
+            # Old drafts are writer repair context, not alternative review targets.
+            review_payload={k:v for k,v in payload.items() if k not in ('body','previous_candidate')}
+            review_payload.update(candidate=candidate,review_target='Assess only candidate. Other supplied records are evidence and prior review findings, not draft text.')
+            verdict=extract_json(chat(REVIEWER,review_payload,'reviewer'))
             accepted,problems=review_verdict(verdict,candidate,open_major)
         else:accepted=False;problems=[reason];verdict={'accept':False,'issues':[{'severity':'major','reason':reason}]}
         history.append({'run_id':run_id,'attempt':attempt,'candidate_sha256':digest(candidate),'accepted':accepted,'problems':problems,'review':verdict})

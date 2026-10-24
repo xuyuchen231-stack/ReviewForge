@@ -31,7 +31,7 @@ def build_is_current(ws, basename, report):
 
 def layout_diagnostics(log):
     overflows = re.findall(r'Overfull \\[hv]box[^\n]*', log)
-    unresolved = re.findall(r'(?:Citation|Reference)[^\n]*undefined[^\n]*|There were undefined (?:references|citations)', log, re.I)
+    unresolved = re.findall(r'(?:Citation|Reference)[^\n]*undefined[^\n]*|(?:Author|Year) undefined for citation[^\n]*|There were undefined (?:references|citations)', log, re.I)
     missing_glyphs = re.findall(r'Missing character:[^\n]*', log)
     return {'status': 'FAILED' if overflows or unresolved or missing_glyphs else 'PASS',
             'overflows': sorted(set(overflows)), 'unresolved': sorted(set(unresolved)),

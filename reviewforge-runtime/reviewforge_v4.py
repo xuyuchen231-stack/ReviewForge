@@ -8,7 +8,7 @@ from reviewforge import CompatibleAPI, load_env, atomic_json
 from research_quality import evaluate as evaluate_quality, scaffold as scaffold_quality
 from evidence_context import load_context, context_digest, candidate_evidence_gate
 from delivery_checks import layout_diagnostics, render_preview, visual_status, delivery_audit, input_digests, build_is_current
-from manuscript_integrity import analyze as analyze_manuscript, write_report as write_integrity, bibkeys as parse_bibkeys
+from manuscript_integrity import analyze as analyze_manuscript, write_report as write_integrity, bibkeys as parse_bibkeys, citekeys as parse_citekeys, tex_integrity
 
 ROOT=Path(__file__).resolve().parent
 WORK=ROOT/'workspace'
@@ -164,7 +164,11 @@ def protect_tex(before,after):
   pattern=r'\\begin\{'+re.escape(env)+r'\}.*?\\end\{'+re.escape(env)+r'\}'
   if re.findall(pattern,before,re.S)!=re.findall(pattern,after,re.S):
    return False,'Protected scientific/graphical environment changed: '+env
- if after.count(r'\\begin{')!=after.count(r'\\end{'):return False,'Unbalanced environments'
+ # Local fragments may inherit an open environment; reject newly introduced errors.
+ from collections import Counter
+ def environment_errors(text):
+  return Counter((e['kind'],e.get('environment')) for e in tex_integrity(text) if e['kind'] in ('unclosed_environment','environment_mismatch'))
+ if environment_errors(after)-environment_errors(before):return False,'Unbalanced or mismatched environments'
  if after.count('$')%2:return False,'Odd number of inline math delimiters'
  if '\\documentclass' in after or '\\begin{document}' in after:return False,'Section edit attempted document reset'
  return True,''
@@ -172,9 +176,7 @@ def protect_tex(before,after):
 def citations_used(tex):return set(re.findall(r'\\cite\w*(?:\[[^]]*\])*\{([^{}]+)\}',tex))
 
 def cite_keys(tex):
- out=set()
- for group in citations_used(tex):out.update(z.strip() for z in group.split(','))
- return out
+ return parse_citekeys(tex)
 
 def client_chat(api,system,payload,role='writer'):
  return api.chat(system,json.dumps(payload,ensure_ascii=False),role=role)
@@ -399,12 +401,13 @@ def review_section(api,head,old,new,workspace=None):
  try:return json.loads(raw.removeprefix('```json').removesuffix('```').strip())
  except ValueError:return {'accept':False,'issues':['Non-JSON review response'],'reason':'Parse failed'}
 
-def generate_chinese_body(api,tex,papers,workspace,deadline=None):
+def generate_chinese_body(api,tex,papers,workspace,deadline=None,context_workspace=None):
  from translation_pipeline import translate_document, TranslationError
  ws=Path(workspace)
- glossary=ws/'translation_glossary.json'
+ context_ws=Path(context_workspace) if context_workspace is not None else ws
+ glossary=context_ws/'translation_glossary.json'
  terms=json.loads(glossary.read_text(encoding='utf-8')) if glossary.exists() else {}
- context=json.dumps({'brief':topic_brief(ws),'glossary':terms,'version':1},ensure_ascii=False)
+ context=json.dumps({'brief':topic_brief(context_ws),'glossary':terms,'version':1},ensure_ascii=False)
  def ask(text,feedback):
   return client_chat(api,
    'Translate every natural-language span into formal Chinese, including titles, headings, captions and table text. '

@@ -3,6 +3,35 @@ from pathlib import Path
 from autonomous_review import RunLock, bootstrap, choose_task, assemble, source_packet, checkpoint_call, run_review
 
 class AutonomousTests(unittest.TestCase):
+ def test_coherence_transport_failure_has_a_bounded_recovery_attempt(self):
+  from autonomous_review import coherence_review
+  class API:
+   calls=0;max_tokens=1000
+   def chat(self,*args,**kwargs):
+    self.calls+=1
+    if self.calls==1:raise RuntimeError('API attempts failed: simulated IncompleteRead')
+    return json.dumps({'issues':[]})
+  with tempfile.TemporaryDirectory() as t:
+   ws=Path(t);self.source(ws);run,state=bootstrap(ws,9);state['work_deadline']=state['deadline'];state['coherence_rounds']=1;api=API()
+   self.assertEqual(coherence_review(run,state,api),[]);self.assertEqual(api.calls,2)
+ def test_coherence_quote_error_retries_review_without_discarding_progress(self):
+  from autonomous_review import coherence_review
+  class API:
+   calls=0;max_tokens=1000
+   def chat(self,*args,**kwargs):
+    self.calls+=1
+    return json.dumps({'issues':[{'unit_id':'unit_001','id':'I1','severity':'major','passage':'Invented passage','reason':'A concern','required_change':'Fix it'}] if self.calls==1 else []})
+  with tempfile.TemporaryDirectory() as t:
+   ws=Path(t);self.source(ws);run,state=bootstrap(ws,9);state['work_deadline']=state['deadline'];state['coherence_rounds']=1;api=API()
+   self.assertEqual(coherence_review(run,state,api),[]);self.assertEqual(api.calls,2)
+ def test_small_whole_unit_review_has_review_output_and_time_budgets(self):
+  class API:
+   max_tokens=1000
+   def chat(self,*args,**kwargs):return 'ok'
+  with tempfile.TemporaryDirectory() as t:
+   api=API();state={'deadline':time.time()+1200}
+   checkpoint_call(api,state,Path(t)/'state.json','review',{'candidate':'Current draft','study_comparisons':[]},'reviewer')
+   self.assertEqual(api.call_timeout,600);self.assertGreaterEqual(api.max_tokens,12000)
  def source(self,w):
   text='\\begin{document}\n\\section{Methods}\n\\subsection{One}\nOriginal scientifically useful discussion. '*1+'\\cite{A}\n\\subsection{Two}\nSecond discussion. \\cite{A}\n\\end{document}'
   (w/'review_en.tex').write_text(text)
@@ -41,7 +70,7 @@ class AutonomousTests(unittest.TestCase):
    p=w/'review_en.tex';p.write_text(p.read_text().replace(r'\end{document}',r'\begin{thebibliography}{99}\end{thebibliography}\end{document}'))
    (w/'literature.json').write_text(json.dumps([{'key':'A','title':'An actual registered title','authors':['Author'],'year':2020,'doi':'10.example/a','metadata_status':'REGISTERED_METADATA'}]))
    run,state=bootstrap(w,9);r=assemble(run,state)
-   self.assertIn(r'\bibitem{A}',Path(r['english']).read_text());self.assertEqual(r['bibliography_added'],['A'])
+   self.assertIn(r'\bibitem[Author(2020)]{A}',Path(r['english']).read_text());self.assertEqual(r['bibliography_added'],['A'])
  def test_expired_budget_makes_no_model_call(self):
   class API:
    def chat(self,*a,**k):raise AssertionError('API called after budget')
