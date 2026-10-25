@@ -3,6 +3,19 @@ from pathlib import Path
 from autonomous_review import RunLock, bootstrap, choose_task, assemble, source_packet, checkpoint_call, run_review
 
 class AutonomousTests(unittest.TestCase):
+ def test_coherence_route_is_reset_before_local_scientific_review(self):
+  class API:
+   model='writer';max_tokens=1000
+   def chat(self,*args,**kwargs):return 'ok'
+  with tempfile.TemporaryDirectory() as t:
+   api=API();state={'deadline':time.time()+1200};path=Path(t)/'state.json'
+   checkpoint_call(api,state,path,'s',{'units':[]},'reviewer');self.assertEqual(api.request_model,'writer');self.assertEqual(api.reasoning_effort,'low')
+   checkpoint_call(api,state,path,'s',{'candidate':'draft','study_comparisons':[]},'reviewer');self.assertIsNone(api.request_model);self.assertIsNone(api.reasoning_effort)
+ def test_resume_with_unfinished_units_reopens_coherence_budget(self):
+  with tempfile.TemporaryDirectory() as t:
+   ws=Path(t);self.source(ws);run,state=bootstrap(ws,9);state['coherence_rounds']=2
+   (run/'autonomous_state.json').write_text(json.dumps(state),encoding='utf-8')
+   _,resumed=bootstrap(ws,9);self.assertEqual(resumed['coherence_rounds'],0)
  def test_coherence_uses_the_same_validated_candidates_as_assembly(self):
   from autonomous_review import coherence_review
   from synthesis_pipeline import units

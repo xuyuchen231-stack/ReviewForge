@@ -144,7 +144,7 @@ def bootstrap(workspace,hours,new_run=False):
             history=run/'evidence_history';history.mkdir(exist_ok=True)
             shutil.copyfile(run/'evidence_ledger.json',history/(uuid.uuid4().hex+'.json'));shutil.copyfile(incoming_ledger,run/'evidence_ledger.json')
         state['consecutive_provider_failures']=0
-        if state.get('coherence_error'):state['coherence_rounds']=0
+        if state.get('coherence_error') or any(t.get('status') in ('pending','retry','blocked_evidence') for t in state['tasks'].values()):state['coherence_rounds']=0
         state['status']='resuming';atomic_json(run/'autonomous_state.json',state)
         return run,state
     run=ws/'autonomous_runs'/('run_'+datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')+'_'+uuid.uuid4().hex[:6]);run.mkdir(parents=True)
@@ -223,6 +223,8 @@ def checkpoint_call(api,state,path,system,payload,role):
     original_bytes=len(json.dumps(payload,ensure_ascii=False).encode('utf-8'));payload=compact_evidence_payload(payload)
     whole_unit=(('body' in payload or 'candidate' in payload) and 'study_comparisons' in payload) or (role=='reviewer' and 'units' in payload) or len(json.dumps(payload,ensure_ascii=False).encode('utf-8'))>30000
     if role=='reviewer':api.max_tokens=max(getattr(api,'max_tokens',0),int(os.environ.get('RF_AUTO_REVIEW_OUTPUT_TOKENS','12000')))
+    api.reasoning_effort=os.environ.get('RF_COHERENCE_REASONING_EFFORT','low') if role=='reviewer' and 'units' in payload else None
+    api.request_model=(os.environ.get('RF_COHERENCE_MODEL') or getattr(api,'model',None)) if role=='reviewer' and 'units' in payload else None
     request_budget=600 if whole_unit else 180
     state['request_budget_seconds']=min(request_budget,int(remaining));state['request_payload_bytes']=len(json.dumps(payload,ensure_ascii=False).encode('utf-8'));state['request_original_bytes']=original_bytes
     state['requests_attempted']=state.get('requests_attempted',0)+1;state['last_request_role']=role;state['last_request_started']=time.time();atomic_json(path,state)
@@ -431,6 +433,51 @@ def heartbeat(stop,state,run):
         print(f'[heartbeat] phase={state.get("phase")} unit={state.get("active_unit","-")} completed={done}/{len(state["tasks"])} calls={state.get("calls",0)} attempts={state.get("requests_attempted",0)} source={state.get("active_source","-")} request_elapsed={max(0,int(time.time()-state.get("last_request_started",time.time())))}s request_budget={state.get("request_budget_seconds",0)}s remaining={max(0,int(state["deadline"]-time.time()))}s',flush=True)
         atomic_json(run/'heartbeat.json',{'utc':datetime.datetime.now(datetime.timezone.utc).isoformat(),'phase':state.get('phase'),'unit':state.get('active_unit'),'completed':done,'calls':state.get('calls',0)})
 
+def coherence_batches(packets,max_chars=32000):
+    """Cover every unit and neighboring boundary, then compare bounded global excerpts."""
+    pieces=[];window=max_chars//2;overlap=min(300,window//4)
+    for packet in packets:
+        body=packet['text']
+        for start in range(0,max(1,len(body)),window-overlap):
+            end=min(len(body),start+window)
+            pieces.append({**packet,'text':body[start:end],'window_start':start,'window_end':end,'unit_length':len(body)})
+            if end==len(body):break
+    batches=[];current=[]
+    for piece in pieces:
+        if current and sum(len(p['text']) for p in current)+len(piece['text'])>max_chars:
+            batches.append({'scope':'complete_unit_windows','units':current});current=[current[-1]]
+        current.append(piece)
+    if current:batches.append({'scope':'complete_unit_windows','units':current})
+    if len(batches)>1:
+        overview=[{**p,'text':p['text'] if len(p['text'])<=320 else p['text'][:160]+'\n[...unseen middle omitted...]\n'+p['text'][-160:]} for p in packets]
+        # Large collections still have a bounded overview; neighboring overview
+        # groups overlap and the report never claims that unseen middles were read.
+        current=[]
+        for packet in overview:
+            if current and sum(len(p['text']) for p in current)+len(packet['text'])>max_chars:
+                batches.append({'scope':'opening_and_conclusion_excerpts','units':current});current=[current[-1]]
+            current.append(packet)
+        if current:batches.append({'scope':'opening_and_conclusion_excerpts','units':current})
+    return batches
+
+def apply_coherence_findings(run,state,issues,requeued,prefix):
+    grouped={}
+    for issue in issues:
+        key=issue['unit_id']
+        if issue['severity']=='major' and (state['tasks'][key]['status']=='completed' or key in requeued):grouped.setdefault(key,[]).append(issue)
+    for key,findings in grouped.items():
+        report=run/'synthesis_candidates'/(key+'.json');record=read(run/'synthesis_candidates/accepted'/(key+'.json'));new=[]
+        for issue in findings:
+            identifier='global:'+prefix+':'+issue['id']
+            if identifier in record.get('open_major_issues',[]):continue
+            record.setdefault('open_major_issues',[]).append(identifier)
+            new.append({'id':identifier,'severity':'major','locator':issue['passage'],'reason':issue['reason'],'required_evidence_or_change':issue['required_change']})
+        if not new:continue
+        record['status']='needs_revision';record.setdefault('history',[]).append({'review':{'accept':False,'issues':new},'stage':'coherence'})
+        atomic_json(report,record);atomic_json(run/'synthesis_candidates/accepted'/(key+'.json'),record)
+        state['tasks'][key]['status']='retry'
+        if key not in requeued:requeued.append(key)
+
 def coherence_review(run,state,api):
     """Review cross-unit consistency; actionable findings re-enter the same queue."""
     base=(run/'review_en.tex').read_text(encoding='utf-8');packets=[]
@@ -438,46 +485,49 @@ def coherence_review(run,state,api):
         body=current_accepted_candidate(run,unit,base)
         if body is None:body=unit['body']
         packets.append({'unit_id':unit['id'],'heading':unit['heading'],'text':body})
-    scope='complete_units'
-    if sum(len(p['text']) for p in packets)>130000:
-        scope='selected_opening_and_conclusion_excerpts'
-        for p in packets:p['text']=p['text'][:1100]+'\n[...unseen middle omitted...]\n'+p['text'][-1100:]
+    batches=coherence_batches(packets)
     prompt='''Review cross-subsection coherence of this scientific review. Source entailment was
 assessed locally and is not certified here. Inspect contradictions, repeated definitions, incompatible
 comparison tasks and conclusions that do not develop a common contribution. Respect the supplied scope;
 never pretend omitted text was read. Return JSON {"issues":[{"unit_id":str,"id":str,
 "severity":"major"|"minor","passage":exact quotation from that unit,"reason":str,
 "required_change":str}]}. Do not reward length or manufacture issues to keep a program busy.'''
-    index={p['unit_id']:p['text'] for p in packets}
-    def validate_coherence(verdict):
-        if not isinstance(verdict.get('issues'),list):return False
-        for issue in verdict['issues']:
-            if not isinstance(issue,dict) or issue.get('unit_id') not in index or issue.get('severity') not in ('major','minor') or any(not isinstance(issue.get(k),str) or not issue[k].strip() for k in ('id','passage','reason','required_change')) or issue['passage'] not in index[issue['unit_id']]:
-                raise ValueError('Coherence issue needs a valid unit ID, severity, reason, required change and exact passage from that unit.')
-        return True
-    for transport_attempt in range(2):
-        try:
-            verdict=structured_call(api,state,run/'autonomous_state.json',prompt,{'scope':scope,'units':packets},'issues',role='reviewer',validator=validate_coherence)
-            break
-        except RuntimeError as exc:
-            if transport_attempt or not str(exc).startswith('API attempts failed:') or state.get('work_deadline',state['deadline'])-time.time()<=30:raise
-            print('Coherence service failure; retrying once with the saved units and remaining budget.',flush=True)
-    state.pop('coherence_error',None);issues=verdict.get('issues')
-    if not isinstance(issues,list):raise ValueError('Invalid coherence review')
-    index={p['unit_id']:p['text'] for p in packets};requeued=[]
-    for issue in issues:
-        key=issue.get('unit_id');quote=issue.get('passage')
-        if key not in index or not isinstance(quote,str) or not quote.strip() or quote not in index[key] or not issue.get('id') or not issue.get('required_change'):raise ValueError('Unanchored coherence issue')
-        if issue.get('severity')!='major' or state['tasks'][key]['status']!='completed':continue
-        report=run/'synthesis_candidates'/(key+'.json');record=read(report)
-        finding={'id':'global:'+issue['id'],'severity':'major','locator':quote,'reason':issue['reason'],'required_evidence_or_change':issue['required_change']}
-        record['status']='needs_revision';record.setdefault('open_major_issues',[]).append(finding['id'])
-        record.setdefault('history',[]).append({'review':{'accept':False,'issues':[finding]},'stage':'coherence'})
-        atomic_json(report,record)
-        accepted_report=run/'synthesis_candidates/accepted'/(key+'.json')
-        if accepted_report.exists():atomic_json(accepted_report,record)
-        state['tasks'][key]['status']='retry';requeued.append(key)
-    atomic_json(run/'reports'/('coherence_%02d.json'%state.get('coherence_rounds',1)),{'scope':scope,'verdict':verdict,'requeued':requeued,'expert_verified':False})
+    index={p['unit_id']:p['text'] for p in packets};issues=[];requeued=[];progress=[]
+    target=run/'reports'/('coherence_%02d.json'%state.get('coherence_rounds',1))
+    summary={'scope':'batched_complete_windows_and_global_excerpts','manuscript_snapshot_sha256':digest(json.dumps(packets,sort_keys=True)),'verdict':{'issues':issues},'requeued':requeued,'expert_verified':False,'batches':progress,'total_batches':len(batches),'completed_batches':0,'status':'incomplete'}
+    atomic_json(target,summary)
+    try:
+        for number,batch in enumerate(batches,1):
+            state['coherence_batch']=number;state['coherence_batch_count']=len(batches)
+            shown={p['unit_id'] for p in batch['units']}
+            def validate_coherence(verdict):
+                if not isinstance(verdict.get('issues'),list):return False
+                for issue in verdict['issues']:
+                    if not isinstance(issue,dict) or issue.get('unit_id') not in shown or issue.get('severity') not in ('major','minor') or any(not isinstance(issue.get(k),str) or not issue[k].strip() for k in ('id','passage','reason','required_change')) or issue['passage'] not in index[issue['unit_id']] or not any(p['unit_id']==issue['unit_id'] and issue['passage'] in p['text'] for p in batch['units']):
+                        raise ValueError('Coherence issue needs a valid unit ID, severity, reason, required change and exact passage from a supplied window.')
+                return True
+            key=digest(json.dumps({'version':3,'prompt':prompt,'batch':batch,'requested_model':os.environ.get('RF_COHERENCE_MODEL') or getattr(api,'model',None),'reasoning_effort':os.environ.get('RF_COHERENCE_REASONING_EFFORT','low')},sort_keys=True));cache=run/'reports/coherence_cache'/(key+'.json');verdict=None
+            if cache.exists():
+                try:
+                    saved=read(cache)
+                    if saved.get('input_sha256')==key and validate_coherence(saved.get('verdict',{})):verdict=saved['verdict']
+                except (OSError,ValueError,TypeError,AttributeError):pass
+            cached=verdict is not None
+            print('Coherence batch '+str(number)+'/'+str(len(batches))+(' cached' if cached else ': '+batch['scope']),flush=True)
+            if verdict is None:
+                for transport_attempt in range(2):
+                    try:
+                        verdict=structured_call(api,state,run/'autonomous_state.json',prompt,batch,'issues',role='reviewer',validator=validate_coherence);break
+                    except RuntimeError as exc:
+                        if transport_attempt or not str(exc).startswith('API attempts failed:') or state.get('work_deadline',state['deadline'])-time.time()<=30:raise
+                        print('Coherence service failure; retrying this batch once with remaining budget.',flush=True)
+                atomic_json(cache,{'input_sha256':key,'verdict':verdict,'model':getattr(api,'last_model','unknown'),'expert_verified':False})
+            issues.extend(verdict['issues']);apply_coherence_findings(run,state,verdict['issues'],requeued,key[:12])
+            progress.append({'batch':number,'scope':batch['scope'],'input_sha256':key,'cached':cached,'unit_ids':sorted(shown)})
+            summary['completed_batches']=len(progress);atomic_json(target,summary);atomic_json(run/'autonomous_state.json',state)
+    except Exception as exc:
+        summary['error']=type(exc).__name__+': '+str(exc)[:500];atomic_json(target,summary);raise
+    state.pop('coherence_error',None);summary['status']='complete';atomic_json(target,summary)
     return requeued
 
 def run_review(workspace,hours=9,reserve_minutes=40,max_visits=3,new_run=False,translate=True,api_factory=CompatibleAPI):

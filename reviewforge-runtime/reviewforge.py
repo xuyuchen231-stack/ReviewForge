@@ -106,13 +106,18 @@ class CompatibleAPI:
         self.max_tokens = int(os.environ.get('RF_MAX_OUTPUT_TOKENS','2500'))
 
     def chat(self, system, user, role='writer'):
-        preferred = self.reviewer_model if role == 'reviewer' else self.model
+        preferred = getattr(self,'request_model',None) or (self.reviewer_model if role == 'reviewer' else self.model)
         models = [preferred] + ([self.fallback_model] if self.fallback_model != preferred else [])
         if role=='reviewer' and self.model not in models:models.append(self.model)
         failures = []
         call_deadline=min(getattr(self,'deadline',float('inf')),time.time()+max(1,min(1800,getattr(self,'call_timeout',180))))
         for model in models:
-            body = json.dumps({'model': model, 'messages': [{'role': 'system', 'content': system}, {'role': 'user', 'content': user}], 'temperature': 0.2, 'max_tokens': self.max_tokens}).encode()
+            request_body={'model': model, 'messages': [{'role': 'system', 'content': system}, {'role': 'user', 'content': user}], 'temperature': 0.2, 'max_tokens': self.max_tokens}
+            effort=getattr(self,'reasoning_effort',None)
+            if effort is not None and ('deepseek-v4' in model.lower() or model.lower().split('/')[-1].removesuffix(':free')=='deepseek-flash'):
+                if effort not in ('low','high','max'):raise ValueError('DeepSeek coherence reasoning effort must be low, high or max')
+                request_body['reasoning_effort']=effort
+            body=json.dumps(request_body).encode()
             # Explicit user opt-in to independently authorized accounts.
             allow_rate_failover = os.environ.get('RF_ALLOW_RATE_LIMIT_FAILOVER') == '1'
             key_order = list(range(self.key_index, len(self.keys))) + list(range(0, self.key_index))

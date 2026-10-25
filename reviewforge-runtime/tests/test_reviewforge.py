@@ -53,6 +53,32 @@ class TestLiveLoopMock(unittest.TestCase):
             self.assertTrue((p/'reports/iteration_0001.json').exists())
 
 class TestModelRouting(unittest.TestCase):
+    def test_task_specific_model_override_does_not_change_the_local_reviewer(self):
+        from unittest.mock import patch
+        from io import BytesIO
+        from reviewforge import CompatibleAPI
+        models=[]
+        class Response:
+            def __enter__(self):return BytesIO(b'{"choices":[{"message":{"content":"ok"}}]}')
+            def __exit__(self,*args):return False
+        def opener(req,timeout):models.append(json.loads(req.data)['model']);return Response()
+        env={'RF_API_KEYS':'task-route','RF_BASE_URL':'https://task.invalid','RF_WRITER_MODEL':'writer','RF_REVIEWER_MODEL':'critic','RF_FALLBACK_MODEL':'fallback'}
+        with patch.dict('os.environ',env),patch('reviewforge.urllib.request.urlopen',side_effect=opener):
+            api=CompatibleAPI();api.request_model='writer';api.chat('s','u',role='reviewer');api.request_model=None;api.chat('s','u',role='reviewer')
+        self.assertEqual(models,['writer','critic'])
+    def test_coherence_effort_is_sent_only_to_supported_deepseek_models(self):
+        from unittest.mock import patch
+        from io import BytesIO
+        from reviewforge import CompatibleAPI
+        bodies=[]
+        class Response:
+            def __enter__(self):return BytesIO(b'{"choices":[{"message":{"content":"ok"}}]}')
+            def __exit__(self,*args):return False
+        def opener(req,timeout):bodies.append(json.loads(req.data));return Response()
+        env={'RF_API_KEYS':'effort-test','RF_BASE_URL':'https://effort.invalid','RF_WRITER_MODEL':'mimo-v2.6-flash:free','RF_REVIEWER_MODEL':'deepseek-v4.1-flash:free'}
+        with patch.dict('os.environ',env),patch('reviewforge.urllib.request.urlopen',side_effect=opener):
+            api=CompatibleAPI();api.reasoning_effort='low';api.chat('s','u',role='reviewer');api.chat('s','u',role='writer')
+        self.assertEqual(bodies[0].get('reasoning_effort'),'low');self.assertNotIn('reasoning_effort',bodies[1])
     def test_timeout_changes_account_for_the_next_model_without_marking_exhaustion(self):
         from unittest.mock import patch
         from io import BytesIO
