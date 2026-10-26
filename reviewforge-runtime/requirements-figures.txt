@@ -1,0 +1,2 @@
+# Optional structured quantitative figure renderer; Graphviz dot is a separate optional executable.
+matplotlib==3.10.8

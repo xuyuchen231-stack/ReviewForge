@@ -5,6 +5,10 @@ from io import BytesIO
 from reviewforge import CompatibleAPI
 
 class AccountCooldownTests(unittest.TestCase):
+ def setUp(self):
+  from unittest.mock import patch
+  directory=tempfile.TemporaryDirectory();self.addCleanup(directory.cleanup)
+  environment=patch.dict('os.environ',{'RF_PROVIDER_FILE':str(Path(directory.name)/'not_configured.json')});environment.start();self.addCleanup(environment.stop)
  def test_rate_limited_key_rotates_and_remains_temporarily_cooled_after_restart(self):
   with tempfile.TemporaryDirectory() as tmp:
    path=Path(tmp)/'health.json'

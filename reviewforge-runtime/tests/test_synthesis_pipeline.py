@@ -3,6 +3,17 @@ from pathlib import Path
 from synthesis_pipeline import initialize, audit_contract, revise_unit, review_verdict, CRITERIA
 
 class SynthesisTests(unittest.TestCase):
+ def test_minor_style_feedback_does_not_force_a_rewrite_when_substantive_criteria_pass(self):
+  candidate='A concrete comparison and bounded conclusion.'
+  verdict={'accept':True,'issues':[{'id':'style','severity':'minor','locator':candidate,'reason':'A sentence could be smoother.','required_evidence_or_change':'Optional wording polish.'}],'criteria':{key:{'status':'pass','explanation':'Specific scientific appraisal','passages':[candidate]} for key in CRITERIA}}
+  self.assertTrue(review_verdict(verdict,candidate)[0]);verdict['criteria']['evidence_scope']['status']='fail';self.assertFalse(review_verdict(verdict,candidate)[0])
+ def test_depth_contract_targets_supported_core_but_exempts_bridge_and_sparse_evidence(self):
+  from synthesis_pipeline import depth_contract
+  records=[{'source_type':'full_text_excerpt','citekey':key} for key in ('A','B','C')]
+  core=depth_contract('Existing prose.',{'kind':'core'},records)
+  self.assertEqual(core['suggested_english_words'],[600,1000]);self.assertFalse(core['length_is_acceptance_gate']);self.assertEqual(len(core['reasoning_functions']),3)
+  self.assertIsNone(depth_contract('Transition.',{'kind':'bridge'},records)['suggested_english_words'])
+  self.assertIsNone(depth_contract('Sparse.',{'kind':'core'},records[:1])['suggested_english_words'])
  def test_repair_feedback_reuses_findings_without_repeating_criterion_quotes(self):
   from synthesis_pipeline import repair_feedback
   record={'attempt':1,'problems':['review_rejected'],'review':{'accept':False,'criteria':{'evidence_scope':{'status':'fail','explanation':'Distinguish random-split accuracy from unseen-policy transfer.','passages':['large quote'*300]}},'issues':[{'id':'M1','reason':'Compare validation conditions'}],'resolved_issue_ids':[]}}

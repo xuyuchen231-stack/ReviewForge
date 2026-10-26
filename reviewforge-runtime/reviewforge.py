@@ -106,13 +106,14 @@ class CompatibleAPI:
         if not self.key or self.key == 'replace_me' or not self.base.startswith('https://') or not self.model:
             raise ValueError('Configure RF_API_KEY, HTTPS RF_BASE_URL, RF_MODEL in .env')
         self.max_tokens = int(os.environ.get('RF_MAX_OUTPUT_TOKENS','2500'))
-        self.provider_name=env.get('name','primary');self.providers=[]
+        self.provider_name=env.get('name','primary');self.providers=[];self.preferred_provider=None
         if config is None:
             path=Path(os.environ.get('RF_PROVIDER_FILE',str(Path.home()/'.reviewforge/providers.json')))
             if path.exists():
                 profiles=json.loads(path.read_text(encoding='utf-8'))
                 if not isinstance(profiles,dict) or not isinstance(profiles.get('providers'),list):raise ValueError('Invalid local provider profiles')
                 self.providers=[CompatibleAPI(profile) for profile in profiles['providers'] if profile.get('enabled',True)]
+                self.preferred_provider=profiles.get('preferred_provider')
 
     def chat(self, system, user, role='writer'):
         if not self.providers:
@@ -120,6 +121,8 @@ class CompatibleAPI:
         timeout=getattr(self,'call_timeout',180);deadline=getattr(self,'deadline',None)
         until=min(deadline if deadline is not None else float('inf'),time.time()+timeout)
         failures=[];clients=[self]+self.providers
+        requested=getattr(self,'request_provider',None) or ('primary' if getattr(self,'request_stage',None) in ('preparation','coherence') else self.preferred_provider)
+        if requested:clients.sort(key=lambda client:client.provider_name!=requested)
         try:
             for index,client in enumerate(clients):
                 remaining=until-time.time()
@@ -133,7 +136,7 @@ class CompatibleAPI:
                     failures.append(client.provider_name+': '+str(exc))
                     if index+1<len(clients):print('API provider unavailable; trying configured backup '+clients[index+1].provider_name+'.',flush=True)
                     continue
-                for attr in ('last_model','last_key_slot','last_finish_reason','last_reasoning_chars','last_thinking_requested'):
+                for attr in ('last_model','last_key_slot','last_finish_reason','last_reasoning_chars','last_thinking_requested','last_usage'):
                     if hasattr(client,attr):setattr(self,attr,getattr(client,attr))
                 self.last_provider=client.provider_name
                 return result
@@ -152,7 +155,10 @@ class CompatibleAPI:
         if role=='reviewer' and self.model not in models:models.append(self.model)
         failures = []
         call_deadline=min(getattr(self,'deadline',float('inf')),time.time()+max(1,min(1800,getattr(self,'call_timeout',180))))
-        for model in models:
+        for model_index,model in enumerate(models):
+            # Leave time for configured fallback models instead of letting a
+            # stalled first model spend the provider's entire request budget.
+            model_deadline=min(call_deadline,time.time()+max(0,call_deadline-time.time())/(len(models)-model_index))
             request_body={'model': model, 'messages': [{'role': 'system', 'content': system}, {'role': 'user', 'content': user}], 'temperature': 0.2, 'max_tokens': self.max_tokens}
             effort=getattr(self,'reasoning_effort',None)
             thinking=getattr(self,'thinking_mode',None)
@@ -168,14 +174,14 @@ class CompatibleAPI:
             allow_rate_failover = os.environ.get('RF_ALLOW_RATE_LIMIT_FAILOVER') == '1'
             key_order = list(range(self.key_index, len(self.keys))) + list(range(0, self.key_index))
             for key_index in key_order:
-                if time.time()>=call_deadline:raise TimeoutError('API time budget reached')
+                if time.time()>=model_deadline:break
                 if self.key_cooldowns.get(key_index, 0) > time.time():
                     continue
                 key = self.keys[key_index]
                 req = urllib.request.Request(self.base + '/chat/completions', data=body, headers={'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json'}, method='POST')
                 try:
-                    attempt_deadline=min(call_deadline,time.time()+getattr(self,'request_timeout',150)) if getattr(self,'call_timeout',180)>180 else call_deadline
-                    with urllib.request.urlopen(req, timeout=max(.1,min(getattr(self,'request_timeout',150),call_deadline-time.time()))) as resp:
+                    attempt_deadline=min(model_deadline,time.time()+getattr(self,'request_timeout',150)) if getattr(self,'call_timeout',180)>180 else model_deadline
+                    with urllib.request.urlopen(req, timeout=max(.1,min(getattr(self,'request_timeout',150),model_deadline-time.time()))) as resp:
                         raw = read_response_body(resp,attempt_deadline,getattr(self,'request_timeout',150))
                         if not raw.strip():raise ValueError('Empty upstream body; bytes='+str(len(raw)))
                         try:data=json.loads(raw)
@@ -190,6 +196,8 @@ class CompatibleAPI:
                     self.last_key_slot=key_index+1
                     self.last_reasoning_chars=len(data['choices'][0]['message'].get('reasoning_content') or data['choices'][0]['message'].get('reasoning') or '')
                     self.last_thinking_requested=request_body.get('thinking',{}).get('type')
+                    usage=data.get('usage',{})
+                    self.last_usage={key:usage[key] for key in ('prompt_tokens','completion_tokens','total_tokens') if isinstance(usage,dict) and type(usage.get(key)) is int and usage[key]>=0}
                     return result
                 except urllib.error.HTTPError as exc:
                     if exc.code == 429:

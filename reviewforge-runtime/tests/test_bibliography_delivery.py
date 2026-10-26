@@ -1,5 +1,9 @@
 import unittest
 class BibliographyDeliveryTests(unittest.TestCase):
+ def test_doi_date_does_not_override_explicit_journal_year(self):
+  from bibliography_delivery import prepare_inline_bibliography
+  source=r'\begin{thebibliography}{99}\bibitem{study}Raissi, M.; Perdikaris, P.. Article. \textit{Journal} 2019, 378. DOI: \url{10.1016/j.jcp.2018.10.045}.\end{thebibliography}'
+  self.assertIn(r'\bibitem[Raissi et al.(2019)]{study}',prepare_inline_bibliography(source,{})[0])
  def test_ambiguous_manual_dates_are_not_guessed_from_a_title(self):
   from bibliography_delivery import prepare_inline_bibliography
   source=r'\begin{thebibliography}{99}\bibitem{old}Smith, J. Longitudinal measurements in 2019. Journal of Tests (2023).\end{thebibliography}'

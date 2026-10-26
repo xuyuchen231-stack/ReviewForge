@@ -58,6 +58,16 @@ REVIEWER+=''' When review_passage_options is supplied, return passage_ids:[IDs] 
 def digest(text):return hashlib.sha256(text.encode('utf-8')).hexdigest()
 def read(path):return json.loads(Path(path).read_text(encoding='utf-8'))
 
+def depth_contract(body,argument,records):
+    from quality_audit import count_units
+    substantial=argument.get('kind')!='bridge' and len(records)>=3 and any(r.get('source_type') in ('full_text','full_text_excerpt') for r in records)
+    return {'kind':argument.get('kind'),'original_metrics':count_units(body),'supplied_studies':len(records),
+            'reasoning_functions':['Mechanism and evolution: explain retained assumptions and what is learned, without repeating a textbook introduction.',
+                                   'Cross-study synthesis: compare relevant conditions, organisms/substrates, learned structure and validation; retain supported quantities and explain non-comparability.',
+                                   'Critical conclusion: distinguish supported transfer/scale/control claims from inference, identify specific failure boundaries and a testable unresolved question.'],
+            'suggested_english_words':[600,1000] if substantial else None,'length_is_acceptance_gate':False,
+            'scope':'Functions may span multiple paragraphs. Preserve longer developed source content. Expand supported comparison, not filler. Bridges and sparse evidence have no word quota; do not invent 8-12 studies or numerical comparisons.'}
+
 def repair_feedback(record):
     """Keep actionable findings; exact criterion quotes already live in the draft/history."""
     result={k:v for k,v in record.items() if k!='review'}
@@ -292,6 +302,7 @@ def revise_unit(workspace,unit_id,chat,max_rounds=3,require_calibration=True):
     payload={'argument_plan':argument,'body':u['body'],'required_citation_keys':sorted(citekeys(u['body'])),'original_headings':re.findall(r'\\(?:section|subsection|subsubsection|paragraph)\*?\{[^}]+\}',u['body']),'study_comparisons':[r for r in matrix['studies'] if r['citekey'] in keys],
              'evidence_context':evidence,'calibrated_preferences':calibration.get('preferences',[]),'feedback':[],
              'scope':'Whole subsection including all subordinate headings; introductions/bridges have a distinct function.'}
+    payload['depth_contract']=depth_contract(u['body'],argument,payload['study_comparisons'])
     if len(json.dumps(payload))>180000:raise ValueError('Evidence exceeds context budget; curate relevant source locations without silently dropping comparison evidence.')
     folder=ws/'synthesis_candidates';folder.mkdir(exist_ok=True)
     run_id=uuid.uuid4().hex

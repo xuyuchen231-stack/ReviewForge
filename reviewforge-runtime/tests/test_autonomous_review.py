@@ -3,6 +3,53 @@ from pathlib import Path
 from autonomous_review import RunLock, bootstrap, choose_task, assemble, source_packet, checkpoint_call, run_review
 
 class AutonomousTests(unittest.TestCase):
+ def test_production_preparation_uses_batched_cards_and_exact_shared_cache(self):
+  from synthesis_pipeline import CRITERIA
+  class API:
+   extractions=0
+   def chat(self,system,user,role='writer'):
+    p=json.loads(user)
+    if 'required_original_keys' in p:return json.dumps({'argument':{'question':'What is supported?','thesis':'Bounded support.','comparison_axes':['finding'],'study_keys':['A'],'paragraph_plan':[{'role':'comparison','point':'Assess evidence'}],'synthesis_claim':'Bounded conclusion.','limitations':'One study.','open_question':'Transfer?','sparse_evidence_reason':'Single study fixture.','kind':'core'}})
+    if p.get('schema_version')==4:
+     self.extractions+=1
+     return json.dumps({'studies':[{'citekey':s['citekey'],'comparisons':[{'axis_index':0,'status':'supported','value':'A quoted finding','evidence_ids':[s['evidence_spans'][0]['id']],'explicit_in_abstract':True}]} for s in p['sources']]})
+    if role=='writer':return p['body']+'\n'+('A bounded comparison of supplied evidence and assumptions. '*5)
+    return json.dumps({'accept':True,'issues':[],'criteria':{k:{'status':'pass','explanation':'Mock scoped judgment','passages':[p['candidate'][-40:]]} for k in CRITERIA}})
+  with tempfile.TemporaryDirectory() as t:
+   ws=Path(t);self.source(ws);api=API();report=run_review(ws,hours=.001,reserve_minutes=0,max_visits=1,translate=False,api_factory=lambda:api)
+   self.assertEqual(report['accepted_units'],2);self.assertEqual(api.extractions,1)
+ def test_stagnant_unit_reopens_after_evidence_contract_changes(self):
+  from autonomous_review import reconcile_completed_tasks
+  with tempfile.TemporaryDirectory() as t:
+   ws=Path(t);self.source(ws);run,state=bootstrap(ws,9);key=next(iter(state['tasks']))
+   state['tasks'][key].update(status='blocked_no_increment',visits=2,rejection_contract_sha256='old');state['coherence_rounds']=2
+   reconcile_completed_tasks(run,state,2);self.assertEqual(state['tasks'][key]['status'],'retry');self.assertEqual(state['coherence_rounds'],0)
+ def test_unchanged_rejected_candidate_and_evidence_stop_instead_of_rerolling(self):
+  from autonomous_review import record_revision_result
+  task={};result={'status':'needs_revision','candidate_sha256':'same','contract_sha256':'evidence1','open_major_issues':['M1'],'history':[{'problems':['major_issues_open']}]}
+  record_revision_result(task,result);self.assertEqual(task['status'],'retry')
+  record_revision_result(task,result);self.assertEqual(task['status'],'blocked_no_increment')
+  record_revision_result(task,{**result,'contract_sha256':'new evidence'});self.assertEqual(task['status'],'retry')
+ def test_usage_reports_observed_tokens_without_inventing_missing_usage(self):
+  class API:
+   max_tokens=1000;last_usage={'prompt_tokens':100,'completion_tokens':20,'total_tokens':120}
+   def chat(self,*args,**kwargs):return 'ok'
+  with tempfile.TemporaryDirectory() as t:
+   api=API();state={'deadline':time.time()+1200};path=Path(t)/'state.json'
+   checkpoint_call(api,state,path,'s',{},'writer');api.last_usage={};checkpoint_call(api,state,path,'s',{},'writer')
+   self.assertEqual(state['observed_token_usage'],{'prompt_tokens':100,'completion_tokens':20,'total_tokens':120,'calls_with_usage':1,'calls_without_usage':1})
+ def test_planning_budget_and_mode_do_not_expand_with_payload_size(self):
+  class API:
+   model='writer';reviewer_model='critic';max_tokens=2500
+   def chat(self,*args,**kwargs):return 'ok'
+  with tempfile.TemporaryDirectory() as t:
+   api=API();state={'deadline':time.time()+1200,'phase':'argument_planning'}
+   checkpoint_call(api,state,Path(t)/'state.json','s',{'body':'x'*40000},'writer')
+   self.assertEqual(state['request_budget_seconds'],180);self.assertEqual(api.thinking_mode,'disabled')
+ def test_scheduler_prefers_prepared_then_lower_cost_and_defers_service_failures(self):
+  state={'tasks':{'big':{'status':'pending','visits':0,'priority':16},'small':{'status':'pending','visits':0,'priority':2},'ready':{'status':'retry','visits':0,'priority':19,'preparation_ready':True}}}
+  self.assertEqual(choose_task(state,3),'ready');state['tasks']['ready']['service_failures']=1
+  self.assertEqual(choose_task(state,3),'small')
  def test_coherence_route_is_reset_before_local_scientific_review(self):
   class API:
    model='writer';reviewer_model='critic';max_tokens=1000

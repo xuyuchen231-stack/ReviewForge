@@ -22,8 +22,11 @@ def prepare_inline_bibliography(tex,catalogue):
         else:
             # Existing manual entries may already supply an explicit surname/year.
             first=re.match(r'\s*([^,;\n.{}\\]+),\s*[^;\n]+',body)
-            dates=set(re.findall(r'(?<!\d)((?:19|20)\d{2})(?!\d)',body))
-            date=re.search(r'(?<!\d)((?:19|20)\d{2})(?!\d)(?:\}|\))?\s*[,.;]',body)
+            # A DOI or URL may contain an unrelated four-digit number; it is
+            # an identifier, not an alternative publication year.
+            dating=re.sub(r'\\url\{[^}]*\}|https?://\S+|10\.\d{4,9}/\S+','',body)
+            dates=set(re.findall(r'(?<!\d)((?:19|20)\d{2})(?!\d)',dating))
+            date=re.search(r'(?<!\d)((?:19|20)\d{2})(?!\d)(?:\}|\))?\s*[,.;]',dating)
             if first and date and len(dates)==1:author=first.group(1).strip()+(' et al.' if ';' in body[:body.find(date.group(1))] else '');year=date.group(1)
         if not author or not year:return match.group()
         # Natbib interprets parentheses as its author/year label delimiters.

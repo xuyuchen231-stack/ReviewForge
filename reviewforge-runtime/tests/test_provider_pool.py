@@ -4,6 +4,27 @@ from unittest.mock import patch
 from reviewforge import CompatibleAPI
 
 class ProviderPoolTests(unittest.TestCase):
+ def test_first_model_cannot_consume_entire_fallback_budget(self):
+  from io import BytesIO
+  with tempfile.TemporaryDirectory() as t,patch.dict('os.environ',{'RF_BASE_URL':'https://primary.example/v1','RF_API_KEY':'first-key','RF_API_KEYS':'','RF_PROVIDER_FILE':str(Path(t)/'absent.json'),'RF_ACCOUNT_HEALTH_FILE':str(Path(t)/'health.json'),'RF_WRITER_MODEL':'first','RF_FALLBACK_MODEL':'second'}):
+   api=CompatibleAPI();api.call_timeout=180;api.request_timeout=150;timeouts=[]
+   class Response:
+    def __enter__(self):return BytesIO(b'{"choices":[{"message":{"content":"ok"}}]}')
+    def __exit__(self,*args):return False
+   def request(req,timeout):
+    timeouts.append(timeout)
+    if len(timeouts)==1:raise TimeoutError('simulated first model stall')
+    return Response()
+   with patch('reviewforge.urllib.request.urlopen',side_effect=request):self.assertEqual(api.chat('s','u'),'ok')
+   self.assertLessEqual(timeouts[0],91);self.assertEqual(api.last_model,'second')
+ def test_preferred_provider_is_used_for_writing_but_preparation_can_use_primary(self):
+  with tempfile.TemporaryDirectory() as t,patch.dict('os.environ',{'RF_BASE_URL':'https://primary.example/v1','RF_API_KEY':'first-key','RF_API_KEYS':'','RF_PROVIDER_FILE':str(Path(t)/'profiles.json'),'RF_ACCOUNT_HEALTH_FILE':str(Path(t)/'health.json')}):
+   Path(t,'profiles.json').write_text(json.dumps({'preferred_provider':'apimaster','providers':[{'name':'apimaster','RF_BASE_URL':'https://apimaster.ai/v1','RF_API_KEY':'second-key'}]}))
+   api=CompatibleAPI();seen=[]
+   def request(client,*args):seen.append(client.provider_name);return 'ok'
+   with patch.object(CompatibleAPI,'_chat',request):
+    api.chat('s','u');api.request_stage='preparation';api.chat('s','u');api.request_stage='coherence';api.chat('s','u')
+   self.assertEqual(seen,['apimaster','primary','primary'])
  def test_all_providers_cooling_retains_retry_after(self):
   with tempfile.TemporaryDirectory() as t,patch.dict('os.environ',{'RF_BASE_URL':'https://primary.example/v1','RF_API_KEY':'first-key','RF_API_KEYS':'','RF_PROVIDER_FILE':str(Path(t)/'absent.json'),'RF_ACCOUNT_HEALTH_FILE':str(Path(t)/'health.json')}):
    api=CompatibleAPI();api.providers=[CompatibleAPI({'name':'apimaster','RF_BASE_URL':'https://apimaster.ai/v1','RF_API_KEY':'second-key'})]

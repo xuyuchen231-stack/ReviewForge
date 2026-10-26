@@ -6,7 +6,14 @@ from reviewforge import validate_ledger, extract_json, run
 
 SOURCES=[{'id':'S1','title':'Example','excerpts':[{'locator':'p1','text':'This is an exact supporting excerpt from the original document.'}]}]
 CLAIM=[{'claim':'Example claim','source_id':'S1','locator':'p1','quote':'This is an exact supporting excerpt','status':'supported'}]
-class TestEvidence(unittest.TestCase):
+class ProviderIsolatedTests(unittest.TestCase):
+    def setUp(self):
+        from unittest.mock import patch
+        folder=tempfile.TemporaryDirectory();self.addCleanup(folder.cleanup)
+        environment=patch.dict('os.environ',{'RF_PROVIDER_FILE':str(Path(folder.name)/'not_configured.json'),'RF_ACCOUNT_HEALTH_FILE':str(Path(folder.name)/'health.json')})
+        environment.start();self.addCleanup(environment.stop)
+
+class TestEvidence(ProviderIsolatedTests):
     def test_valid_quote(self):
         self.assertTrue(validate_ledger(CLAIM,SOURCES)[0])
     def test_fabricated_quote(self):
@@ -33,7 +40,7 @@ class TestEvidence(unittest.TestCase):
             with self.assertRaises(ValueError):run(p,minutes=0,dry_run=True,resume=True)
 if __name__ == '__main__': unittest.main()
 
-class TestLiveLoopMock(unittest.TestCase):
+class TestLiveLoopMock(ProviderIsolatedTests):
     def test_accept_and_checkpoint(self):
         from unittest.mock import patch
         from reviewforge import CompatibleAPI
@@ -52,7 +59,7 @@ class TestLiveLoopMock(unittest.TestCase):
             self.assertEqual(result['best_file'],'revisions/revision_0001.md')
             self.assertTrue((p/'reports/iteration_0001.json').exists())
 
-class TestModelRouting(unittest.TestCase):
+class TestModelRouting(ProviderIsolatedTests):
     def test_explicit_coherence_thinking_toggle_does_not_override_local_review(self):
         from unittest.mock import patch
         from io import BytesIO
@@ -175,7 +182,7 @@ class TestModelRouting(unittest.TestCase):
             self.assertEqual(api.chat('system','user',role='reviewer'),'ok')
         self.assertEqual(calls,['mimo-v2.6-flash:free','deepseek-v4.1-flash:free'])
 
-class TestEmptyDiagnostics(unittest.TestCase):
+class TestEmptyDiagnostics(ProviderIsolatedTests):
  def test_empty_response_reports_safe_metadata(self):
   from unittest.mock import patch
   from io import BytesIO
@@ -187,7 +194,7 @@ class TestEmptyDiagnostics(unittest.TestCase):
   with patch.dict('os.environ',env),patch('reviewforge.urllib.request.urlopen',return_value=Response()):
    with self.assertRaisesRegex(RuntimeError,'finish_reason=length') as caught:CompatibleAPI().chat('s','u')
    self.assertNotIn('private reasoning',str(caught.exception))
-class TestWhitespaceResponse(unittest.TestCase):
+class TestWhitespaceResponse(ProviderIsolatedTests):
  def test_whitespace_body_tries_another_account_and_reports_metadata(self):
   from unittest.mock import patch
   from io import BytesIO
@@ -200,7 +207,7 @@ class TestWhitespaceResponse(unittest.TestCase):
   responses=[Response(b'\n'),Response(b'{"choices":[{"message":{"content":"ok"}}]}')]
   with patch.dict('os.environ',env),patch('reviewforge.urllib.request.urlopen',side_effect=responses):
    api=CompatibleAPI();self.assertEqual(api.chat('s','u'),'ok');self.assertEqual(api.last_key_slot,2)
-class TestResponseDeadline(unittest.TestCase):
+class TestResponseDeadline(ProviderIsolatedTests):
  def test_periodic_bytes_cannot_extend_total_response_deadline(self):
   from reviewforge import read_response_body
   from unittest.mock import patch
@@ -208,7 +215,11 @@ class TestResponseDeadline(unittest.TestCase):
    def read1(self,n):return b' '
   with patch('reviewforge.time.time',side_effect=[0,2]):
    with self.assertRaises(TimeoutError):read_response_body(Response(),1,150)
-class TestWholeUnitRouteBudget(unittest.TestCase):
+class TestWholeUnitRouteBudget(ProviderIsolatedTests):
+ def setUp(self):
+  from unittest.mock import patch
+  folder=tempfile.TemporaryDirectory();self.addCleanup(folder.cleanup)
+  environment=patch.dict('os.environ',{'RF_PROVIDER_FILE':str(Path(folder.name)/'not_configured.json')});environment.start();self.addCleanup(environment.stop)
  def test_large_call_budget_reaches_transport_with_bounded_route_timeout(self):
   from unittest.mock import patch
   from io import BytesIO

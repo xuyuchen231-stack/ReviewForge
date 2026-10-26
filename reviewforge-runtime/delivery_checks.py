@@ -31,11 +31,19 @@ def build_is_current(ws, basename, report):
 
 def layout_diagnostics(log):
     overflows = re.findall(r'Overfull \\[hv]box[^\n]*', log)
+    details=[]
+    for match in re.finditer(r'Overfull \\([hv])box \(([\d.]+)pt too (?:wide|high)\)([^\n]*)',log):
+        location=re.search(r'(?:at lines|at line)\s+(\d+)(?:--(\d+))?',match.group(3))
+        details.append({'kind':match.group(1)+'box','amount_pt':float(match.group(2)),
+                        'start_line':int(location.group(1)) if location else None,
+                        'end_line':int(location.group(2) or location.group(1)) if location else None})
     unresolved = re.findall(r'(?:Citation|Reference)[^\n]*undefined[^\n]*|(?:Author|Year) undefined for citation[^\n]*|There were undefined (?:references|citations)', log, re.I)
     missing_glyphs = re.findall(r'Missing character:[^\n]*', log)
     return {'status': 'FAILED' if overflows or unresolved or missing_glyphs else 'PASS',
             'overflows': sorted(set(overflows)), 'unresolved': sorted(set(unresolved)),
-            'missing_glyphs': sorted(set(missing_glyphs))}
+            'missing_glyphs': sorted(set(missing_glyphs)),'overflow_details':details,
+            'severe_overflow_count':sum(item['amount_pt']>5 for item in details),
+            'visual_guarantee':False}
 
 
 def render_preview(pdf, directory):

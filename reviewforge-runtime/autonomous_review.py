@@ -164,8 +164,9 @@ def bootstrap(workspace,hours,new_run=False):
 
 def choose_task(state,max_visits):
     candidates=[(key,row) for key,row in state['tasks'].items() if row['status'] in ('pending','retry') and row.get('visits',0)<max_visits]
-    # First cover every unit; then revisit expensive failures, prioritizing evidence-rich units.
-    return min(candidates,key=lambda pair:(pair[1].get('visits',0),-pair[1].get('priority',0),pair[0]))[0] if candidates else None
+    # Cover eligible units, reusing prepared evidence; a service failure must not
+    # immediately select the same expensive unit again after refunding its visit.
+    return min(candidates,key=lambda pair:(pair[1].get('service_failures',0),not pair[1].get('preparation_ready',False),pair[1].get('visits',0),pair[1].get('priority',0),pair[0]))[0] if candidates else None
 
 def source_packet(workspace,run,entry,query,max_chars=8500):
     ws=Path(workspace).resolve();run=Path(run);key=entry['citekey'];text='';access='anchor_only'
@@ -221,12 +222,15 @@ def checkpoint_call(api,state,path,system,payload,role):
     remaining=budget-time.time()
     if remaining<=2:raise TimeoutError('Run time budget reached before new request')
     original_bytes=len(json.dumps(payload,ensure_ascii=False).encode('utf-8'));payload=compact_evidence_payload(payload)
-    whole_unit=(('body' in payload or 'candidate' in payload) and 'study_comparisons' in payload) or (role=='reviewer' and 'units' in payload) or len(json.dumps(payload,ensure_ascii=False).encode('utf-8'))>30000
+    preparation=state.get('phase') in ('argument_planning','planning','evidence_extraction')
+    whole_unit=not preparation and ((('body' in payload or 'candidate' in payload) and 'study_comparisons' in payload) or (role=='reviewer' and 'units' in payload) or len(json.dumps(payload,ensure_ascii=False).encode('utf-8'))>30000)
     if role=='reviewer':api.max_tokens=max(getattr(api,'max_tokens',0),int(os.environ.get('RF_AUTO_REVIEW_OUTPUT_TOKENS','12000')))
     coherence=role=='reviewer' and 'units' in payload
-    api.thinking_mode=os.environ.get('RF_COHERENCE_THINKING','disabled') if coherence else None
+    api.thinking_mode=os.environ.get('RF_COHERENCE_THINKING','disabled') if coherence else (os.environ.get('RF_PREPARATION_THINKING','disabled') if preparation else None)
     api.reasoning_effort=os.environ.get('RF_COHERENCE_REASONING_EFFORT','low') if coherence and api.thinking_mode=='enabled' else None
-    api.request_model=(os.environ.get('RF_COHERENCE_MODEL') or getattr(api,'reviewer_model',getattr(api,'model',None))) if coherence else None
+    api.request_stage='preparation' if preparation else ('coherence' if coherence else 'manuscript')
+    api.request_provider=os.environ.get('RF_PREPARATION_PROVIDER','primary') if preparation else (os.environ.get('RF_COHERENCE_PROVIDER','primary') if coherence else None)
+    api.request_model=(os.environ.get('RF_COHERENCE_MODEL') or getattr(api,'reviewer_model',getattr(api,'model',None))) if coherence else ((os.environ.get('RF_PREPARATION_MODEL') or getattr(api,'reviewer_model',None)) if preparation else None)
     request_budget=600 if whole_unit else 180
     state['request_budget_seconds']=min(request_budget,int(remaining));state['request_payload_bytes']=len(json.dumps(payload,ensure_ascii=False).encode('utf-8'));state['request_original_bytes']=original_bytes
     state['requests_attempted']=state.get('requests_attempted',0)+1;state['last_request_role']=role;state['last_request_started']=time.time();atomic_json(path,state)
@@ -239,6 +243,12 @@ def checkpoint_call(api,state,path,system,payload,role):
     response_file=response_folder/('%06d.txt'%state['requests_attempted']);response_file.write_text(result,encoding='utf-8')
     state['last_response_file']=str(response_file.relative_to(Path(path).parent));state['last_finish_reason']=getattr(api,'last_finish_reason',None)
     state['calls']=state.get('calls',0)+1;state['last_response']=time.time()
+    usage=getattr(api,'last_usage',{})
+    state['token_usage_scope']='Successful nonempty API responses only; failed/empty responses and historical calls may be missing. Not a bill or total spend.'
+    totals=state.setdefault('observed_token_usage',{'prompt_tokens':0,'completion_tokens':0,'total_tokens':0,'calls_with_usage':0,'calls_without_usage':0})
+    known={key:usage[key] for key in ('prompt_tokens','completion_tokens','total_tokens') if isinstance(usage,dict) and type(usage.get(key)) is int and usage[key]>=0}
+    for key,value in known.items():totals[key]+=value
+    totals['calls_with_usage' if known else 'calls_without_usage']+=1
     state.setdefault('model_routes',[]).append({'role':role,'provider':getattr(api,'last_provider','unknown'),'model':getattr(api,'last_model','unknown'),'account_slot':getattr(api,'last_key_slot',None),'thinking_requested':getattr(api,'last_thinking_requested',None),'reasoning_chars':getattr(api,'last_reasoning_chars',None),'response_seconds':round(time.time()-state['last_request_started'],2),'payload_bytes':state.get('request_payload_bytes'),'budget_seconds':state.get('request_budget_seconds'),'utc':datetime.datetime.now(datetime.timezone.utc).isoformat()})
     atomic_json(path,state)
     return result
@@ -323,42 +333,17 @@ def prepare_unit(workspace,run,state,unit,api):
             if not isinstance(data.get('argument'),dict):raise ValueError('Invalid automatic argument schema')
             atomic_json(plan_cache,data)
         argument=data['argument'];studies=data.get('studies',[])
-        # Old cached/all-in-one responses are usable, but new requests extract one source at a time.
-        extracted={r['citekey']:r for r in studies}
-        for key in argument.get('study_keys',[]):
-            if key not in packet_index:raise ValueError('Planner invented study key')
-            if key in extracted:continue
-            indexed=indexed_source(packet_index[key])
-            request={'schema_version':3,'question':argument.get('question'),'comparison_axes':argument.get('comparison_axes',[]),'sources':[indexed]}
-            record_signature=digest(json.dumps(request,sort_keys=True));record_cache=cache/('study_'+record_signature+'.json')
-            old_request={**request,'schema_version':2,'sources':[packet_index[key]]}
-            for legacy_request in [old_request,{k:v for k,v in old_request.items() if k!='schema_version'}]:
-                legacy_cache=cache/('study_'+digest(json.dumps(legacy_request,sort_keys=True))+'.json')
-                if not record_cache.exists() and legacy_cache.exists():atomic_json(record_cache,normalize_study(read(legacy_cache),argument.get('comparison_axes',[])))
-            if record_cache.exists():
-                try:validate_study(read(record_cache),argument.get('comparison_axes',[]),packet_index[key])
-                except (ValueError,TypeError,KeyError):record_cache.replace(record_cache.with_suffix('.invalid'))
-            if record_cache.exists():row=read(record_cache)
-            else:
-                state['active_source']=key;state['phase']='evidence_extraction'
-                print('['+unit['id']+'] extracting source '+key,flush=True)
-                api.max_tokens=6000
-                for extraction_attempt in range(2):
-                    result=structured_call(api,state,run/'autonomous_state.json',EXTRACT_STUDY,request,'studies')
-                    try:
-                        records=result.get('studies',[])
-                        if len(records)!=1:raise ValueError('Invalid single-source extraction')
-                        row=materialize_evidence(normalize_study(records[0],argument.get('comparison_axes',[])),indexed)
-                        validate_study(row,argument.get('comparison_axes',[]),packet_index[key])
-                        break
-                    except (ValueError,TypeError,KeyError) as exc:
-                        if extraction_attempt:
-                            atomic_json(run/'evidence_tasks'/(unit['id']+'_'+key+'.json'),{'status':'invalid_model_extraction','error':str(exc),'source':key,'action':'Re-read the cited source; supplied quotation was not reproduced exactly.'})
-                            raise ValueError('Evidence record blocked after local repair: '+str(exc)) from None
-                        print('Source record retry: '+str(exc)[:200],flush=True)
-                        request={**request,'previous_extraction':result,'source_validation_errors':str(exc)[:600],'repair_instruction':'Re-read supplied chunks. Use exact short substrings; if evidence is inaccessible mark not_accessible. Do not invent or approximate quotations.'}
-                atomic_json(record_cache,row)
-            extracted[key]=row
+        selected=argument.get('study_keys',[])
+        if set(selected)-set(packet_index):raise ValueError('Planner invented study key')
+        from evidence_batch import extract_sources
+        def ask_batch(sources):
+            state.update(active_source=','.join(source['citekey'] for source in sources),phase='evidence_extraction')
+            print('['+unit['id']+'] extracting source batch '+state['active_source'],flush=True)
+            api.max_tokens=min(12000,max(4000,2500*len(sources)))
+            request={'schema_version':4,'question':argument.get('question'),'comparison_axes':argument.get('comparison_axes',[]),'sources':sources}
+            prompt=EXTRACT_STUDY.replace('Read ONE supplied source packet','Read EACH supplied source packet')+' Return one study card for EACH supplied citekey. Keep evidence IDs scoped to that source; never borrow another source span. Do not compare papers during extraction.'
+            return structured_call(api,state,run/'autonomous_state.json',prompt,request,'studies')
+        extracted=extract_sources(run,unit['id'],argument.get('question'),argument.get('comparison_axes',[]),[packet_index[key] for key in selected],ask_batch,indexed_source,normalize_study,materialize_evidence,validate_study,seed_rows=studies)
         studies=list(extracted.values())
         if not isinstance(argument,dict) or not isinstance(studies,list):raise ValueError('Invalid automatic plan schema')
         if not required.issubset(set(argument.get('study_keys',[]))) or set(argument.get('study_keys',[]))-set(available):raise ValueError('Automatic plan changed citation scope')
@@ -395,9 +380,24 @@ def reconcile_completed_tasks(run,state,max_visits):
     original=(Path(run)/'review_en.tex').read_text(encoding='utf-8')
     for unit in units(original):
         task=state['tasks'].get(unit['id'],{})
+        if task.get('status')=='blocked_no_increment':
+            plan=read(Path(run)/'synthesis_plan.json');argument=next(item for item in plan['units'] if item['id']==unit['id'])
+            current=contract_digest(plan,matrix_for_unit(run,unit['id']),unit_evidence(run,unit,argument),unit['id'])
+            if current!=task.get('rejection_contract_sha256'):
+                task.update(status='retry',visits=min(task.get('visits',0),max_visits-1));state['coherence_rounds']=0
         if task.get('status')=='completed' and current_accepted_candidate(run,unit,original) is None:
             task.update(status='retry',visits=min(task.get('visits',0),max_visits-1),last_result='accepted_candidate_invalidated',in_flight=False)
             state['coherence_rounds']=0
+
+def record_revision_result(task,result):
+    passed=result['status']=='model_review_passed'
+    task.update(status='completed' if passed else 'retry',last_result=result['status'],open_major_issues=result.get('open_major_issues',[]),service_failures=0)
+    if passed:
+        task.pop('last_rejected_signature',None);task.pop('stop_reason',None);return
+    fingerprint=digest(json.dumps({'candidate':result.get('candidate_sha256'),'contract':result.get('contract_sha256'),'issues':sorted(result.get('open_major_issues',[])),'problems':(result.get('history') or [{}])[-1].get('problems',[])},sort_keys=True))
+    if fingerprint==task.get('last_rejected_signature'):
+        task.update(status='blocked_no_increment',stop_reason='Same rejected candidate, evidence contract and unresolved findings; preserve draft and wait for new evidence or a substantive repair.')
+    task.update(last_rejected_signature=fingerprint,rejection_contract_sha256=result.get('contract_sha256'))
 
 def assemble(run,state):
     from reviewforge_v4 import gate_block
@@ -560,11 +560,13 @@ to agree with an unsupported original assertion. Do not reward length or manufac
     state.pop('coherence_error',None);summary['status']='complete';atomic_json(target,summary)
     return requeued
 
-def run_review(workspace,hours=9,reserve_minutes=40,max_visits=3,new_run=False,translate=True,api_factory=CompatibleAPI):
+def run_review(workspace,hours=9,reserve_minutes=40,max_visits=2,new_run=False,translate=True,api_factory=CompatibleAPI):
     ws=Path(workspace).resolve()
     with RunLock(ws/'autonomous.lock'):
         run,state=bootstrap(ws,hours,new_run);path=run/'autonomous_state.json'
         reconcile_completed_tasks(run,state,max_visits)
+        for key,task in state['tasks'].items():
+            if task['status'] in ('pending','retry'):task['preparation_ready']=audit_contract(run,key)['ready']
         state['work_deadline']=state['deadline']-min(reserve_minutes*60,hours*3600*.15)
         api=api_factory();api.max_tokens=int(os.environ.get('RF_AUTO_OUTPUT_TOKENS','6500'))
         stop=threading.Event();thread=threading.Thread(target=heartbeat,args=(stop,state,run),daemon=True);thread.start()
@@ -592,6 +594,7 @@ def run_review(workspace,hours=9,reserve_minutes=40,max_visits=3,new_run=False,t
                 print(f'[{key}] visit {task["visits"]}/{max_visits}: preparing evidence and argument',flush=True)
                 try:
                     if not audit_contract(run,key)['ready']:prepare_unit(ws,run,state,allunits[key],api)
+                    task['preparation_ready']=True
                     state['phase']='writing_review';state['active_source']=None;atomic_json(path,state)
                     previous=run/'synthesis_candidates'/(key+'.json');pending=previous.exists() and read(previous).get('status')=='review_pending'
                     saved=previous.with_suffix('.tex')
@@ -599,7 +602,7 @@ def run_review(workspace,hours=9,reserve_minutes=40,max_visits=3,new_run=False,t
                         nonlocal pending
                         state['phase']='reviewing' if role=='reviewer' else 'writing'
                         if role=='writer' and pending and saved.exists():pending=False;return saved.read_text(encoding='utf-8')
-                        api.max_tokens=int(os.environ.get('RF_AUTO_OUTPUT_TOKENS','6500'))
+                        api.max_tokens=int(os.environ.get('RF_AUTO_OUTPUT_TOKENS','10000'))
                         if role=='reviewer':return json.dumps(structured_call(api,state,path,system,payload,'accept',role=role,validator=lambda verdict:validate_review_response(verdict,payload['candidate'])))
                         for writer_attempt in range(2):
                             response=checkpoint_call(api,state,path,system,payload,role)
@@ -609,7 +612,7 @@ def run_review(workspace,hours=9,reserve_minutes=40,max_visits=3,new_run=False,t
                         raise RuntimeError('API attempts failed: writer output truncated twice')
                     result=revise_unit(run,key,chat,max_rounds=1,require_calibration=False)
                     state['consecutive_provider_failures']=0
-                    task.update(status='completed' if result['status']=='model_review_passed' else 'retry',last_result=result['status'],open_major_issues=result.get('open_major_issues',[]))
+                    record_revision_result(task,result)
                 except KeyboardInterrupt:
                     task['visits']=max(0,task['visits']-1);task['status']='retry';task['in_flight']=False;raise
                 except TimeoutError as exc:
@@ -625,7 +628,7 @@ def run_review(workspace,hours=9,reserve_minutes=40,max_visits=3,new_run=False,t
                     elif 'Missing source anchors:' in str(exc) or 'Evidence record blocked after local repair:' in str(exc):task['status']='blocked_evidence'
                     elif 'API attempts failed:' in str(exc):
                         # A provider outage is not 58 failed scientific reviews.
-                        task['visits']-=1;state['phase']='provider_backoff'
+                        task['visits']-=1;task['service_failures']=task.get('service_failures',0)+1;state['phase']='provider_backoff'
                         state['consecutive_provider_failures']=state.get('consecutive_provider_failures',0)+1
                         print('Provider failure: '+message,flush=True)
                         atomic_json(path,state)
@@ -653,7 +656,7 @@ def run_review(workspace,hours=9,reserve_minutes=40,max_visits=3,new_run=False,t
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--workspace',default=str(ROOT/'workspace'));parser.add_argument('--hours',type=float,default=9)
-    parser.add_argument('--reserve-minutes',type=float,default=40);parser.add_argument('--max-visits',type=int,default=3);parser.add_argument('--new-run',action='store_true');parser.add_argument('--skip-translation',action='store_true');parser.add_argument('--check',action='store_true')
+    parser.add_argument('--reserve-minutes',type=float,default=40);parser.add_argument('--max-visits',type=int,default=2);parser.add_argument('--new-run',action='store_true');parser.add_argument('--skip-translation',action='store_true');parser.add_argument('--check',action='store_true')
     args=parser.parse_args()
     if not 0<args.hours<=24 or args.reserve_minutes<0 or not 1<=args.max_visits<=10:parser.error('Use hours in (0,24], reserve>=0 and max-visits in 1..10')
     load_env(ROOT/'.env')
