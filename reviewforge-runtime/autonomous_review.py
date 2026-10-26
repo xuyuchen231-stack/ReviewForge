@@ -239,7 +239,7 @@ def checkpoint_call(api,state,path,system,payload,role):
     response_file=response_folder/('%06d.txt'%state['requests_attempted']);response_file.write_text(result,encoding='utf-8')
     state['last_response_file']=str(response_file.relative_to(Path(path).parent));state['last_finish_reason']=getattr(api,'last_finish_reason',None)
     state['calls']=state.get('calls',0)+1;state['last_response']=time.time()
-    state.setdefault('model_routes',[]).append({'role':role,'model':getattr(api,'last_model','unknown'),'account_slot':getattr(api,'last_key_slot',None),'thinking_requested':getattr(api,'last_thinking_requested',None),'reasoning_chars':getattr(api,'last_reasoning_chars',None),'response_seconds':round(time.time()-state['last_request_started'],2),'payload_bytes':state.get('request_payload_bytes'),'budget_seconds':state.get('request_budget_seconds'),'utc':datetime.datetime.now(datetime.timezone.utc).isoformat()})
+    state.setdefault('model_routes',[]).append({'role':role,'provider':getattr(api,'last_provider','unknown'),'model':getattr(api,'last_model','unknown'),'account_slot':getattr(api,'last_key_slot',None),'thinking_requested':getattr(api,'last_thinking_requested',None),'reasoning_chars':getattr(api,'last_reasoning_chars',None),'response_seconds':round(time.time()-state['last_request_started'],2),'payload_bytes':state.get('request_payload_bytes'),'budget_seconds':state.get('request_budget_seconds'),'utc':datetime.datetime.now(datetime.timezone.utc).isoformat()})
     atomic_json(path,state)
     return result
 

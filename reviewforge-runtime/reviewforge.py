@@ -5,6 +5,7 @@ import hashlib
 import http.client
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import time
@@ -80,15 +81,16 @@ def read_response_body(response,deadline,timeout):
     return b''.join(chunks)
 
 class CompatibleAPI:
-    def __init__(self):
-        raw_keys = os.environ.get('RF_API_KEYS', '')
+    def __init__(self,config=None):
+        env=os.environ if config is None else config
+        raw_keys = env.get('RF_API_KEYS', '')
         self.keys = [x.strip() for x in raw_keys.split(',') if x.strip() and x.strip() != 'replace_me']
         if not self.keys:
-            self.keys = [os.environ.get('RF_API_KEY', '')]
+            self.keys = [env.get('RF_API_KEY', '')]
         self.key = self.keys[0]
         self.key_index = 0
         self.key_cooldowns = {}
-        self.base = os.environ.get('RF_BASE_URL','').rstrip('/')
+        self.base = env.get('RF_BASE_URL','').rstrip('/')
         self.health_path = Path(os.environ.get('RF_ACCOUNT_HEALTH_FILE',str(Path.home()/'.reviewforge'/'account_health.json')))
         self.cooldown_seconds = max(60,int(os.environ.get('RF_ACCOUNT_COOLDOWN_SECONDS','36000')))
         try:
@@ -98,14 +100,53 @@ class CompatibleAPI:
             slot=hashlib.sha256((self.base+'\0'+key).encode()).hexdigest()
             until=health.get(slot,{}).get('retry_after_epoch',0)
             if until>time.time():self.key_cooldowns[i]=until
-        self.model = os.environ.get('RF_WRITER_MODEL',os.environ.get('RF_MODEL','mimo-v2.6-flash:free'))
-        self.reviewer_model = os.environ.get('RF_REVIEWER_MODEL','deepseek-v4.1-flash:free')
-        self.fallback_model = os.environ.get('RF_FALLBACK_MODEL','deepseek-v4.1-flash:free')
+        self.model = env.get('RF_WRITER_MODEL',env.get('RF_MODEL','mimo-v2.6-flash:free'))
+        self.reviewer_model = env.get('RF_REVIEWER_MODEL','deepseek-v4.1-flash:free')
+        self.fallback_model = env.get('RF_FALLBACK_MODEL','deepseek-v4.1-flash:free')
         if not self.key or self.key == 'replace_me' or not self.base.startswith('https://') or not self.model:
             raise ValueError('Configure RF_API_KEY, HTTPS RF_BASE_URL, RF_MODEL in .env')
         self.max_tokens = int(os.environ.get('RF_MAX_OUTPUT_TOKENS','2500'))
+        self.provider_name=env.get('name','primary');self.providers=[]
+        if config is None:
+            path=Path(os.environ.get('RF_PROVIDER_FILE',str(Path.home()/'.reviewforge/providers.json')))
+            if path.exists():
+                profiles=json.loads(path.read_text(encoding='utf-8'))
+                if not isinstance(profiles,dict) or not isinstance(profiles.get('providers'),list):raise ValueError('Invalid local provider profiles')
+                self.providers=[CompatibleAPI(profile) for profile in profiles['providers'] if profile.get('enabled',True)]
 
     def chat(self, system, user, role='writer'):
+        if not self.providers:
+            result=self._chat(system,user,role);self.last_provider=self.provider_name;return result
+        timeout=getattr(self,'call_timeout',180);deadline=getattr(self,'deadline',None)
+        until=min(deadline if deadline is not None else float('inf'),time.time()+timeout)
+        failures=[];clients=[self]+self.providers
+        try:
+            for index,client in enumerate(clients):
+                remaining=until-time.time()
+                if remaining<=1:break
+                client.call_timeout=max(1,remaining/(len(clients)-index));client.deadline=min(until,time.time()+client.call_timeout)
+                if client is not self:
+                    for attr in ('max_tokens','request_timeout','thinking_mode','reasoning_effort'):
+                        if hasattr(self,attr):setattr(client,attr,getattr(self,attr))
+                try:result=client._chat(system,user,role)
+                except (RuntimeError,TimeoutError) as exc:
+                    failures.append(client.provider_name+': '+str(exc))
+                    if index+1<len(clients):print('API provider unavailable; trying configured backup '+clients[index+1].provider_name+'.',flush=True)
+                    continue
+                for attr in ('last_model','last_key_slot','last_finish_reason','last_reasoning_chars','last_thinking_requested'):
+                    if hasattr(client,attr):setattr(self,attr,getattr(client,attr))
+                self.last_provider=client.provider_name
+                return result
+        finally:
+            self.call_timeout=timeout
+            if deadline is None:self.__dict__.pop('deadline',None)
+            else:self.deadline=deadline
+        if failures and all('Provider rate limit (429)' in failure for failure in failures):
+            delays=[int(match.group(1)) for failure in failures for match in [re.search(r'Retry-After:\s*(\d+)',failure)] if match]
+            raise RuntimeError('Provider rate limit (429); respect Retry-After: '+str(min(delays) if delays else 60))
+        raise RuntimeError('API attempts failed: '+'; '.join(failures or ['provider time budget reached']))
+
+    def _chat(self, system, user, role='writer'):
         preferred = getattr(self,'request_model',None) or (self.reviewer_model if role == 'reviewer' else self.model)
         models = [preferred] + ([self.fallback_model] if self.fallback_model != preferred else [])
         if role=='reviewer' and self.model not in models:models.append(self.model)
