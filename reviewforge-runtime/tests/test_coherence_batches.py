@@ -3,6 +3,23 @@ from pathlib import Path
 from autonomous_review import bootstrap,coherence_review,read
 
 class CoherenceBatchTests(unittest.TestCase):
+ def test_self_conflict_can_be_anchored_inside_one_short_passage(self):
+  class API:
+   max_tokens=1000
+   def chat(self,system,user,role):
+    p=json.loads(user)['units'][0];return json.dumps({'issues':[{'unit_id':p['unit_id'],'id':'self','severity':'major','passage_id':p['passage_options'][0]['id'],'related_passage_ids':[],'self_conflict':True,'reason':'The two sentences specify opposite fixed splits.','required_change':'Reconcile the two clauses.'}]})
+  with tempfile.TemporaryDirectory() as t:
+   ws=Path(t);(ws/'review_en.tex').write_text('\\begin{document}\n\\subsection{Protocol}\nThe fixed split includes every test trajectory in training. The same fixed split excludes every test trajectory from training.\n\\end{document}',encoding='utf-8');run,state=bootstrap(ws,9);self.assertEqual(coherence_review(run,state,API()),[])
+ def test_passage_ids_materialize_original_text_and_cross_unit_context(self):
+  class API:
+   calls=0;max_tokens=1000
+   def chat(self,system,user,role):
+    self.calls+=1;p=json.loads(user)['units']
+    if self.calls>1:return json.dumps({'issues':[]})
+    return json.dumps({'issues':[{'unit_id':p[0]['unit_id'],'id':'paired','severity':'major','passage_id':p[0]['passage_options'][0]['id'],'related_passage_ids':[p[1]['passage_options'][0]['id']],'reason':'Two anchored clauses conflict.','required_change':'Reconcile scope.'}]})
+  with tempfile.TemporaryDirectory() as t:
+   ws=Path(t);source=self.source(ws);run,state=bootstrap(ws,9);coherence_review(run,state,API());r=read(run/'reports/coherence_01.json');issue=r['verdict']['issues'][0]
+   self.assertIn(issue['passage'],source);self.assertIn(issue['related_passages'][0]['passage'],source);self.assertNotEqual(issue['unit_id'],issue['related_passages'][0]['unit_id'])
  def source(self,ws):
   text='\\begin{document}\n'+''.join('\\subsection{Topic '+str(i)+'}\n'+('A bounded comparison considers validation and evidence limitations. '*35)+'\n' for i in range(20))+'\\end{document}'
   (ws/'review_en.tex').write_text(text,encoding='utf-8');return text
@@ -46,7 +63,8 @@ class CoherenceBatchTests(unittest.TestCase):
     def chat(self,system,user,role):
      self.calls+=1
      if self.calls>1:raise RuntimeError('API attempts failed: simulated later-batch outage')
-     return json.dumps({'issues':[{'unit_id':u['id'],'id':key,'severity':'major','passage':'A conditional comparison follows the retained model and its evidence.','reason':'A distinct concern '+key,'required_change':'Repair '+key} for key in ('A','B')]})
+     packets=json.loads(user)['units'];first=next(p for p in packets if p['unit_id']==u['id']);other=next(p for p in packets if p['unit_id']!=u['id'])
+     return json.dumps({'issues':[{'unit_id':u['id'],'id':key,'severity':'major','passage_id':first['passage_options'][0]['id'],'related_passage_ids':[other['passage_options'][0]['id']],'reason':'A distinct concern '+key,'required_change':'Repair '+key} for key in ('A','B')]})
    with self.assertRaises(RuntimeError):coherence_review(ws,state,API())
    record=read(ws/'synthesis_candidates/accepted'/(u['id']+'.json'));self.assertEqual(len(record['open_major_issues']),2);self.assertEqual(state['tasks'][u['id']]['status'],'retry')
    report=read(ws/'reports/coherence_01.json');self.assertEqual(report['status'],'incomplete');self.assertEqual(report['completed_batches'],1)

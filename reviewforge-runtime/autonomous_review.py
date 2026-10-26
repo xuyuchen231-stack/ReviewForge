@@ -15,7 +15,7 @@ import time
 import uuid
 
 from reviewforge import CompatibleAPI, atomic_json, extract_json, load_env
-from manuscript_integrity import citekeys, tex_integrity
+from manuscript_integrity import citekeys, tex_integrity,unique_label_targets
 from synthesis_pipeline import initialize, units, audit_contract, revise_unit, digest, read, contract_digest, unit_evidence, matrix_for_unit, validate_review_response
 
 ROOT=Path(__file__).resolve().parent
@@ -223,8 +223,10 @@ def checkpoint_call(api,state,path,system,payload,role):
     original_bytes=len(json.dumps(payload,ensure_ascii=False).encode('utf-8'));payload=compact_evidence_payload(payload)
     whole_unit=(('body' in payload or 'candidate' in payload) and 'study_comparisons' in payload) or (role=='reviewer' and 'units' in payload) or len(json.dumps(payload,ensure_ascii=False).encode('utf-8'))>30000
     if role=='reviewer':api.max_tokens=max(getattr(api,'max_tokens',0),int(os.environ.get('RF_AUTO_REVIEW_OUTPUT_TOKENS','12000')))
-    api.reasoning_effort=os.environ.get('RF_COHERENCE_REASONING_EFFORT','low') if role=='reviewer' and 'units' in payload else None
-    api.request_model=(os.environ.get('RF_COHERENCE_MODEL') or getattr(api,'model',None)) if role=='reviewer' and 'units' in payload else None
+    coherence=role=='reviewer' and 'units' in payload
+    api.thinking_mode=os.environ.get('RF_COHERENCE_THINKING','disabled') if coherence else None
+    api.reasoning_effort=os.environ.get('RF_COHERENCE_REASONING_EFFORT','low') if coherence and api.thinking_mode=='enabled' else None
+    api.request_model=(os.environ.get('RF_COHERENCE_MODEL') or getattr(api,'reviewer_model',getattr(api,'model',None))) if coherence else None
     request_budget=600 if whole_unit else 180
     state['request_budget_seconds']=min(request_budget,int(remaining));state['request_payload_bytes']=len(json.dumps(payload,ensure_ascii=False).encode('utf-8'));state['request_original_bytes']=original_bytes
     state['requests_attempted']=state.get('requests_attempted',0)+1;state['last_request_role']=role;state['last_request_started']=time.time();atomic_json(path,state)
@@ -237,7 +239,7 @@ def checkpoint_call(api,state,path,system,payload,role):
     response_file=response_folder/('%06d.txt'%state['requests_attempted']);response_file.write_text(result,encoding='utf-8')
     state['last_response_file']=str(response_file.relative_to(Path(path).parent));state['last_finish_reason']=getattr(api,'last_finish_reason',None)
     state['calls']=state.get('calls',0)+1;state['last_response']=time.time()
-    state.setdefault('model_routes',[]).append({'role':role,'model':getattr(api,'last_model','unknown'),'account_slot':getattr(api,'last_key_slot',None),'response_seconds':round(time.time()-state['last_request_started'],2),'payload_bytes':state.get('request_payload_bytes'),'budget_seconds':state.get('request_budget_seconds'),'utc':datetime.datetime.now(datetime.timezone.utc).isoformat()})
+    state.setdefault('model_routes',[]).append({'role':role,'model':getattr(api,'last_model','unknown'),'account_slot':getattr(api,'last_key_slot',None),'thinking_requested':getattr(api,'last_thinking_requested',None),'reasoning_chars':getattr(api,'last_reasoning_chars',None),'response_seconds':round(time.time()-state['last_request_started'],2),'payload_bytes':state.get('request_payload_bytes'),'budget_seconds':state.get('request_budget_seconds'),'utc':datetime.datetime.now(datetime.timezone.utc).isoformat()})
     atomic_json(path,state)
     return result
 
@@ -385,7 +387,7 @@ def current_accepted_candidate(run,unit,original):
         if not isinstance(record,dict) or not isinstance(plan,dict):return None
         argument=next(u for u in plan['units'] if u['id']==unit['id'])
         expected=contract_digest(plan,matrix_for_unit(run,unit['id']),unit_evidence(run,unit,argument),unit['id'])
-        if record.get('status')!='model_review_passed' or record.get('open_major_issues') or record.get('contract_sha256')!=expected or record.get('source_sha256')!=digest(original) or record.get('unit_source_sha256')!=unit['source_sha256'] or record.get('candidate_sha256')!=digest(body) or not gate_block(unit['body'],body)[0]:return None
+        if record.get('status')!='model_review_passed' or record.get('open_major_issues') or record.get('contract_sha256')!=expected or record.get('source_sha256')!=digest(original) or record.get('unit_source_sha256')!=unit['source_sha256'] or record.get('candidate_sha256')!=digest(body) or not gate_block(unit['body'],body,known_reference_targets=unique_label_targets(original))[0]:return None
         return body
     except (OSError,ValueError,TypeError,KeyError,AttributeError,StopIteration):return None
 
@@ -407,7 +409,7 @@ def assemble(run,state):
         if body is None:invalid.append(unit['id']);continue
         candidate=candidate[:unit['start']]+body+candidate[unit['end']:];accepted.append(unit['id'])
     def content(tex):return tex.split(r'\begin{document}',1)[-1].rsplit(r'\end{document}',1)[0]
-    ok,reason=gate_block(content(original),content(candidate))
+    ok,reason=gate_block(content(original),content(candidate),known_reference_targets=unique_label_targets(original))
     if not ok or tex_integrity(candidate)!=tex_integrity(original):raise ValueError('Whole-candidate structural gate failed: '+reason)
     output=run/'output';output.mkdir(exist_ok=True)
     from autonomous_delivery import quarantine_stale_outputs
@@ -471,7 +473,7 @@ def apply_coherence_findings(run,state,issues,requeued,prefix):
             identifier='global:'+prefix+':'+issue['id']
             if identifier in record.get('open_major_issues',[]):continue
             record.setdefault('open_major_issues',[]).append(identifier)
-            new.append({'id':identifier,'severity':'major','locator':issue['passage'],'reason':issue['reason'],'required_evidence_or_change':issue['required_change']})
+            new.append({'id':identifier,'severity':'major','locator':issue['passage'],'reason':issue['reason'],'required_evidence_or_change':issue['required_change'],'cross_unit_context':issue.get('related_passages',[])})
         if not new:continue
         record['status']='needs_revision';record.setdefault('history',[]).append({'review':{'accept':False,'issues':new},'stage':'coherence'})
         atomic_json(report,record);atomic_json(run/'synthesis_candidates/accepted'/(key+'.json'),record)
@@ -483,15 +485,24 @@ def coherence_review(run,state,api):
     base=(run/'review_en.tex').read_text(encoding='utf-8');packets=[]
     for unit in units(base):
         body=current_accepted_candidate(run,unit,base)
+        reviewed=body is not None
         if body is None:body=unit['body']
-        packets.append({'unit_id':unit['id'],'heading':unit['heading'],'text':body})
+        packets.append({'unit_id':unit['id'],'heading':unit['heading'],'text':body,'review_status':'model_review_passed' if reviewed else 'unreviewed_original'})
     batches=coherence_batches(packets)
     prompt='''Review cross-subsection coherence of this scientific review. Source entailment was
 assessed locally and is not certified here. Inspect contradictions, repeated definitions, incompatible
 comparison tasks and conclusions that do not develop a common contribution. Respect the supplied scope;
 never pretend omitted text was read. Return JSON {"issues":[{"unit_id":str,"id":str,
-"severity":"major"|"minor","passage":exact quotation from that unit,"reason":str,
-"required_change":str}]}. Do not reward length or manufacture issues to keep a program busy.'''
+"severity":"major"|"minor","passage_id":str,"related_passage_ids":[str],"self_conflict":bool,"reason":str,
+"required_change":str}]}. Select passage IDs from passage_options; never retype quotations.
+A major finding needs a second distinct passage demonstrating the conflict, or self_conflict=true
+when BOTH inconsistent statements are inside the selected passage; explain both clauses. Generic style,
+selection-completeness or preference concerns without a demonstrated conflict are minor.
+Distinguish normative recommendations from reported empirical findings; a difference of
+scope or register alone is not a contradiction. Status model_review_passed is provisional,
+not expert proof; unreviewed_original is not a reference truth. For a disagreement involving
+unreviewed text, propose independent revalidation rather than forcing a reviewed candidate
+to agree with an unsupported original assertion. Do not reward length or manufacture issues.'''
     index={p['unit_id']:p['text'] for p in packets};issues=[];requeued=[];progress=[]
     target=run/'reports'/('coherence_%02d.json'%state.get('coherence_rounds',1))
     summary={'scope':'batched_complete_windows_and_global_excerpts','manuscript_snapshot_sha256':digest(json.dumps(packets,sort_keys=True)),'verdict':{'issues':issues},'requeued':requeued,'expert_verified':False,'batches':progress,'total_batches':len(batches),'completed_batches':0,'status':'incomplete'}
@@ -500,13 +511,32 @@ never pretend omitted text was read. Return JSON {"issues":[{"unit_id":str,"id":
         for number,batch in enumerate(batches,1):
             state['coherence_batch']=number;state['coherence_batch_count']=len(batches)
             shown={p['unit_id'] for p in batch['units']}
+            locations={};annotated=[]
+            for packet in batch['units']:
+                options=[]
+                for part_number,part in enumerate(packet['text'].split('\n[...unseen middle omitted...]\n')):
+                    for start in range(0,len(part),1200):
+                        excerpt=part[start:start+1200]
+                        if not excerpt.strip() or excerpt not in index[packet['unit_id']]:continue
+                        identifier=packet['unit_id']+':'+str(packet.get('window_start',0))+':'+str(part_number)+':'+str(start)
+                        locations[identifier]={'unit_id':packet['unit_id'],'heading':packet['heading'],'review_status':packet['review_status'],'passage_id':identifier,'passage':excerpt}
+                        options.append({'id':identifier,'anchor':excerpt[:56],'end_anchor':excerpt[-28:]})
+                annotated.append({**packet,'passage_options':options})
+            batch={**batch,'units':annotated}
             def validate_coherence(verdict):
                 if not isinstance(verdict.get('issues'),list):return False
                 for issue in verdict['issues']:
-                    if not isinstance(issue,dict) or issue.get('unit_id') not in shown or issue.get('severity') not in ('major','minor') or any(not isinstance(issue.get(k),str) or not issue[k].strip() for k in ('id','passage','reason','required_change')) or issue['passage'] not in index[issue['unit_id']] or not any(p['unit_id']==issue['unit_id'] and issue['passage'] in p['text'] for p in batch['units']):
-                        raise ValueError('Coherence issue needs a valid unit ID, severity, reason, required change and exact passage from a supplied window.')
+                    if not isinstance(issue,dict) or issue.get('unit_id') not in shown or issue.get('severity') not in ('major','minor') or any(not isinstance(issue.get(k),str) or not issue[k].strip() for k in ('id','reason','required_change')):raise ValueError('Coherence issue schema is incomplete')
+                    selected=locations.get(issue.get('passage_id'))
+                    if not selected or selected['unit_id']!=issue['unit_id']:raise ValueError('Select passage_id from this unit passage_options; do not retype or invent a locator')
+                    if 'passage' in issue and issue['passage']!=selected['passage']:raise ValueError('Supplied quotation does not match the immutable passage ID')
+                    related=issue.get('related_passage_ids',[])
+                    if not isinstance(related,list) or any(not isinstance(k,str) or k not in locations for k in related):raise ValueError('Related passage IDs must come from the supplied options')
+                    related=list(dict.fromkeys(k for k in related if k!=issue['passage_id']))
+                    if issue['severity']=='major' and not related and issue.get('self_conflict') is not True:raise ValueError('A major conflict needs a second passage ID or an explained self_conflict inside the selected passage; otherwise use minor')
+                    issue['passage']=selected['passage'];issue['related_passages']=[locations[k] for k in related]
                 return True
-            key=digest(json.dumps({'version':3,'prompt':prompt,'batch':batch,'requested_model':os.environ.get('RF_COHERENCE_MODEL') or getattr(api,'model',None),'reasoning_effort':os.environ.get('RF_COHERENCE_REASONING_EFFORT','low')},sort_keys=True));cache=run/'reports/coherence_cache'/(key+'.json');verdict=None
+            key=digest(json.dumps({'version':5,'prompt':prompt,'batch':batch,'requested_model':os.environ.get('RF_COHERENCE_MODEL') or getattr(api,'reviewer_model',getattr(api,'model',None)),'thinking_mode':os.environ.get('RF_COHERENCE_THINKING','disabled'),'reasoning_effort':os.environ.get('RF_COHERENCE_REASONING_EFFORT','low') if os.environ.get('RF_COHERENCE_THINKING','disabled')=='enabled' else None},sort_keys=True));cache=run/'reports/coherence_cache'/(key+'.json');verdict=None
             if cache.exists():
                 try:
                     saved=read(cache)

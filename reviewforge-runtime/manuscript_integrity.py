@@ -1,6 +1,7 @@
 """Deterministic offline manuscript checks. Never invokes a model or modifies a manuscript."""
 from __future__ import annotations
 import hashlib
+from collections import Counter
 import json
 import re
 from pathlib import Path
@@ -17,6 +18,18 @@ def citekeys(text):
     for group in CITES.findall(text):
         keys.update(k.strip() for k in group.split(",") if k.strip())
     return keys
+
+def reference_targets(text):
+    return {key.strip() for group in REF.findall(text) for key in group.split(',') if key.strip()}
+
+def unique_label_targets(text):
+    active=[]
+    for line in text.splitlines():
+        for index,char in enumerate(line):
+            if char=='%' and (index-len(line[:index].rstrip('\\')))%2==0:
+                line=line[:index];break
+        active.append(line)
+    return {key for key,count in Counter(LABEL.findall('\n'.join(active))).items() if count==1}
 
 def bibkeys(text):
     return set(BIB.findall(text)) | set(MANUAL.findall(text))

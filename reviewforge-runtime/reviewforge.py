@@ -114,7 +114,12 @@ class CompatibleAPI:
         for model in models:
             request_body={'model': model, 'messages': [{'role': 'system', 'content': system}, {'role': 'user', 'content': user}], 'temperature': 0.2, 'max_tokens': self.max_tokens}
             effort=getattr(self,'reasoning_effort',None)
-            if effort is not None and ('deepseek-v4' in model.lower() or model.lower().split('/')[-1].removesuffix(':free')=='deepseek-flash'):
+            thinking=getattr(self,'thinking_mode',None)
+            supported=('deepseek-v4' in model.lower() or model.lower().split('/')[-1].removesuffix(':free')=='deepseek-flash')
+            if thinking is not None and supported:
+                if thinking not in ('enabled','disabled'):raise ValueError('DeepSeek coherence thinking mode must be enabled or disabled')
+                request_body['thinking']={'type':thinking}
+            if effort is not None and thinking!='disabled' and supported:
                 if effort not in ('low','high','max'):raise ValueError('DeepSeek coherence reasoning effort must be low, high or max')
                 request_body['reasoning_effort']=effort
             body=json.dumps(request_body).encode()
@@ -142,6 +147,8 @@ class CompatibleAPI:
                     self.last_finish_reason=data['choices'][0].get('finish_reason')
                     self.last_model=model
                     self.last_key_slot=key_index+1
+                    self.last_reasoning_chars=len(data['choices'][0]['message'].get('reasoning_content') or data['choices'][0]['message'].get('reasoning') or '')
+                    self.last_thinking_requested=request_body.get('thinking',{}).get('type')
                     return result
                 except urllib.error.HTTPError as exc:
                     if exc.code == 429:

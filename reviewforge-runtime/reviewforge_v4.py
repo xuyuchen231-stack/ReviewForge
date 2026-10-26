@@ -8,7 +8,7 @@ from reviewforge import CompatibleAPI, load_env, atomic_json
 from research_quality import evaluate as evaluate_quality, scaffold as scaffold_quality
 from evidence_context import load_context, context_digest, candidate_evidence_gate
 from delivery_checks import layout_diagnostics, render_preview, visual_status, delivery_audit, input_digests, build_is_current
-from manuscript_integrity import analyze as analyze_manuscript, write_report as write_integrity, bibkeys as parse_bibkeys, citekeys as parse_citekeys, tex_integrity
+from manuscript_integrity import analyze as analyze_manuscript, write_report as write_integrity, bibkeys as parse_bibkeys, citekeys as parse_citekeys, tex_integrity, reference_targets
 
 ROOT=Path(__file__).resolve().parent
 WORK=ROOT/'workspace'
@@ -218,7 +218,7 @@ def heading_change_log(old,new):
  return [{'before':a,'after':b} for a,b in zip(before,after) if a!=b]
 
 
-def gate_block(old,new):
+def gate_block(old,new,known_reference_targets=None):
  if re.search(r'normalized source text offset\s+\d',new,re.I):return False,'Internal source locator leaked into narrative; keep provenance in evidence records and citation keys in the manuscript'
  if not new.strip() or len(new)<max(80,int(len(old)*.72)):
   return False,'Output empty or likely truncated'
@@ -228,12 +228,13 @@ def gate_block(old,new):
   # All protected LaTeX, citations, labels and cross-references are still gated below.
   if len(heading_inventory(new))>max(20,3*max(1,len(heading_inventory(old)))):
    return False,'Excessive new headings; possible model-generated outline instead of revision'
- old_refs=set(re.findall(r'\\(?:ref|eqref|autoref|cref|Cref)\{([^}]+)\}',old))
- new_refs=set(re.findall(r'\\(?:ref|eqref|autoref|cref|Cref)\{([^}]+)\}',new))
+ old_refs=reference_targets(old)
+ new_refs=reference_targets(new)
  if old_refs-new_refs:
   return False,'Existing cross-reference targets removed: '+', '.join(sorted(old_refs-new_refs))
- if new_refs-old_refs:
-  return False,'New cross-reference targets require whole-document validation: '+', '.join(sorted(new_refs-old_refs))
+ unknown_refs=new_refs-old_refs-set(known_reference_targets or ())
+ if unknown_refs:
+  return False,'New cross-reference targets require whole-document validation: '+', '.join(sorted(unknown_refs))
  for env in ('figure','figure*','table','table*','equation','equation*','align','align*','gather','gather*','tikzpicture'):
   p=r'\\begin\{'+re.escape(env)+r'\}.*?\\end\{'+re.escape(env)+r'\}'
   if re.findall(p,old,re.S)!=re.findall(p,new,re.S):return False,'Protected environment changed: '+env

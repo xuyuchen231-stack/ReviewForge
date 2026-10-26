@@ -3,6 +3,15 @@ from pathlib import Path
 from unittest.mock import patch
 
 class EndToEndRegressions(unittest.TestCase):
+ def test_reference_catalogue_ignores_commented_and_duplicate_labels(self):
+  from manuscript_integrity import unique_label_targets
+  source='\\label{active}\n% \\label{inactive}\n% \\label{active}\n\\label{duplicate}\\label{duplicate}\n'
+  self.assertEqual(unique_label_targets(source),{'active'})
+ def test_new_cross_reference_requires_a_validated_whole_document_target(self):
+  from reviewforge_v4 import gate_block
+  old='A bounded comparison of validation conditions. '*8;new=old+r' See \eqref{eq:known}.'
+  self.assertFalse(gate_block(old,new)[0]);self.assertTrue(gate_block(old,new,known_reference_targets={'eq:known'})[0])
+  self.assertFalse(gate_block(old,new.replace('eq:known','eq:invented'),known_reference_targets={'eq:known'})[0])
  def test_internal_source_locations_do_not_leak_into_manuscript_prose(self):
   from reviewforge_v4 import gate_block
   old='A bounded comparison of validation conditions. '*8

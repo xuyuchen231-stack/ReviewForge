@@ -53,6 +53,19 @@ class TestLiveLoopMock(unittest.TestCase):
             self.assertTrue((p/'reports/iteration_0001.json').exists())
 
 class TestModelRouting(unittest.TestCase):
+    def test_explicit_coherence_thinking_toggle_does_not_override_local_review(self):
+        from unittest.mock import patch
+        from io import BytesIO
+        from reviewforge import CompatibleAPI
+        bodies=[]
+        class Response:
+            def __enter__(self):return BytesIO(b'{"choices":[{"message":{"content":"ok","reasoning_content":""}}]}')
+            def __exit__(self,*args):return False
+        def opener(req,timeout):bodies.append(json.loads(req.data));return Response()
+        env={'RF_API_KEYS':'mode-test','RF_BASE_URL':'https://mode.invalid','RF_WRITER_MODEL':'writer','RF_REVIEWER_MODEL':'deepseek-v4.1-flash:free'}
+        with patch.dict('os.environ',env),patch('reviewforge.urllib.request.urlopen',side_effect=opener):
+            api=CompatibleAPI();api.thinking_mode='disabled';api.reasoning_effort='low';api.chat('s','u',role='reviewer');self.assertEqual(api.last_reasoning_chars,0);api.thinking_mode=None;api.reasoning_effort=None;api.chat('s','u',role='reviewer')
+        self.assertEqual(bodies[0].get('thinking'),{'type':'disabled'});self.assertNotIn('reasoning_effort',bodies[0]);self.assertNotIn('thinking',bodies[1])
     def test_task_specific_model_override_does_not_change_the_local_reviewer(self):
         from unittest.mock import patch
         from io import BytesIO

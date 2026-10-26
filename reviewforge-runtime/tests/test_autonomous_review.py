@@ -5,12 +5,12 @@ from autonomous_review import RunLock, bootstrap, choose_task, assemble, source_
 class AutonomousTests(unittest.TestCase):
  def test_coherence_route_is_reset_before_local_scientific_review(self):
   class API:
-   model='writer';max_tokens=1000
+   model='writer';reviewer_model='critic';max_tokens=1000
    def chat(self,*args,**kwargs):return 'ok'
   with tempfile.TemporaryDirectory() as t:
    api=API();state={'deadline':time.time()+1200};path=Path(t)/'state.json'
-   checkpoint_call(api,state,path,'s',{'units':[]},'reviewer');self.assertEqual(api.request_model,'writer');self.assertEqual(api.reasoning_effort,'low')
-   checkpoint_call(api,state,path,'s',{'candidate':'draft','study_comparisons':[]},'reviewer');self.assertIsNone(api.request_model);self.assertIsNone(api.reasoning_effort)
+   checkpoint_call(api,state,path,'s',{'units':[]},'reviewer');self.assertEqual(api.request_model,'critic');self.assertIsNone(api.reasoning_effort);self.assertEqual(api.thinking_mode,'disabled')
+   checkpoint_call(api,state,path,'s',{'candidate':'draft','study_comparisons':[]},'reviewer');self.assertIsNone(api.request_model);self.assertIsNone(api.reasoning_effort);self.assertIsNone(api.thinking_mode)
  def test_resume_with_unfinished_units_reopens_coherence_budget(self):
   with tempfile.TemporaryDirectory() as t:
    ws=Path(t);self.source(ws);run,state=bootstrap(ws,9);state['coherence_rounds']=2
@@ -125,7 +125,9 @@ class AutonomousTests(unittest.TestCase):
    run=Path(report['english']).parent.parent;state=json.loads((run/'autonomous_state.json').read_text())
    key=report['accepted_ids'][0];body=(run/'synthesis_candidates/accepted'/(key+'.tex')).read_text()
    class GlobalAPI:
-    def chat(self,*a,**k):return json.dumps({'issues':[{'unit_id':key,'id':'contradiction','severity':'major','passage':body[-40:],'reason':'Inconsistent conclusion','required_change':'Reconcile conclusion'}]})
+    def chat(self,system,user,**k):
+     packets=json.loads(user)['units'];target=next(p for p in packets if p['unit_id']==key);other=next(p for p in packets if p['unit_id']!=key)
+     return json.dumps({'issues':[{'unit_id':key,'id':'contradiction','severity':'major','passage_id':target['passage_options'][0]['id'],'related_passage_ids':[other['passage_options'][0]['id']],'reason':'Inconsistent conclusion','required_change':'Reconcile conclusion'}]})
    state['deadline']=time.time()+30;state['work_deadline']=state['deadline'];coherence_review(run,state,GlobalAPI())
    self.assertEqual(assemble(run,state)['accepted_units'],1)
    remaining=next(i for i in report['accepted_ids'] if i!=key);snapshot=run/'unit_studies'/(remaining+'.json')

@@ -3,6 +3,30 @@ from pathlib import Path
 from synthesis_pipeline import initialize, audit_contract, revise_unit, review_verdict, CRITERIA
 
 class SynthesisTests(unittest.TestCase):
+ def test_repair_budget_includes_previous_candidate_before_api_call(self):
+  with tempfile.TemporaryDirectory() as t:
+   ws=self.workspace(t);u=self.prepared(ws);folder=ws/'synthesis_candidates';folder.mkdir(exist_ok=True)
+   (folder/(u['id']+'.json')).write_text(json.dumps({'status':'needs_revision','history':[]}),encoding='utf-8')
+   (folder/(u['id']+'.tex')).write_text('x'*180001,encoding='utf-8')
+   with self.assertRaisesRegex(ValueError,'context budget'):
+    revise_unit(ws,u['id'],lambda *args:self.fail('Oversized repair reached API'),max_rounds=1)
+ def test_synthesis_and_assembly_validate_existing_cross_unit_reference_targets(self):
+  from autonomous_review import assemble
+  with tempfile.TemporaryDirectory() as t:
+   ws=self.workspace(t);p=ws/'review_en.tex';p.write_text(p.read_text(encoding='utf-8').replace(r'\end{document}',r'\subsection{Timing}'+'\n'+r'\begin{equation}\label{eq:known}a=b\end{equation}\end{document}'),encoding='utf-8');u=self.prepared(ws)
+   def chat(s,p,r):return self.passing_chat(s,p,r)+r' See \eqref{eq:known}.' if r=='writer' else self.passing_chat(s,p,r)
+   result=revise_unit(ws,u['id'],chat,max_rounds=1);self.assertEqual(result['status'],'model_review_passed')
+   self.assertIn(u['id'],assemble(ws,{})['accepted_ids'])
+ def test_repair_receives_original_context_for_legacy_cross_unit_findings(self):
+  with tempfile.TemporaryDirectory() as t:
+   ws=self.workspace(t);source=(ws/'review_en.tex').read_text(encoding='utf-8').replace(r'\end{document}',r'\subsection{Related}'+'\nA normative related statement. '+r'\cite{A}\end{document}');(ws/'review_en.tex').write_text(source,encoding='utf-8');u=self.prepared(ws)
+   def first(system,payload,role):
+    if role=='writer':return self.passing_chat(system,payload,role)
+    verdict=json.loads(self.passing_chat(system,payload,role));verdict.update(accept=False,issues=[{'id':'I1','severity':'major','locator':'A definition','reason':'Compare the scope with unit_002.','required_evidence_or_change':'Clarify the normative scope.'}]);return json.dumps(verdict)
+   revise_unit(ws,u['id'],first,max_rounds=1)
+   def inspect(system,payload,role):
+    context=payload['active_issue_details'][0]['cross_unit_context'];self.assertEqual(context[0]['unit_id'],'unit_002');self.assertIn('normative related statement',context[0]['passage']);self.assertEqual(context[0]['review_status'],'original_not_revalidated');raise RuntimeError('stop after context inspection')
+   with self.assertRaisesRegex(RuntimeError,'stop after context inspection'):revise_unit(ws,u['id'],inspect,max_rounds=1)
  def test_grounded_negative_review_remains_a_scientific_rejection(self):
   from synthesis_pipeline import validate_review_response
   verdict={'accept':False,'issues':[],'criteria':{k:{'status':'fail','passages':['Actual text'],'explanation':'Comparison is insufficient.'} for k in CRITERIA}}

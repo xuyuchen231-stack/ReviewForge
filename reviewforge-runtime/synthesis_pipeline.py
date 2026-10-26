@@ -10,7 +10,7 @@ import re
 import uuid
 from pathlib import Path
 from reviewforge import atomic_json, CompatibleAPI, load_env, extract_json
-from manuscript_integrity import citekeys
+from manuscript_integrity import citekeys,unique_label_targets
 from evidence_context import load_context
 
 CRITERIA=('question_answered','comparative_synthesis','explains_differences','evidence_scope','bounded_conclusion')
@@ -48,6 +48,7 @@ application of each criterion using actual bridge passages. Empirical claims sti
 
 WRITER+=''' The required_citation_keys inventory is mandatory. Every original heading listed in original_headings belongs to this revision scope even when it was inline in the source. Resolve review findings in place; never relocate protected formulas, citations or existing material to an unwritten other section. Add evidence-based explanation rather than deleting protected content.'''
 WRITER+=''' Source locators, normalized source text offsets, span IDs and extraction bookkeeping belong only in evidence/review records, never in publication prose. Cite studies with the supplied citation keys. Report access limitations where scientifically necessary without describing the tool workflow. Scope negative claims to the studies and accessible evidence actually examined; do not equate incomplete reporting with evidence that a method or measurement does not exist.'''
+WRITER+=''' When previous_candidate is supplied, it is the working draft: make targeted changes addressing the open findings, retaining already grounded comparisons, empirical details, caveats and unaffected paragraphs. Do not introduce a new empirical characterization merely while fixing wording or framing. Original body supplies protected content, not an instruction to regenerate the entire argument. Cross-unit context is manuscript context, not additional verified primary evidence; distinguish a methodological recommendation from an observed result rather than forcing a reviewed claim to match an unreviewed original.'''
 REVIEWER+=''' Treat every original_headings entry as part of the supplied source unit. Require in-place study-based integration rather than relocation or deletion of protected formulas/citations. The unit may contain an existing inline sibling heading; assess its original content rather than assuming it was newly added.'''
 
 def digest(text):return hashlib.sha256(text.encode('utf-8')).hexdigest()
@@ -252,6 +253,17 @@ def revise_unit(workspace,unit_id,chat,max_rounds=3,require_calibration=True):
             open_major.update(prior.get('open_major_issues',[]))
             payload['open_major_issues']=sorted(open_major)
             payload['active_issue_details']=[i for h in history for i in h.get('review',{}).get('issues',[]) if isinstance(i,dict) and i.get('id') in open_major]
+            # Older coherence records named another unit without attaching its
+            # text. Supply that original explicitly, labeled as unverified context.
+            originals={item['id']:item for item in units(text)}
+            expanded=[]
+            for issue in payload['active_issue_details']:
+                related=issue.get('cross_unit_context',[])
+                if not related:
+                    identifiers=set(re.findall(r'unit_\d{3}',str(issue.get('reason',''))+' '+str(issue.get('required_evidence_or_change',''))))-{unit_id}
+                    related=[{'unit_id':key,'heading':originals[key]['heading'],'review_status':'original_not_revalidated','passage':originals[key]['body']} for key in sorted(identifiers) if key in originals]
+                expanded.append({**issue,'cross_unit_context':related})
+            payload['active_issue_details']=expanded
             payload['feedback']={'previous_run':prior.get('run_id'),'previous_review':history[-1] if history else {},'contract_changed':prior.get('contract_sha256')!=contract_digest(plan,matrix,evidence,unit_id)}
             previous_text=folder/(unit_id+'.tex')
             if previous_text.exists():
@@ -259,18 +271,20 @@ def revise_unit(workspace,unit_id,chat,max_rounds=3,require_calibration=True):
                 payload['missing_original_citation_keys']=sorted(citekeys(u['body'])-citekeys(payload['previous_candidate']))
     for attempt in range(1,max_rounds+1):
         # Any API exception exits immediately; already saved attempts survive.
+        if len(json.dumps(payload))>180000:raise ValueError('Repair exceeds context budget; curate related passages explicitly before retrying; no evidence was silently truncated.')
         candidate=chat(WRITER,payload,'writer').strip()
         attemptfile=runfolder/(unit_id+f'.attempt_{attempt:02}.tex')
         attemptfile.write_bytes(candidate.encode('utf-8'))
         (folder/(unit_id+'.tex')).write_bytes(candidate.encode('utf-8'))
         atomic_json(folder/(unit_id+'.json'),{'status':'review_pending','run_id':run_id,'candidate_sha256':digest(candidate),'source_sha256':digest(text),'contract_sha256':contract_digest(plan,matrix,evidence,unit_id),'open_major_issues':sorted(open_major),'history':history})
-        structural,reason=gate_block(u['body'],candidate)
+        structural,reason=gate_block(u['body'],candidate,known_reference_targets=unique_label_targets(text))
         unknown=citekeys(candidate)-keys
         if unknown:structural=False;reason='Citations outside supplied evidence: '+','.join(sorted(unknown))
         if structural:
             # Old drafts are writer repair context, not alternative review targets.
             review_payload={k:v for k,v in payload.items() if k not in ('body','previous_candidate')}
             review_payload.update(candidate=candidate,review_target='Assess only candidate. Other supplied records are evidence and prior review findings, not draft text.')
+            if len(json.dumps(review_payload))>180000:raise ValueError('Review exceeds context budget; candidate saved for resume; curate related passages explicitly.')
             verdict=extract_json(chat(REVIEWER,review_payload,'reviewer'))
             accepted,problems=review_verdict(verdict,candidate,open_major)
         else:accepted=False;problems=[reason];verdict={'accept':False,'issues':[{'severity':'major','reason':reason}]}
