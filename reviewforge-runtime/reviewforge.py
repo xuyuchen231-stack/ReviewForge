@@ -90,6 +90,7 @@ class CompatibleAPI:
         self.key = self.keys[0]
         self.key_index = 0
         self.key_cooldowns = {}
+        self.key_statuses = {}
         self.base = env.get('RF_BASE_URL','').rstrip('/')
         self.health_path = Path(os.environ.get('RF_ACCOUNT_HEALTH_FILE',str(Path.home()/'.reviewforge'/'account_health.json')))
         self.cooldown_seconds = max(60,int(os.environ.get('RF_ACCOUNT_COOLDOWN_SECONDS','36000')))
@@ -99,7 +100,7 @@ class CompatibleAPI:
         for i,key in enumerate(self.keys):
             slot=hashlib.sha256((self.base+'\0'+key).encode()).hexdigest()
             until=health.get(slot,{}).get('retry_after_epoch',0)
-            if until>time.time():self.key_cooldowns[i]=until
+            if until>time.time():self.key_cooldowns[i]=until;self.key_statuses[i]=health.get(slot,{}).get('status')
         self.model = env.get('RF_WRITER_MODEL',env.get('RF_MODEL','mimo-v2.6-flash:free'))
         self.reviewer_model = env.get('RF_REVIEWER_MODEL','deepseek-v4.1-flash:free')
         self.fallback_model = env.get('RF_FALLBACK_MODEL','deepseek-v4.1-flash:free')
@@ -209,6 +210,7 @@ class CompatibleAPI:
                             except (TypeError, ValueError):
                                 delay = self.cooldown_seconds
                             self.key_cooldowns[key_index] = time.time() + delay
+                            self.key_statuses[key_index] = 'temporary_rate_limit'
                             try:
                                 health=json.loads(self.health_path.read_text(encoding='utf-8'))
                             except FileNotFoundError:health={}
@@ -222,6 +224,14 @@ class CompatibleAPI:
                     # Explicitly opt-in only for independently authorized,
                     # separately billed accounts. 402 is payment required.
                     if exc.code == 402 and os.environ.get('RF_ALLOW_BILLING_FAILOVER') == '1':
+                        self.key_cooldowns[key_index]=time.time()+self.cooldown_seconds
+                        self.key_statuses[key_index]='quota_unavailable'
+                        try:health=json.loads(self.health_path.read_text(encoding='utf-8'))
+                        except FileNotFoundError:health={}
+                        slot=hashlib.sha256((self.base+'\0'+key).encode()).hexdigest()
+                        health[slot]={'status':'quota_unavailable','retry_after_epoch':self.key_cooldowns[key_index]}
+                        atomic_json(self.health_path,health)
+                        print('API account slot '+str(key_index+1)+' quota unavailable (402); trying the next configured account.',flush=True)
                         failures.append('HTTP 402 (key slot ' + str(key_index + 1) + ')')
                         continue
                     failures.append(model + ': HTTP ' + str(exc.code))
@@ -238,6 +248,8 @@ class CompatibleAPI:
                     if detail.startswith('; Empty API response; finish_reason=length;'):break
                     if detail:continue
                     break
+        if self.keys and all(self.key_cooldowns.get(i,0)>time.time() and self.key_statuses.get(i)=='quota_unavailable' for i in range(len(self.keys))):
+            raise RuntimeError('API attempts failed: all configured account quotas unavailable (402); checkpoint retained.')
         if (failures and all('HTTP 429' in f for f in failures)) or (not failures and self.key_cooldowns and all(self.key_cooldowns.get(i,0)>time.time() for i in range(len(self.keys)))):
             active_cooldowns=[until for until in self.key_cooldowns.values() if until>time.time()]
             delay = max(60, int(min(active_cooldowns) - time.time())+1) if active_cooldowns else 60

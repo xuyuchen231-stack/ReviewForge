@@ -5,6 +5,19 @@ from io import BytesIO
 from reviewforge import CompatibleAPI
 
 class AccountCooldownTests(unittest.TestCase):
+ def test_quota_exhausted_account_is_skipped_for_following_requests(self):
+  with tempfile.TemporaryDirectory() as t:
+   env={'RF_API_KEYS':'used,available','RF_BASE_URL':'https://example.invalid/v1','RF_WRITER_MODEL':'test','RF_FALLBACK_MODEL':'test','RF_ALLOW_BILLING_FAILOVER':'1','RF_ACCOUNT_HEALTH_FILE':str(Path(t)/'health.json')};seen=[]
+   class Response:
+    def __enter__(self):return BytesIO(b'{"choices":[{"message":{"content":"ok"}}]}')
+    def __exit__(self,*a):return False
+   def request(req,timeout):
+    key=req.get_header('Authorization');seen.append(key)
+    if key=='Bearer used':raise urllib.error.HTTPError(req.full_url,402,'quota depleted',{},None)
+    return Response()
+   with patch.dict('os.environ',env),patch('reviewforge.urllib.request.urlopen',side_effect=request):
+    api=CompatibleAPI();api.chat('s','u');api.key_index=0;api.chat('s','u');CompatibleAPI().chat('s','u')
+   self.assertEqual(seen,['Bearer used','Bearer available','Bearer available','Bearer available'])
  def setUp(self):
   from unittest.mock import patch
   directory=tempfile.TemporaryDirectory();self.addCleanup(directory.cleanup)
