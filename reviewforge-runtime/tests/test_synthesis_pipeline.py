@@ -12,6 +12,7 @@ class SynthesisTests(unittest.TestCase):
   records=[{'source_type':'full_text_excerpt','citekey':key} for key in ('A','B','C')]
   core=depth_contract('Existing prose.',{'kind':'core'},records)
   self.assertEqual(core['suggested_english_words'],[600,1000]);self.assertFalse(core['length_is_acceptance_gate']);self.assertEqual(len(core['reasoning_functions']),3)
+  self.assertIn('reverse_outline',core['editorial_checks']);self.assertIn('counterevidence',core['editorial_checks'])
   self.assertIsNone(depth_contract('Transition.',{'kind':'bridge'},records)['suggested_english_words'])
   self.assertIsNone(depth_contract('Sparse.',{'kind':'core'},records[:1])['suggested_english_words'])
  def test_repair_feedback_reuses_findings_without_repeating_criterion_quotes(self):

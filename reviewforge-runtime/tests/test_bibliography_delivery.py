@@ -26,3 +26,33 @@ class BibliographyDeliveryTests(unittest.TestCase):
  def test_author_undefined_warning_blocks_layout_pass(self):
   from delivery_checks import layout_diagnostics
   self.assertEqual(layout_diagnostics("Package natbib Warning: Author undefined for citation`old' on page 1.")['status'],'FAILED')
+
+ def test_numeric_bibliography_follows_first_active_citation_and_preserves_uncited(self):
+  import re
+  from bibliography_delivery import prepare_inline_bibliography
+  source = r"\usepackage[numbers]{natbib}" + "\n% ignored \cite{A}\n" + r"First \citep[see][p. 2]{C,B}. Then \citet{A,C}.\begin{thebibliography}{99}\bibitem{A} Alpha.\bibitem{B} Beta.\bibitem{C} Gamma.\bibitem{D} Uncited.\end{thebibliography}"
+  result=prepare_inline_bibliography(source,{})[0]
+  self.assertEqual(re.findall(r'\\bibitem(?:\[[^]]*\])?\{([^}]+)\}',result),['C','B','A','D'])
+  self.assertEqual(prepare_inline_bibliography(result,{})[0],result)
+ def test_explicit_author_year_style_retains_publisher_order(self):
+  from bibliography_delivery import prepare_inline_bibliography
+  source=r"\usepackage[authoryear]{natbib}\cite{B,A}\begin{thebibliography}{99}\bibitem{A} Alpha.\bibitem{B} Beta.\end{thebibliography}"
+  self.assertEqual(prepare_inline_bibliography(source,{})[0],source)
+
+ def test_default_natbib_author_year_is_not_reordered(self):
+  from bibliography_delivery import prepare_inline_bibliography
+  source=r"\usepackage{natbib}\cite{B,A}\begin{thebibliography}{99}\bibitem[Alpha(2020)]{A} Alpha.\bibitem[Beta(2021)]{B} Beta.\end{thebibliography}"
+  self.assertEqual(prepare_inline_bibliography(source,{})[0],source)
+
+ def test_commented_citation_does_not_create_unresolved_reference(self):
+  from bibliography_delivery import prepare_inline_bibliography
+  source="% \\cite{ghost}\n"+r"\begin{thebibliography}{99}\end{thebibliography}"
+  self.assertEqual(prepare_inline_bibliography(source,{})[2],[])
+
+ def test_commented_bibitem_cannot_satisfy_an_active_citation(self):
+  from bibliography_delivery import prepare_inline_bibliography
+  source=r"\cite{B}\begin{thebibliography}{99}"+"\n% \\bibitem{B} Commented only.\n"+r"\bibitem{A} Active.\end{thebibliography}"
+  catalogue={'B':{'metadata_status':'REGISTERED_METADATA','authors':['Smith'],'title':'Actual','year':2020,'doi':'10.1/test'}}
+  text,added,missing=prepare_inline_bibliography(source,catalogue)
+  self.assertEqual(added,['B']);self.assertEqual(missing,[])
+  self.assertIn('% '+r"\bibitem{B} Commented only.",text)

@@ -569,6 +569,8 @@ def run_review(workspace,hours=9,reserve_minutes=40,max_visits=2,new_run=False,t
             if task['status'] in ('pending','retry'):task['preparation_ready']=audit_contract(run,key)['ready']
         state['work_deadline']=state['deadline']-min(reserve_minutes*60,hours*3600*.15)
         api=api_factory();api.max_tokens=int(os.environ.get('RF_AUTO_OUTPUT_TOKENS','6500'))
+        if os.environ.get('RF_TOKENHARBOR_PRIME_ACCOUNTS')=='1' and hasattr(api,'prime_free_accounts'):
+            state['account_initialization']=api.prime_free_accounts(deadline=min(state['work_deadline'],time.time()+60));atomic_json(path,state)
         stop=threading.Event();thread=threading.Thread(target=heartbeat,args=(stop,state,run),daemon=True);thread.start()
         print('Autonomous run: '+str(run)+'; no manual plan filling or sample approval required.',flush=True)
         allunits={u['id']:u for u in units((run/'review_en.tex').read_text(encoding='utf-8'))}

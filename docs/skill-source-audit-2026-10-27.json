@@ -1,0 +1,228 @@
+{
+  "date": "2026-10-27",
+  "method": "Primary GitHub repository files; conceptual adaptation in original wording, no installer execution.",
+  "repositories": [
+    {
+      "repository": "Galaxy-Dawn/claude-scholar",
+      "url": "https://github.com/Galaxy-Dawn/claude-scholar",
+      "default_branch": "main",
+      "license_api": "MIT",
+      "tree_sha": "d394fb599ed9e6ea2212a9e6daa864345fe97a26",
+      "inspected_files": [
+        "README.md",
+        "skills/nature-writing/SKILL.md"
+      ],
+      "scope": "README and selected relevant instructions; not a full repository code audit; no upstream code copied"
+    },
+    {
+      "repository": "ahmetbersoz/chatgpt-prompts-for-academic-writing",
+      "url": "https://github.com/ahmetbersoz/chatgpt-prompts-for-academic-writing",
+      "default_branch": "main",
+      "license_api": "not detected",
+      "tree_sha": "4029d941c9eebb7723bb62d0838102ec476da72f",
+      "inspected_files": [
+        "README.md"
+      ],
+      "scope": "README and selected relevant instructions; not a full repository code audit; no upstream code copied"
+    },
+    {
+      "repository": "hzwer/WritingAIPaper",
+      "url": "https://github.com/hzwer/WritingAIPaper",
+      "default_branch": "main",
+      "license_api": "not detected",
+      "tree_sha": "ab1d5a359702583df09eaa8d6b0f8ac2146b1f60",
+      "inspected_files": [
+        "README.md"
+      ],
+      "scope": "README and selected relevant instructions; not a full repository code audit; no upstream code copied"
+    },
+    {
+      "repository": "Adkid-Zephyr/anti-defensive-writing-Skill",
+      "url": "https://github.com/Adkid-Zephyr/anti-defensive-writing-Skill",
+      "default_branch": "main",
+      "license_api": "MIT",
+      "tree_sha": "82d31402caa0db1790026824399044538483171b",
+      "inspected_files": [
+        "README.md",
+        "skills/anti-defensive-writing-en/SKILL.md"
+      ],
+      "scope": "README and selected relevant instructions; not a full repository code audit; no upstream code copied"
+    },
+    {
+      "repository": "OpenNSWM-Lab/FAROS",
+      "url": "https://github.com/OpenNSWM-Lab/FAROS",
+      "default_branch": "main",
+      "license_api": "MIT",
+      "tree_sha": "60ce4bc235f169d71f2d11dbe37445b4e402b528",
+      "inspected_files": [
+        "README.md",
+        "backend/app/faros/skills/section-drafting/README.md"
+      ],
+      "scope": "README and selected relevant instructions; not a full repository code audit; no upstream code copied"
+    },
+    {
+      "repository": "HughYau/AcademicForge",
+      "url": "https://github.com/HughYau/AcademicForge",
+      "default_branch": "site-first",
+      "license_api": "NOASSERTION",
+      "tree_sha": "01b6d90c5b50ba0aa48b6564e45ee4a0ade9487c",
+      "inspected_files": [
+        "README.md",
+        "skills/claude-science/paper-narrative/SKILL.md"
+      ],
+      "scope": "README and selected relevant instructions; not a full repository code audit; no upstream code copied"
+    },
+    {
+      "repository": "AIScientists-Dev/academic-humanizer",
+      "url": "https://github.com/AIScientists-Dev/academic-humanizer",
+      "default_branch": "main",
+      "license_api": "NOASSERTION",
+      "tree_sha": "94b88b23703bed7df507acae7d6d5876209a0cdf",
+      "inspected_files": [
+        "README.md",
+        "SKILL.md"
+      ],
+      "scope": "README and selected relevant instructions; not a full repository code audit; no upstream code copied"
+    },
+    {
+      "repository": "aipoch/medical-research-skills",
+      "url": "https://github.com/aipoch/medical-research-skills",
+      "default_branch": "main",
+      "license_api": "MIT",
+      "tree_sha": null,
+      "inspected_files": [
+        "README.md"
+      ],
+      "scope": "README and selected relevant instructions; not a full repository code audit; no upstream code copied"
+    },
+    {
+      "repository": "zLanqing/codex-claude-academic-skills",
+      "url": "https://github.com/zLanqing/codex-claude-academic-skills",
+      "default_branch": "main",
+      "license_api": "MIT",
+      "tree_sha": "7ed6377f0efb6a38951b48ef03b19d996e454b1f",
+      "inspected_files": [
+        "README.md",
+        "research-writing-skill/SKILL.md"
+      ],
+      "scope": "README and selected relevant instructions; not a full repository code audit; no upstream code copied"
+    },
+    {
+      "repository": "delibae/claude-prism",
+      "url": "https://github.com/delibae/claude-prism",
+      "default_branch": "chore/bump-1.1.6",
+      "license_api": "MIT",
+      "tree_sha": null,
+      "inspected_files": [
+        "README.md"
+      ],
+      "scope": "README and selected relevant instructions; not a full repository code audit; no upstream code copied"
+    },
+    {
+      "repository": "Imbad0202/academic-research-skills",
+      "url": "https://github.com/Imbad0202/academic-research-skills",
+      "default_branch": "main",
+      "license_api": "NOASSERTION",
+      "tree_sha": null,
+      "inspected_files": [
+        "README.md"
+      ],
+      "scope": "README and selected relevant instructions; not a full repository code audit; no upstream code copied"
+    },
+    {
+      "repository": "Imbad0202/academic-research-skills-codex",
+      "url": "https://github.com/Imbad0202/academic-research-skills-codex",
+      "default_branch": "main",
+      "license_api": "NOASSERTION",
+      "tree_sha": "c923a914eaa45fe1435ad3ac6641a8f251167675",
+      "inspected_files": [
+        "README.md",
+        "skills/academic-research-suite/SKILL.md"
+      ],
+      "scope": "README and selected relevant instructions; not a full repository code audit; no upstream code copied"
+    },
+    {
+      "repository": "K-Dense-AI/scientific-agent-skills",
+      "url": "https://github.com/K-Dense-AI/scientific-agent-skills",
+      "default_branch": "main",
+      "license_api": "MIT",
+      "tree_sha": "5f2bc0341354fd5590aef76a533ada1e1e5b4e62",
+      "inspected_files": [
+        "README.md",
+        "skills/literature-review/SKILL.md"
+      ],
+      "scope": "README and selected relevant instructions; not a full repository code audit; no upstream code copied"
+    },
+    {
+      "repository": "Orchestra-Research/AI-Research-SKILLs",
+      "url": "https://github.com/Orchestra-Research/AI-Research-SKILLs",
+      "default_branch": "main",
+      "license_api": "MIT",
+      "tree_sha": "773a52944ba4747a18bd4ae9ade53fff041adcbc",
+      "inspected_files": [
+        "README.md",
+        "20-ml-paper-writing/ml-paper-writing/SKILL.md"
+      ],
+      "scope": "README and selected relevant instructions; not a full repository code audit; no upstream code copied"
+    },
+    {
+      "repository": "LearningCircuit/local-deep-research",
+      "url": "https://github.com/LearningCircuit/local-deep-research",
+      "default_branch": "main",
+      "license_api": "MIT",
+      "tree_sha": null,
+      "inspected_files": [
+        "README.md"
+      ],
+      "scope": "README and selected relevant instructions; not a full repository code audit; no upstream code copied"
+    },
+    {
+      "repository": "Master-cai/Research-Paper-Writing-Skills",
+      "url": "https://github.com/Master-cai/Research-Paper-Writing-Skills",
+      "default_branch": "main",
+      "license_api": "MIT",
+      "tree_sha": "77e7c2c1ba06f7d71844873147665437a03aac1b",
+      "inspected_files": [
+        "README.md",
+        "research-paper-writing/SKILL.md"
+      ],
+      "scope": "README and selected relevant instructions; not a full repository code audit; no upstream code copied"
+    },
+    {
+      "repository": "HKUSTDial/Supervisor-Skills",
+      "url": "https://github.com/HKUSTDial/Supervisor-Skills",
+      "default_branch": "main",
+      "license_api": "NOASSERTION",
+      "tree_sha": "a20d76ef3979b804d7dbf599d577826957e0a8a9",
+      "inspected_files": [
+        "README.md",
+        "skills/pre-submission-reviewer/SKILL.md"
+      ],
+      "scope": "README and selected relevant instructions; not a full repository code audit; no upstream code copied"
+    },
+    {
+      "repository": "K-Dense-AI/claude-scientific-writer",
+      "url": "https://github.com/K-Dense-AI/claude-scientific-writer",
+      "default_branch": "main",
+      "license_api": "MIT",
+      "tree_sha": "529b9f73ab4b48925027145800d7b49e96ccfd3c",
+      "inspected_files": [
+        "README.md",
+        ".claude/skills/scientific-writing/SKILL.md"
+      ],
+      "scope": "README and selected relevant instructions; not a full repository code audit; no upstream code copied"
+    },
+    {
+      "repository": "Yuan1z0825/nature-skills",
+      "url": "https://github.com/Yuan1z0825/nature-skills",
+      "default_branch": "main",
+      "license_api": "Apache-2.0",
+      "tree_sha": "07009f91f99c7108519e7657885f1a89d91099d5",
+      "inspected_files": [
+        "README.md",
+        "skills/nature-writing/SKILL.md"
+      ],
+      "scope": "README and selected relevant instructions; not a full repository code audit; no upstream code copied"
+    }
+  ]
+}

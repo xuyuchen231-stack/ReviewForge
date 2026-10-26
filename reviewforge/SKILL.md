@@ -26,6 +26,7 @@ Evidence extraction should select immutable, located source-span IDs; code copie
 ## Workflow
 For substantive review writing or a request to fix shallow/textbook-like coverage,
 use the **critical-synthesis workflow** below before ordinary prose revision.
+Consult `references/editorial-synthesis.md` for paragraph argument checks, fair treatment of counterevidence, meaningful comparisons and citation-order verification. These checks belong in the existing writing/review pass, not extra paid rounds.
 1. Define review question, scope, target journals, intended contribution, and explicit exclusions. Request manuscript and literature evidence when absent.
 2. Study authoritative reviews in the same field: compare how they establish scope, organize competing methods, synthesize disagreements, evaluate evidence, and justify open questions. Distinguish editorial patterns from actual journal requirements. See `references/benchmark.md`.
 3. Build a claim-to-evidence matrix before revising: claim, source identity, exact supporting excerpt and location, study limitations, and verification status. Follow `references/evidence.md`.

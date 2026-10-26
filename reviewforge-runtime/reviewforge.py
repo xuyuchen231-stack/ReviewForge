@@ -106,6 +106,8 @@ class CompatibleAPI:
         self.fallback_model = env.get('RF_FALLBACK_MODEL','deepseek-v4.1-flash:free')
         if not self.key or self.key == 'replace_me' or not self.base.startswith('https://') or not self.model:
             raise ValueError('Configure RF_API_KEY, HTTPS RF_BASE_URL, RF_MODEL in .env')
+        from account_cycles import WeeklyAccounts,is_tokenharbor_free
+        self.weekly_accounts=WeeklyAccounts() if any(is_tokenharbor_free(self.base,model) for model in (self.model,self.reviewer_model,self.fallback_model)) else None
         self.max_tokens = int(os.environ.get('RF_MAX_OUTPUT_TOKENS','2500'))
         self.provider_name=env.get('name','primary');self.providers=[];self.preferred_provider=None
         if config is None:
@@ -115,6 +117,34 @@ class CompatibleAPI:
                 if not isinstance(profiles,dict) or not isinstance(profiles.get('providers'),list):raise ValueError('Invalid local provider profiles')
                 self.providers=[CompatibleAPI(profile) for profile in profiles['providers'] if profile.get('enabled',True)]
                 self.preferred_provider=profiles.get('preferred_provider')
+
+    def prime_free_accounts(self,deadline=None):
+        """Activate only unobserved free accounts; never call a paid route."""
+        if self.weekly_accounts is None:return []
+        from account_cycles import is_tokenharbor_free,is_weekly_quota
+        model=os.environ.get('RF_TOKENHARBOR_ACTIVATION_MODEL','deepseek-v4.1-flash:free')
+        if not is_tokenharbor_free(self.base,model):raise ValueError('Account activation requires a TokenHarbor :free model')
+        until=min(deadline if deadline is not None else float('inf'),time.time()+60);result=[]
+        for index,key in enumerate(self.keys):
+            row=self.weekly_accounts.entry(self.base,key)
+            if row.get('first_success_observed_at') is not None:continue
+            if self.key_cooldowns.get(index,0)>time.time() or self.weekly_accounts.blocked(self.base,key):
+                result.append({'slot':index+1,'status':'deferred_until_eligible'});continue
+            if time.time()>=until-1:break
+            body={'model':model,'messages':[{'role':'user','content':'Reply OK.'}],'max_tokens':32,'thinking':{'type':'disabled'}}
+            request=urllib.request.Request(self.base+'/chat/completions',data=json.dumps(body).encode(),headers={'Authorization':'Bearer '+key,'Content-Type':'application/json'})
+            started=time.time()
+            try:
+                with urllib.request.urlopen(request,timeout=max(.1,min(15,until-time.time()))) as response:data=json.loads(read_response_body(response,until,15))
+                if not isinstance(data,dict) or not data.get('choices'):raise ValueError('Activation did not return a model completion')
+                self.weekly_accounts.success(self.base,key,started);result.append({'slot':index+1,'status':'first_success_recorded'})
+            except urllib.error.HTTPError as exc:
+                try:detail=json.loads(exc.read(4096))
+                except (ValueError,OSError):detail={}
+                if is_weekly_quota(exc.code,detail):self.weekly_accounts.exhausted(self.base,key,started)
+                result.append({'slot':index+1,'status':'HTTP '+str(exc.code)})
+            except (OSError,ValueError,TimeoutError):result.append({'slot':index+1,'status':'not_confirmed; retry_on_next_start'})
+        return result
 
     def chat(self, system, user, role='writer'):
         if not self.providers:
@@ -154,6 +184,13 @@ class CompatibleAPI:
         preferred = getattr(self,'request_model',None) or (self.reviewer_model if role == 'reviewer' else self.model)
         models = [preferred] + ([self.fallback_model] if self.fallback_model != preferred else [])
         if role=='reviewer' and self.model not in models:models.append(self.model)
+        from account_cycles import is_tokenharbor_free,is_weekly_quota
+        weekly=self.weekly_accounts
+        if weekly is not None and is_tokenharbor_free(self.base,preferred):
+            # Never turn an exhausted free allowance into paid usage.
+            if os.environ.get('RF_TOKENHARBOR_ALLOW_PAID_FALLBACK')!='1':models=[model for model in models if model.endswith(':free')]
+            eligible=[index for index,key in enumerate(self.keys) if self.key_cooldowns.get(index,0)<=time.time() and not weekly.blocked(self.base,key)]
+            if eligible:self.key_index=eligible[0]
         failures = []
         call_deadline=min(getattr(self,'deadline',float('inf')),time.time()+max(1,min(1800,getattr(self,'call_timeout',180))))
         for model_index,model in enumerate(models):
@@ -179,8 +216,10 @@ class CompatibleAPI:
                 if self.key_cooldowns.get(key_index, 0) > time.time():
                     continue
                 key = self.keys[key_index]
+                if weekly is not None and is_tokenharbor_free(self.base,model) and weekly.blocked(self.base,key):continue
                 req = urllib.request.Request(self.base + '/chat/completions', data=body, headers={'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json'}, method='POST')
                 try:
+                    attempt_started=time.time()
                     attempt_deadline=min(model_deadline,time.time()+getattr(self,'request_timeout',150)) if getattr(self,'call_timeout',180)>180 else model_deadline
                     with urllib.request.urlopen(req, timeout=max(.1,min(getattr(self,'request_timeout',150),model_deadline-time.time()))) as resp:
                         raw = read_response_body(resp,attempt_deadline,getattr(self,'request_timeout',150))
@@ -188,6 +227,7 @@ class CompatibleAPI:
                         try:data=json.loads(raw)
                         except json.JSONDecodeError as error:raise ValueError('Invalid upstream JSON; bytes='+str(len(raw))+'; position='+str(error.pos)) from None
                     result = data['choices'][0]['message']['content']
+                    if weekly is not None and is_tokenharbor_free(self.base,model):weekly.success(self.base,key,attempt_started)
                     if not isinstance(result, str) or not result.strip():
                         choice=data['choices'][0];message=choice.get('message',{})
                         raise ValueError('Empty API response; finish_reason='+str(choice.get('finish_reason','unknown'))+'; reasoning_chars='+str(len(message.get('reasoning_content') or message.get('reasoning') or '')))
@@ -201,6 +241,13 @@ class CompatibleAPI:
                     self.last_usage={key:usage[key] for key in ('prompt_tokens','completion_tokens','total_tokens') if isinstance(usage,dict) and type(usage.get(key)) is int and usage[key]>=0}
                     return result
                 except urllib.error.HTTPError as exc:
+                    if weekly is not None and is_tokenharbor_free(self.base,model):
+                        try:quota_detail=json.loads(exc.read(4096))
+                        except (ValueError,OSError):quota_detail={}
+                        if is_weekly_quota(exc.code,quota_detail):
+                            self.key_cooldowns[key_index]=weekly.exhausted(self.base,key);self.key_statuses[key_index]='weekly_free_quota_exhausted'
+                            print('TokenHarbor account slot '+str(key_index+1)+' free weekly allowance exhausted; trying the next configured account.',flush=True)
+                            failures.append('Weekly free allowance exhausted (key slot '+str(key_index+1)+')');continue
                     if exc.code == 429:
                         retry = exc.headers.get('Retry-After', '')
                         if allow_rate_failover and len(self.keys) > 1:
@@ -248,6 +295,9 @@ class CompatibleAPI:
                     if detail.startswith('; Empty API response; finish_reason=length;'):break
                     if detail:continue
                     break
+        if weekly is not None and all(weekly.blocked(self.base,key) for key in self.keys):
+            retry=max(1,int(min(weekly.entry(self.base,key)['exhausted_until'] for key in self.keys)-time.time())+1)
+            raise RuntimeError('Provider weekly free allowance exhausted (429); respect Retry-After: '+str(retry))
         if self.keys and all(self.key_cooldowns.get(i,0)>time.time() and self.key_statuses.get(i)=='quota_unavailable' for i in range(len(self.keys))):
             raise RuntimeError('API attempts failed: all configured account quotas unavailable (402); checkpoint retained.')
         if (failures and all('HTTP 429' in f for f in failures)) or (not failures and self.key_cooldowns and all(self.key_cooldowns.get(i,0)>time.time() for i in range(len(self.keys)))):
