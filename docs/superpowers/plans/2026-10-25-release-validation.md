@@ -38,3 +38,11 @@ Final coherence responses select immutable passage IDs, which the program materi
 Unique active labels in the full frozen source permit existing cross-unit formula references; invented, duplicate and commented-out targets do not. Repair requests receive relevant legacy cross-unit context, and final writer/reviewer payloads are checked after all repair context is added, without silently truncating evidence.
 
 Final local verification on Python 3.10 and 3.12: 152 core tests and 11 quality tests passed on each interpreter, including the real PDF preview dependency. The original manuscript is preserved; selected accepted checkpoints are imported only after source, contract, candidate and structure validation. These checks establish program behavior, not expert approval of the entire manuscript.
+
+## Per-heading depth and token use — 2026-10-26
+
+The depth policy explicitly requires study-based reasoning under each substantive heading: formula interpretation, comparability, validation scope and conditional conclusions. Criterion quotations must cover each nonempty heading body before acceptance. This checks review coverage, not semantic quality by a length heuristic. Short functional bridges remain eligible. The policy participates in candidate contracts, so older approvals cannot bypass it; extraction/planning caches remain reusable and earlier drafts support targeted repair.
+
+An actual unit-044 review exposed the omission: it initially approved the whole unit without assessing Metrics and physical consistency. Immutable candidate passage IDs now materialize exact criterion/resolution quotations, avoiding copying errors without lowering the evidence gate. Final live revalidation passed with one scientific-review call and no writer call. This does not certify the remaining 57 units or establish that every future draft will satisfy the author.
+
+Repair feedback retains actionable findings and problems while omitting repeated criterion/resolution quotations already preserved in saved history and the current draft. No new general review stage was added. Final verification: 157 core plus 11 quality tests passed on each local Python 3.10/3.12 interpreter. Malformed passage lists, forged IDs and omitted child headings have regression tests.

@@ -3,6 +3,32 @@ from pathlib import Path
 from synthesis_pipeline import initialize, audit_contract, revise_unit, review_verdict, CRITERIA
 
 class SynthesisTests(unittest.TestCase):
+ def test_repair_feedback_reuses_findings_without_repeating_criterion_quotes(self):
+  from synthesis_pipeline import repair_feedback
+  record={'attempt':1,'problems':['review_rejected'],'review':{'accept':False,'criteria':{'evidence_scope':{'status':'fail','explanation':'Distinguish random-split accuracy from unseen-policy transfer.','passages':['large quote'*300]}},'issues':[{'id':'M1','reason':'Compare validation conditions'}],'resolved_issue_ids':[]}}
+  result=repair_feedback(record)
+  self.assertEqual(result['review']['criteria']['evidence_scope'],{'status':'fail','explanation':'Distinguish random-split accuracy from unseen-policy transfer.'});self.assertEqual(result['review']['issues'],record['review']['issues']);self.assertIn('passages',record['review']['criteria']['evidence_scope'])
+ def test_review_passage_ids_materialize_exact_body_and_reject_forgery(self):
+  from synthesis_pipeline import review_passage_options,validate_review_response
+  candidate=r'\subsection{Results}'+'\nActual supported interpretation.'
+  option=review_passage_options(candidate)[0]
+  v={'accept':True,'issues':[],'criteria':{k:{'status':'pass','explanation':'Specific judgment','passage_ids':[option['id']]} for k in CRITERIA}}
+  self.assertTrue(validate_review_response(v,candidate));self.assertEqual(v['criteria']['question_answered']['passages'],['Actual supported interpretation.'])
+  v['criteria']['question_answered']['passage_ids']=['invented']
+  with self.assertRaisesRegex(ValueError,'passage'):validate_review_response(v,candidate)
+ def test_child_coverage_handles_malformed_passage_inventory_as_rejection(self):
+  candidate=r'\subsection{Transition}'+'\nA bridge.'
+  self.assertFalse(review_verdict({'accept':False,'issues':[],'criteria':{'question_answered':{'passages':None}}},candidate)[0])
+ def test_review_cannot_use_one_good_child_to_approve_untouched_other_child(self):
+  candidate=r'\subsection{Comparison}'+'\nA grounded comparison of studies.\n'+r'\subsubsection{Transfer}'+'\nTransfer is important.'
+  verdict={'accept':True,'issues':[],'criteria':{k:{'status':'pass','explanation':'Specific judgment','passages':['A grounded comparison of studies.']} for k in CRITERIA}}
+  accepted,problems=review_verdict(verdict,candidate)
+  self.assertFalse(accepted);self.assertIn('unassessed_subsection:Transfer',problems)
+ def test_child_coverage_does_not_turn_scientific_failure_into_schema_retry(self):
+  from synthesis_pipeline import validate_review_response
+  candidate=r'\subsection{Comparison}'+'\nA grounded comparison of studies.\n'+r'\subsubsection{Transfer}'+'\nTransfer is important.'
+  verdict={'accept':False,'issues':[],'criteria':{k:{'status':'fail','explanation':'Transfer remains a definition.','passages':['Transfer is important.']} for k in CRITERIA}}
+  self.assertTrue(validate_review_response(verdict,candidate))
  def test_repair_budget_includes_previous_candidate_before_api_call(self):
   with tempfile.TemporaryDirectory() as t:
    ws=self.workspace(t);u=self.prepared(ws);folder=ws/'synthesis_candidates';folder.mkdir(exist_ok=True)
