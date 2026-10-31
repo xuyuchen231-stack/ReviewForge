@@ -9,7 +9,7 @@ import json
 import re
 import uuid
 from pathlib import Path
-from reviewforge import atomic_json, CompatibleAPI, load_env, extract_json
+from reviewforge import atomic_json, CompatibleAPI, load_env, extract_json, encode_model_payload
 from manuscript_integrity import citekeys,unique_label_targets
 from evidence_context import load_context
 
@@ -81,6 +81,14 @@ def repair_feedback(record):
     if isinstance(review,dict):
         result['review']={k:v for k,v in review.items() if k not in ('criteria','resolutions')}
         if isinstance(review.get('criteria'),dict):result['review']['criteria']={key:{k:v for k,v in item.items() if k in ('status','explanation')} for key,item in review['criteria'].items() if isinstance(item,dict)}
+    return result
+
+def unique_issue_details(issues):
+    """Remove exact repeated records only; retain evolving same-ID findings."""
+    seen=set();result=[]
+    for issue in issues:
+        key=json.dumps(issue,sort_keys=True,ensure_ascii=False,separators=(',',':'))
+        if key not in seen:seen.add(key);result.append(issue)
     return result
 
 def matrix_for_unit(workspace,unit_id,fallback=None):
@@ -322,7 +330,7 @@ def revise_unit(workspace,unit_id,chat,max_rounds=3,require_calibration=True):
             history=prior.get('history',[])
             open_major.update(prior.get('open_major_issues',[]))
             payload['open_major_issues']=sorted(open_major)
-            payload['active_issue_details']=[i for h in history for i in h.get('review',{}).get('issues',[]) if isinstance(i,dict) and i.get('id') in open_major]
+            payload['active_issue_details']=unique_issue_details([i for h in history for i in h.get('review',{}).get('issues',[]) if isinstance(i,dict) and i.get('id') in open_major])
             # Older coherence records named another unit without attaching its
             # text. Supply that original explicitly, labeled as unverified context.
             originals={item['id']:item for item in units(text)}
@@ -388,7 +396,7 @@ def main():
         if not args.unit:parser.error('revise requires --unit; calibrate one sample before full expansion')
         if not 1<=args.max_rounds<=3:parser.error('--max-rounds must be 1..3')
         load_env(Path(__file__).parent/'.env');api=CompatibleAPI()
-        def chat(system,payload,role):return api.chat(system,json.dumps(payload,ensure_ascii=False),role=role)
+        def chat(system,payload,role):return api.chat(system,encode_model_payload(payload),role=role)
         result=revise_unit(ws,args.unit,chat,args.max_rounds)
     print(json.dumps(result,ensure_ascii=False,indent=2))
     if args.action=='audit' and not result['ready']:raise SystemExit(2)

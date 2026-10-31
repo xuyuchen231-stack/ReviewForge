@@ -14,7 +14,7 @@ import threading
 import time
 import uuid
 
-from reviewforge import CompatibleAPI, atomic_json, extract_json, load_env
+from reviewforge import CompatibleAPI, atomic_json, extract_json, load_env, encode_model_payload
 from manuscript_integrity import citekeys, tex_integrity,unique_label_targets
 from synthesis_pipeline import initialize, units, audit_contract, revise_unit, digest, read, contract_digest, unit_evidence, matrix_for_unit, validate_review_response
 
@@ -232,10 +232,12 @@ def checkpoint_call(api,state,path,system,payload,role):
     api.request_provider=os.environ.get('RF_PREPARATION_PROVIDER','primary') if preparation else (os.environ.get('RF_COHERENCE_PROVIDER','primary') if coherence else None)
     api.request_model=(os.environ.get('RF_COHERENCE_MODEL') or getattr(api,'reviewer_model',getattr(api,'model',None))) if coherence else ((os.environ.get('RF_PREPARATION_MODEL') or getattr(api,'reviewer_model',None)) if preparation else None)
     request_budget=600 if whole_unit else 180
-    state['request_budget_seconds']=min(request_budget,int(remaining));state['request_payload_bytes']=len(json.dumps(payload,ensure_ascii=False).encode('utf-8'));state['request_original_bytes']=original_bytes
+    encoded_payload=encode_model_payload(payload)
+    state['request_budget_seconds']=min(request_budget,int(remaining));state['request_payload_bytes']=len(encoded_payload.encode('utf-8'));state['request_original_bytes']=original_bytes
+    state['request_input_bytes_saved']=original_bytes-state['request_payload_bytes']
     state['requests_attempted']=state.get('requests_attempted',0)+1;state['last_request_role']=role;state['last_request_started']=time.time();atomic_json(path,state)
     api.call_timeout=request_budget;api.request_timeout=max(1,min(300 if whole_unit else 150,int(remaining)));api.deadline=min(budget,time.time()+request_budget)
-    try:result=api.chat(system,json.dumps(payload,ensure_ascii=False),role=role)
+    try:result=api.chat(system,encoded_payload,role=role)
     except TimeoutError as exc:
         if time.time()>=budget-2:raise
         raise RuntimeError('API attempts failed: request timeout before run deadline') from exc

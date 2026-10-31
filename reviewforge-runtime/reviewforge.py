@@ -13,6 +13,11 @@ import urllib.request
 import urllib.error
 
 
+def encode_model_payload(payload):
+    """Remove JSON formatting whitespace only; preserve every payload value."""
+    return json.dumps(payload,ensure_ascii=False,separators=(',',':'))
+
+
 def atomic_json(path, obj):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
