@@ -11,12 +11,12 @@ class DeliveryTests(unittest.TestCase):
    p=out/'review_en.tex';p.write_text(source,encoding='utf-8');calls=[]
    def build(*args,**kwargs):
     calls.append(p.read_text(encoding='utf-8'))
-    if len(calls)==1:return {'status':'PASS','layout_status':'FAILED','layout':{'overflows':['Overfull \\hbox (100pt too wide)'],'unresolved':[],'missing_glyphs':[]}}
+    if len(calls)==1:return {'status':'PASS','layout_status':'FAILED','layout':{'overflows':['Overfull \\hbox (100pt too wide)'],'unresolved':[],'missing_glyphs':[],'overflow_details':[{'kind':'hbox','start_line':3,'amount_pt':100}]}}
     if len(calls)==2:return {'status':'PASS','layout_status':'FAILED','layout':{'overflows':['Overfull \\vbox (1.8pt too high)'],'unresolved':[],'missing_glyphs':[]}}
     return {'status':'PASS','layout_status':'PASS','layout':{'overflows':[],'unresolved':[],'missing_glyphs':[]}}
    report={'accepted_units':1}
    with patch('reviewforge_v4.compile_tex',side_effect=build):deliver_outputs(run,{'deadline':time.time()+1800},report,lambda *a:None,False)
-   self.assertEqual(len(calls),3);self.assertIn(r'\onecolumn',calls[1]);self.assertIn(r'\addtolength{\textheight}{3pt}',calls[2])
+   self.assertEqual(len(calls),3);self.assertNotIn(r'\onecolumn',calls[1]);self.assertIn(r'\begin{strip}',calls[1]);self.assertIn(r'\addtolength{\textheight}{3pt}',calls[2])
    self.assertIn(r'\begin{equation}a=b\end{equation}',calls[2]);self.assertEqual(citekeys(source),citekeys(calls[2]))
    self.assertEqual(report['review_en_build']['layout_status'],'PASS');self.assertEqual((run/'reports/layout_original_english.tex').read_text(encoding='utf-8'),source)
  def test_unresolved_citations_do_not_trigger_formatting_recovery(self):

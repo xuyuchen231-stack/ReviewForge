@@ -25,24 +25,48 @@ def deliver_outputs(run,state,report,chat,translate=True):
         report['translation']='not_run_no_accepted_units';return report
     remaining=state['deadline']-time.time()
     if remaining>30:
-        report['review_en_build']=compile_tex(out,'review_en',timeout_seconds=max(1,min(600,int(remaining-15))))
-        build=report['review_en_build'];layout=build.get('layout',{})
+        from publication_export import canonicalize_references,prepare_two_column_export,reflow_wide_displays,mark_wide_material,reconcile_pdf_references
+        original_blob=(out/'review_en.tex').read_bytes()
         source=(out/'review_en.tex').read_text(encoding='utf-8')
-        eligible=(build.get('status')=='PASS' and layout.get('overflows') and not layout.get('unresolved') and not layout.get('missing_glyphs') and re.search(r'\\documentclass\s*\[[^]]*\btwocolumn\b[^]]*\]',source) and r'\begin{document}' in source)
-        if eligible and state['deadline']-time.time()>30:
-            # Adapt the exported document only; keep every formula/citation byte intact.
-            original=run/'reports/layout_original_english.tex';original.parent.mkdir(exist_ok=True);original.write_bytes(source.encode('utf-8'))
-            exported=source.replace(r'\begin{document}',r'\begin{document}'+'\n\\onecolumn\n',1)
-            (out/'review_en.tex').write_bytes(exported.encode('utf-8'))
-            report['review_en_build']=compile_tex(out,'review_en',timeout_seconds=max(1,min(600,int(state['deadline']-time.time()-15))))
-            layout=report['review_en_build'].get('layout',{});adjustments=['single_column']
-            tiny_vboxes=layout.get('overflows',[])
-            if report['review_en_build'].get('status')=='PASS' and tiny_vboxes and not layout.get('unresolved') and not layout.get('missing_glyphs') and all(re.search(r'Overfull \\vbox \((\d+(?:\.\d+)?)pt',warning) and float(re.search(r'Overfull \\vbox \((\d+(?:\.\d+)?)pt',warning).group(1))<=3 for warning in tiny_vboxes) and state['deadline']-time.time()>30:
-                exported=exported.replace(r'\begin{document}',r'\addtolength{\textheight}{3pt}'+'\n'+r'\begin{document}',1)
-                (out/'review_en.tex').write_bytes(exported.encode('utf-8'));adjustments.append('text_height_plus_3pt')
-                report['review_en_build']=compile_tex(out,'review_en',timeout_seconds=max(1,min(600,int(state['deadline']-time.time()-15))))
-            report['layout_adaptation']={'adjustments':adjustments,'original_sha256':hashlib.sha256(source.encode()).hexdigest(),'export_sha256':hashlib.sha256(exported.encode()).hexdigest(),'original_export':str(original.relative_to(run)),'reason':'Preserve readable original mathematics without column overflow; original manuscript unchanged.'}
+        original=source
+        if (run/'publication_figure_plan.json').exists():
+            import json
+            from publication_figures import add_planned_figures
+            try:source,report['figures']=add_planned_figures(source,json.loads((run/'publication_figure_plan.json').read_text(encoding='utf-8')),out)
+            except (ValueError,TypeError,ImportError,OSError) as exc:report['figures']={'status':'FAILED','reason':type(exc).__name__+': '+str(exc)[:200],'model_calls':0}
+        source,aliases=canonicalize_references(source);report['reference_aliases']=aliases
+        source=mark_wide_material(prepare_two_column_export(source))
+        (out/'review_en.tex').write_bytes(source.encode('utf-8'))
+        def build_current():
+            return compile_tex(out,'review_en',timeout_seconds=max(1,min(600,int(state['deadline']-time.time()-15))))
+        report['review_en_build']=build_current()
+        build=report['review_en_build'];layout=build.get('layout',{});adjustments=[]
+        eligible=build.get('status')=='PASS' and not layout.get('unresolved') and not layout.get('missing_glyphs') and re.search(r'\\documentclass\s*\[[^]]*\btwocolumn\b[^]]*\]',source)
+        if eligible and layout.get('overflows') and state['deadline']-time.time()>30:
+            source,count=reflow_wide_displays(source,layout)
+            if count:
+                source=mark_wide_material(source)
+                (out/'review_en.tex').write_bytes(source.encode('utf-8'));adjustments.append('full_width_math_strips:'+str(count))
+                report['review_en_build']=build_current();layout=report['review_en_build'].get('layout',{})
+            tiny=layout.get('overflows',[])
+            if report['review_en_build'].get('status')=='PASS' and tiny and not layout.get('unresolved') and not layout.get('missing_glyphs') and all(re.search(r'Overfull \\vbox \((\d+(?:\.\d+)?)pt',w) and float(re.search(r'Overfull \\vbox \((\d+(?:\.\d+)?)pt',w).group(1))<=3 for w in tiny) and state['deadline']-time.time()>30:
+                source=source.replace(r'\begin{document}',r'\addtolength{\textheight}{3pt}'+'\n'+r'\begin{document}',1)
+                (out/'review_en.tex').write_bytes(source.encode('utf-8'));adjustments.append('text_height_plus_3pt')
+                report['review_en_build']=build_current()
+        if source!=original:
+            saved=run/'reports/layout_original_english.tex';saved.parent.mkdir(exist_ok=True);saved.write_bytes(original_blob)
+            report['layout_adaptation']={'adjustments':adjustments,'original_sha256':hashlib.sha256(original_blob).hexdigest(),'export_sha256':hashlib.sha256(source.encode()).hexdigest(),'original_export':str(saved.relative_to(run)),'reason':'Requested columns preserved; wide material reflowed without changing math source.'}
             atomic_json(run/'reports/layout_adaptation.json',report['layout_adaptation'])
+        if state['deadline']-time.time()>30:
+            source,report['review_en_build'],report['citation_order']=reconcile_pdf_references(out,source,report['review_en_build'],build_current,deadline=state['deadline'])
+            if report['citation_order']['status'] not in ('PASS','NOT_APPLICABLE'):report['review_en_build']['delivery_ready']=False
+        if report.get('layout_adaptation'):
+            report['layout_adaptation']['export_sha256']=hashlib.sha256((out/'review_en.tex').read_bytes()).hexdigest()
+            atomic_json(run/'reports/layout_adaptation.json',report['layout_adaptation'])
+        if report['review_en_build'].get('status')=='PASS' and report.get('citation_order',{}).get('status') in ('PASS','NOT_APPLICABLE'):
+            from publication_export import make_overleaf_project
+            try:report['overleaf']=make_overleaf_project(out)
+            except (ValueError,OSError) as exc:report['overleaf']={'status':'FAILED','reason':str(exc)[:200]}
     report['translation']='not_run_time_budget_or_disabled'
     if not translate or state['deadline']-time.time()<=120:return report
     remaining=state['deadline']-time.time();build_reserve=min(600,max(30,remaining*.25))
@@ -84,6 +108,11 @@ def copy_project_assets(workspace,output,tex):
                     if command not in ('usepackage','documentclass'):missing.append(name)
                     continue
                 rel=found.relative_to(root)
+                # Only publication assets belong in a source package, even if an
+                # untrusted manuscript names a local configuration file as input.
+                allowed={'.tex','.sty','.cls','.bib','.bbl','.bst','.pdf','.png','.jpg','.jpeg','.eps','.svg',''}
+                if any(part.startswith('.') for part in rel.parts) or found.suffix.lower() not in allowed:
+                    missing.append(name);continue
                 if rel.as_posix() in {'review_en.tex','review_zh.tex','original.tex'}:continue
                 if found in seen:continue
                 seen.add(found);target=output/rel;target.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(found,target)

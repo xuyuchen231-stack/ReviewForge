@@ -145,12 +145,13 @@ def bootstrap(workspace,hours,new_run=False):
             shutil.copyfile(run/'evidence_ledger.json',history/(uuid.uuid4().hex+'.json'));shutil.copyfile(incoming_ledger,run/'evidence_ledger.json')
         state['consecutive_provider_failures']=0
         if state.get('coherence_error') or any(t.get('status') in ('pending','retry','blocked_evidence') for t in state['tasks'].values()):state['coherence_rounds']=0
+        if (ws/'publication_figure_plan.json').exists():shutil.copyfile(ws/'publication_figure_plan.json',run/'publication_figure_plan.json')
         state['status']='resuming';atomic_json(run/'autonomous_state.json',state)
         return run,state
     run=ws/'autonomous_runs'/('run_'+datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')+'_'+uuid.uuid4().hex[:6]);run.mkdir(parents=True)
     (run/'review_en.tex').write_bytes(raw.encode('utf-8'))
     shutil.copyfile(source,run/'original.tex')
-    for name in ['evidence_ledger.json','literature.json','references.bib','review_topic.txt','translation_glossary.json']:
+    for name in ['evidence_ledger.json','literature.json','references.bib','review_topic.txt','translation_glossary.json','publication_figure_plan.json']:
         if (ws/name).exists():shutil.copyfile(ws/name,run/name)
     if not (run/'evidence_ledger.json').exists():atomic_json(run/'evidence_ledger.json',{'entries':[]})
     initialize(run)

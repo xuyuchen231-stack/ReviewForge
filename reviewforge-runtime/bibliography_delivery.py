@@ -18,13 +18,19 @@ def citation_order(text):
     return list(dict.fromkeys(key.strip() for group in CITES.findall(active)
                               for key in group.split(',') if key.strip()))
 
-def order_inline_bibliography(tex):
+def numeric_order_enabled(tex):
     # Author/year publishers may require alphabetical ordering instead.
     active=active_text(tex)
-    if re.search(r'\\setcitestyle\{[^}]*\bauthoryear\b',active):return tex
+    if re.search(r'\\setcitestyle\{[^}]*\bauthoryear\b',active):return False
+    if re.search(r'\\bibpunct(?:\[[^]]*\])?\{[^}]*\}\{[^}]*\}\{[^}]*\}\{a\}',active):return False
     if re.search(r'\\(?:usepackage|RequirePackage)(?:\[[^]]*\])?\{[^}]*\bnatbib\b',active):
         numeric=re.search(r'\\(?:usepackage|RequirePackage)\[[^]]*\b(?:numbers|super)\b[^]]*\]\{natbib\}|\\setcitestyle\{[^}]*\bnumbers\b',active)
-        if not numeric or re.search(r'\\(?:usepackage|RequirePackage)\[[^]]*\bauthoryear\b[^]]*\]\{natbib\}',active):return tex
+        if not numeric or re.search(r'\\(?:usepackage|RequirePackage)\[[^]]*\bauthoryear\b[^]]*\]\{natbib\}',active):return False
+    return True
+
+def order_inline_bibliography(tex,preferred_order=None):
+    if not numeric_order_enabled(tex):return tex
+    active=active_text(tex)
     environment=re.search(r'(\\begin\{thebibliography\}\{[^{}]*\})([\s\S]*?)(\\end\{thebibliography\})',active)
     if not environment:return tex
     body=tex[environment.start(2):environment.end(2)]
@@ -33,7 +39,7 @@ def order_inline_bibliography(tex):
     keys=[m.group(1) for m in matches]
     if len(keys)!=len(set(keys)):raise ValueError('Duplicate bibliography keys; resolve before delivery')
     entries={m.group(1):body[m.start():matches[i+1].start() if i+1<len(matches) else len(body)] for i,m in enumerate(matches)}
-    ordered=[key for key in citation_order(tex) if key in entries]
+    ordered=list(dict.fromkeys(key for key in (preferred_order if preferred_order is not None else citation_order(tex)) if key in entries))
     ordered.extend(key for key in keys if key not in ordered)
     replacement=body[:matches[0].start()]+''.join(entries[key] for key in ordered)
     return tex[:environment.start(2)]+replacement+tex[environment.end(2):]
