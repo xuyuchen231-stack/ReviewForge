@@ -222,6 +222,9 @@ def checkpoint_call(api,state,path,system,payload,role):
     remaining=budget-time.time()
     if remaining<=2:raise TimeoutError('Run time budget reached before new request')
     original_bytes=len(json.dumps(payload,ensure_ascii=False).encode('utf-8'));payload=compact_evidence_payload(payload)
+    from model_input import compact_study_tables
+    before_table_bytes=len(encode_model_payload(payload).encode('utf-8'))
+    payload=compact_study_tables(payload)
     preparation=state.get('phase') in ('argument_planning','planning','evidence_extraction')
     whole_unit=not preparation and ((('body' in payload or 'candidate' in payload) and 'study_comparisons' in payload) or (role=='reviewer' and 'units' in payload) or len(json.dumps(payload,ensure_ascii=False).encode('utf-8'))>30000)
     if role=='reviewer':api.max_tokens=max(getattr(api,'max_tokens',0),int(os.environ.get('RF_AUTO_REVIEW_OUTPUT_TOKENS','12000')))
@@ -235,6 +238,7 @@ def checkpoint_call(api,state,path,system,payload,role):
     encoded_payload=encode_model_payload(payload)
     state['request_budget_seconds']=min(request_budget,int(remaining));state['request_payload_bytes']=len(encoded_payload.encode('utf-8'));state['request_original_bytes']=original_bytes
     state['request_input_bytes_saved']=original_bytes-state['request_payload_bytes']
+    state['request_table_bytes_saved']=before_table_bytes-state['request_payload_bytes']
     state['requests_attempted']=state.get('requests_attempted',0)+1;state['last_request_role']=role;state['last_request_started']=time.time();atomic_json(path,state)
     api.call_timeout=request_budget;api.request_timeout=max(1,min(300 if whole_unit else 150,int(remaining)));api.deadline=min(budget,time.time()+request_budget)
     try:result=api.chat(system,encoded_payload,role=role)

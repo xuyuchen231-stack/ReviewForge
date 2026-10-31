@@ -396,7 +396,9 @@ def main():
         if not args.unit:parser.error('revise requires --unit; calibrate one sample before full expansion')
         if not 1<=args.max_rounds<=3:parser.error('--max-rounds must be 1..3')
         load_env(Path(__file__).parent/'.env');api=CompatibleAPI()
-        def chat(system,payload,role):return api.chat(system,encode_model_payload(payload),role=role)
+        def chat(system,payload,role):
+            from model_input import compact_study_tables
+            return api.chat(system,encode_model_payload(compact_study_tables(payload)),role=role)
         result=revise_unit(ws,args.unit,chat,args.max_rounds)
     print(json.dumps(result,ensure_ascii=False,indent=2))
     if args.action=='audit' and not result['ready']:raise SystemExit(2)
