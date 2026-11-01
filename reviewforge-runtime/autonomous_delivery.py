@@ -77,9 +77,12 @@ def deliver_outputs(run,state,report,chat,translate=True,allow_refinement=True,s
                 (out/'review_en.tex').write_bytes(source.encode('utf-8'));adjustments.append('full_width_math_strips:'+str(count))
                 report['review_en_build']=build_current();layout=report['review_en_build'].get('layout',{})
             tiny=layout.get('overflows',[])
-            if report['review_en_build'].get('status')=='PASS' and tiny and not layout.get('unresolved') and not layout.get('missing_glyphs') and all(re.search(r'Overfull \\vbox \((\d+(?:\.\d+)?)pt',w) and float(re.search(r'Overfull \\vbox \((\d+(?:\.\d+)?)pt',w).group(1))<=3 for w in tiny) and state['deadline']-time.time()>30:
-                source=source.replace(r'\begin{document}',r'\addtolength{\textheight}{3pt}'+'\n'+r'\begin{document}',1)
-                (out/'review_en.tex').write_bytes(source.encode('utf-8'));adjustments.append('text_height_plus_3pt')
+            if report['review_en_build'].get('status')=='PASS' and tiny and not layout.get('unresolved') and not layout.get('missing_glyphs') and all(re.search(r'Overfull \\vbox \((\d+(?:\.\d+)?)pt',w) and float(re.search(r'Overfull \\vbox \((\d+(?:\.\d+)?)pt',w).group(1))<=8 for w in tiny) and state['deadline']-time.time()>30:
+                import math
+                extra=max(3,math.ceil(max(float(re.search(r'Overfull \\vbox \((\d+(?:\.\d+)?)pt',w).group(1)) for w in tiny)))
+                if extra>3:extra+=3  # Leave room for the output routine's baseline adjustment.
+                source=source.replace(r'\begin{document}',r'\addtolength{\textheight}{'+str(extra)+'pt}'+'\n'+r'\begin{document}',1)
+                (out/'review_en.tex').write_bytes(source.encode('utf-8'));adjustments.append('text_height_plus_'+str(extra)+'pt')
                 report['review_en_build']=build_current()
         if source!=original:
             saved=run/'reports/layout_original_english.tex';saved.parent.mkdir(exist_ok=True);saved.write_bytes(original_blob)
