@@ -13,6 +13,7 @@ class AtomicJsonTests(unittest.TestCase):
             original=Path.replace;calls=[]
             def replace(source,destination):
                 calls.append(source)
+                self.assertLess(len(source.name),25)
                 if len(calls)<3:
                     self.assertEqual(json.loads(target.read_text()),{'old':True})
                     raise PermissionError('simulated sharing violation')

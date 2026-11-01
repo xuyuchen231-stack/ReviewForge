@@ -5,6 +5,23 @@ from translation_pipeline import mask_tex, TOKEN
 
 
 class TranslationAnchorTests(unittest.TestCase):
+    def test_plain_slots_never_send_formulas_citations_or_tokens_to_model(self):
+        from translation_pipeline import translate_fragment
+        source=r'Growth $x=1$ follows \cite{Smith2020} evidence.'
+        seen=[]
+        def ask(text,feedback):
+            seen.append(text)
+            self.assertNotIn('RFPROTECT',text)
+            self.assertNotIn('Smith2020',text)
+            self.assertNotIn('x=1',text)
+            return {'Growth':'\u751f\u957f','follows':'\u4f9d\u636e','evidence.':'\u8bc1\u636e\u3002'}[text.strip()]
+        with tempfile.TemporaryDirectory() as folder:
+            d=Path(folder)/'units';d.mkdir()
+            result=translate_fragment(source,ask,d,'',[])
+        self.assertIn('$x=1$',result)
+        self.assertIn(r'\cite{Smith2020}',result)
+        self.assertEqual(len(seen),3)
+
     def test_failed_unit_does_not_block_later_units_or_publish_partial_text(self):
         from translation_pipeline import translate_fragment, TranslationError
         with tempfile.TemporaryDirectory() as folder:

@@ -27,7 +27,7 @@ def atomic_json(path, obj):
     tmp = None
     try:
         with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', dir=path.parent,
-                                         prefix=path.name+'.', suffix='.tmp', delete=False) as stream:
+                                         prefix='.rf-', suffix='.tmp', delete=False) as stream:
             tmp = Path(stream.name)
             json.dump(obj, stream, ensure_ascii=False, indent=2)
             stream.flush()

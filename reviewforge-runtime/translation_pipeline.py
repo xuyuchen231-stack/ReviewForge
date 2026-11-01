@@ -156,6 +156,39 @@ def prose_units(masked, limit=1800):
     return units
 
 
+def translate_plain_slots(unit, ask, directory, context, entry, deadline):
+    """Only prose crosses the model boundary; reinsert every protected span locally."""
+    slots=directory/'plain_slots';slots.mkdir(exist_ok=True)
+    result=[]
+    for part in re.split('('+TOKEN.pattern+')',unit):
+        if not part or TOKEN.fullmatch(part) or not re.search(r'[A-Za-z]{2}',part):
+            result.append(part);continue
+        if not any(not word.isupper() for word in re.findall(r'[A-Za-z]{2,}',part)):
+            result.append(part);continue
+        digest=hashlib.sha256(('plain-slots-v1'+context+'\0'+part).encode()).hexdigest()
+        cache=slots/(digest+'.json');translated=None
+        if cache.exists():
+            record=json.loads(cache.read_text(encoding='utf-8'))
+            if record.get('source_sha256')==digest and validate_unit(part,record.get('text'))[0]:translated=record['text']
+        reason='Translate this prose fragment only. All adjacent formulas, citations and markup are inserted by code; do not reconstruct them.'
+        for attempt in range(2):
+            if translated is not None:break
+            if deadline is not None and time.time()>=deadline:raise TranslationError('Translation deadline reached')
+            entry['attempts']+=1
+            value=ask(part.strip(),reason)
+            ok,why=validate_unit(part,value)
+            if ok:
+                translated=re.match(r'\s*',part).group()+value.strip()+re.search(r'\s*$',part).group()
+                atomic_json(cache,{'source_sha256':digest,'text':translated})
+            else:reason=why
+        if translated is None:raise TranslationError(reason)
+        result.append(translated)
+    candidate=''.join(result)
+    ok,why=validate_unit(unit,candidate)
+    if not ok:raise TranslationError(why)
+    return candidate
+
+
 def translate_fragment(text, ask, directory, context, reports, deadline=None):
     masked, saved = mask_tex(text)
     output = []
@@ -175,35 +208,10 @@ def translate_fragment(text, ask, directory, context, reports, deadline=None):
             except (ValueError, OSError, TypeError):
                 pass
         if candidate is None:
-            for attempt in range(2):
-                if deadline is not None and time.time() >= deadline:
-                    entry['reason'] = 'Translation deadline reached'; break
-                entry['attempts'] += 1
-                try:
-                    translated = ask(unit, entry.get('reason', ''))
-                    ok, why = validate_unit(unit, translated)
-                    if ok:
-                        candidate = translated; break
-                    entry['reason'] = why
-                except Exception as exc:
-                    entry['reason'] = type(exc).__name__ + ': translation request failed'
-            if candidate is None and len(unit) > 600 and (deadline is None or time.time() < deadline):
-                # A bounded second pass uses smaller chunks; it cannot recurse forever.
-                smaller = prose_units(unit, 600)
-                pieces = []
-                for piece in smaller:
-                    if not re.search(r'[A-Za-z]{2}', TOKEN.sub('', piece)):
-                        pieces.append(piece); continue
-                    if deadline is not None and time.time() >= deadline:
-                        break
-                    try:
-                        value = ask(piece, 'Previous larger block failed; translate this smaller unit completely.')
-                        entry['attempts'] += 1
-                        if not validate_unit(piece, value)[0]: break
-                        pieces.append(value)
-                    except Exception:
-                        break
-                if len(pieces) == len(smaller): candidate = ''.join(pieces)
+            try:
+                candidate = translate_plain_slots(unit, ask, directory, context, entry, deadline)
+            except Exception as exc:
+                entry['reason'] = str(exc) if isinstance(exc, TranslationError) else type(exc).__name__ + ': translation request failed'
         if candidate is not None:
             # Preserve boundaries between commands/paragraphs even if the model strips whitespace.
             candidate = re.match(r'\s*', unit).group() + candidate.strip() + re.search(r'\s*$', unit).group()

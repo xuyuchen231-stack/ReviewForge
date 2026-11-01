@@ -63,6 +63,9 @@ def deliver_outputs(run,state,report,chat,translate=True,allow_refinement=True,s
             except (ValueError,TypeError,ImportError,OSError) as exc:report['figures']={'status':'FAILED','reason':type(exc).__name__+': '+str(exc)[:200],'model_calls':0}
         source,aliases=canonicalize_references(source);report['reference_aliases']=aliases
         source=sorted_citation_groups(source)
+        from publication_export import prefer_multiline_displays
+        source,multiline_count=prefer_multiline_displays(source)
+        report['multiline_equations']={'changed':multiline_count,'policy':'single-column-first; algebra and labels preserved'}
         source=mark_wide_material(prepare_two_column_export(source))
         (out/'review_en.tex').write_bytes(source.encode('utf-8'))
         def build_current():
