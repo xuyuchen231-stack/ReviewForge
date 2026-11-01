@@ -416,6 +416,8 @@ def generate_chinese_body(api,tex,papers,workspace,deadline=None,context_workspa
    'Translate every natural-language span into formal Chinese, including titles, headings, captions and table text. '
    'RFPROTECT tokens are immutable TeX/math/number markers: copy each exactly once in the same order. '
    'Do not add TeX syntax, commentary, markdown or omit text. Keep technical abbreviations where appropriate. '
+   'Retain standard scientific abbreviations (such as ODE, PCA, MPC and pH); Chinese academic prose may contain them. '
+   'Do not repeatedly expand abbreviations in separate fragments or invent first-use definitions. '
    'Use the supplied terminology glossary. Return only the translated text.',
    {'text':text,'context':context,'feedback':feedback},role='writer')
  try:return translate_document(tex,ws,ask,context,deadline)

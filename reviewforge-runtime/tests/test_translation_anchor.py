@@ -5,6 +5,31 @@ from translation_pipeline import mask_tex, TOKEN
 
 
 class TranslationAnchorTests(unittest.TestCase):
+    def test_all_natbib_variants_keep_identifier_arguments_opaque(self):
+        for command in ('citealp','citealt','citeauthor','citeyear','citeyearpar','citenum','Citep','Citet'):
+            with self.subTest(command=command):
+                source='\\'+command+'{Geremia20254ccb72}'
+                masked,saved=mask_tex(source)
+                self.assertFalse(TOKEN.sub('',masked).strip())
+                self.assertIn(source,saved)
+
+    def test_mixed_case_and_combined_abbreviations_need_no_chinese_characters(self):
+        from translation_pipeline import validate_unit
+        for abbreviation in ('pH','qPCR','mRNA','NADH','ODE/PDE','DNN, PCA, MPC','RT-qPCR'):
+            with self.subTest(abbreviation=abbreviation):
+                self.assertTrue(validate_unit(abbreviation,abbreviation)[0])
+        self.assertFalse(validate_unit('The operating conditions','The operating conditions')[0])
+        self.assertFalse(validate_unit('INTRODUCTION','INTRODUCTION')[0])
+
+    def test_abbreviation_only_fragments_do_not_call_model(self):
+        from translation_pipeline import translate_fragment
+        from unittest.mock import Mock
+        ask=Mock(side_effect=AssertionError('No translation needed'))
+        with tempfile.TemporaryDirectory() as folder:
+            d=Path(folder)/'units';d.mkdir()
+            self.assertEqual(translate_fragment('pH / qPCR / ODE',ask,d,'',[]),'pH / qPCR / ODE')
+        ask.assert_not_called()
+
     def test_inline_code_citation_identifier_is_not_translatable(self):
         source=r'\texttt{Geremia20254ccb72}'
         masked,saved=mask_tex(source)

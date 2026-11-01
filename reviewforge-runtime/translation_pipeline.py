@@ -3,6 +3,7 @@ import hashlib
 import json
 import re
 import time
+from collections import Counter
 from pathlib import Path
 
 from reviewforge import atomic_json
@@ -25,6 +26,8 @@ COMMAND = re.compile(r'\\([A-Za-z]+\*?|.)', re.S)
 _SCIENTIFIC_NAMES=('Clostridium autoethanogenum','C. autoethanogenum','Xanthophyllomyces dendrorhous','X. dendrorhous','Ralstonia eutropha','R. eutropha','Cupriavidus necator','C. necator','Pichia pastoris','P. pastoris','Komagataella phaffii','K. phaffii','Escherichia coli','E. coli','Saccharomyces cerevisiae','S. cerevisiae','Bacillus subtilis','B. subtilis','Corynebacterium glutamicum','C. glutamicum','Aspergillus niger','A. niger','Yarrowia lipolytica','Y. lipolytica','Pseudomonas putida','P. putida','Pichia','Komagataella','Escherichia','Saccharomyces','Bacillus','Corynebacterium','Aspergillus','Yarrowia','Pseudomonas','Enterobacter')
 SCIENTIFIC_NAMES = re.compile(r'(?<![A-Za-z])(?:'+'|'.join(r'(?:\s+|\\\s+|~)'.join(re.escape(word) for word in name.split()) for name in _SCIENTIFIC_NAMES)+r')(?![A-Za-z])')
 OPAQUE_ARGS = {'cite', 'citep', 'citet', 'parencite', 'textcite', 'autocite',
+               'citealp', 'citealt', 'citeauthor', 'citeyear', 'citeyearpar', 'citenum',
+               'Citep', 'Citet', 'Citealp', 'Citealt', 'Citeauthor',
                'footcite', 'nocite', 'ref', 'eqref', 'autoref', 'cref', 'Cref',
                'label', 'includegraphics', 'bibliography', 'bibliographystyle',
                'url', 'path', 'input', 'include', 'hspace', 'vspace', 'cline',
@@ -115,13 +118,23 @@ def mask_tex(text):
     return ''.join(out), saved
 
 
+MIXED_ABBREVIATIONS={'pH','pO','pCO','pKa','qPCR','qRT','mRNA','rRNA','tRNA','siRNA','miRNA','scFv','GPo','Mut'}
+PROSE_HEADINGS={'ABSTRACT','INTRODUCTION','BACKGROUND','METHOD','METHODS','RESULT','RESULTS','DISCUSSION','CONCLUSION','CONCLUSIONS','MODEL','MODELS','DATA','STUDY','STUDIES','TRAINING','VALIDATION','PREDICTION'}
+
+
+def abbreviation_only(text):
+    words=re.findall(r'[A-Za-z]+',text)
+    residue=re.sub(r'[A-Za-z]+|[\s,;/()\[\].:+-]','',text)
+    return bool(words) and not residue and all(w in MIXED_ABBREVIATIONS or (w.isupper() and 2<=len(w)<=8 and w not in PROSE_HEADINGS) for w in words)
+
+
 def identifier_fragment(source,candidate):
     # A leading article has no standalone Chinese equivalent before an immutable
     # strain identifier. Restrict this exception to unchanged identifiers.
     before=source.strip().strip('(),.;:')
     after=candidate.strip().strip('(),.;:')
     before=re.sub(r'^(?:The|the|A|a|An|an)\s+','',before)
-    return before==after and (before in ('GPo','Mut','Research Square v') or bool(re.fullmatch(r'[A-Z]{2,}',before)))
+    return before==after and (before=='Research Square v' or abbreviation_only(before))
 
 
 def validate_unit(source, candidate):
@@ -135,13 +148,13 @@ def validate_unit(source, candidate):
     original = TOKEN.sub('', source)
     if not TOKEN.search(source) and identifier_fragment(original,prose):
         return True, ''
-    if any(not word.isupper() for word in re.findall(r'[A-Za-z]{2,}', original)) and not re.search(r'[\u3400-\u9fff]', prose) and not identifier_fragment(original,prose):
+    if re.search(r'[A-Za-z]{2,}', original) and not re.search(r'[\u3400-\u9fff]', prose) and not identifier_fragment(original,prose):
         return False, 'English text has no Chinese translation'
     if re.search(r'(?:\b[A-Za-z][A-Za-z-]*[ ,;:]*){12,}', prose):
         return False, 'Long untranslated English span'
     for before, after in zip(TOKEN.split(source), TOKEN.split(candidate)):
         words = re.findall(r'\b[A-Za-z]{2,}\b', before)
-        if any(not word.isupper() for word in words) and not re.search(r'[\u3400-\u9fff]', after) and not identifier_fragment(before,after):
+        if words and not re.search(r'[\u3400-\u9fff]', after) and not identifier_fragment(before,after):
             return False, 'Untranslated prose between protected tokens'
         old_words = re.findall(r'\b[A-Za-z]+\b', before.lower())
         new_words = re.findall(r'\b[A-Za-z]+\b', after.lower())
@@ -175,7 +188,7 @@ def translate_plain_slots(unit, ask, directory, context, entry, deadline):
     for part in re.split('('+TOKEN.pattern+')',unit):
         if not part or TOKEN.fullmatch(part) or not re.search(r'[A-Za-z]{2}',part):
             result.append(part);continue
-        if not any(not word.isupper() for word in re.findall(r'[A-Za-z]{2,}',part)):
+        if identifier_fragment(part,part):
             result.append(part);continue
         digest=hashlib.sha256(('plain-slots-v1'+context+'\0'+part).encode()).hexdigest()
         cache=slots/(digest+'.json');translated=None
@@ -269,6 +282,12 @@ def translate_document(tex, workspace, ask, context='', deadline=None):
             preamble += '\\usepackage[UTF8]{ctex}\n'
         body = translate_fragment(tex[start:end], ask, directory, context, reports, deadline)
         result = preamble + body + tex[end:]
+        from manuscript_integrity import CITES, LABEL, REF
+        for pattern in (re.compile(CITES.pattern,re.I),LABEL,REF):
+            if Counter(m.group() for m in pattern.finditer(tex)) != Counter(m.group() for m in pattern.finditer(result)):
+                raise TranslationError('Protected citation, label or cross-reference changed')
+        if [m.group() for m in OPAQUE.finditer(tex)] != [m.group() for m in OPAQUE.finditer(result)]:
+            raise TranslationError('Protected math or scientific environment changed')
         report.update(status='PASS', output_sha256=hashlib.sha256(result.encode()).hexdigest(), completed_units=len(reports))
         return result
     finally:
