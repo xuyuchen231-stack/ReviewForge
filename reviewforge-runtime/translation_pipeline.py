@@ -115,6 +115,15 @@ def mask_tex(text):
     return ''.join(out), saved
 
 
+def identifier_fragment(source,candidate):
+    # A leading article has no standalone Chinese equivalent before an immutable
+    # strain identifier. Restrict this exception to unchanged identifiers.
+    before=source.strip().strip('(),.;:')
+    after=candidate.strip().strip('(),.;:')
+    before=re.sub(r'^(?:The|the|A|a|An|an)\s+','',before)
+    return before==after and (before in ('GPo','Mut','Research Square v') or bool(re.fullmatch(r'[A-Z]{2,}',before)))
+
+
 def validate_unit(source, candidate):
     if not isinstance(candidate, str) or not candidate.strip():
         return False, 'Empty translation'
@@ -124,17 +133,20 @@ def validate_unit(source, candidate):
     if re.search(r'[\\{}$&\d]|```', prose):
         return False, 'Translation introduced TeX syntax'
     original = TOKEN.sub('', source)
-    if any(not word.isupper() for word in re.findall(r'[A-Za-z]{2,}', original)) and not re.search(r'[\u3400-\u9fff]', prose):
+    if not TOKEN.search(source) and identifier_fragment(original,prose):
+        return True, ''
+    if any(not word.isupper() for word in re.findall(r'[A-Za-z]{2,}', original)) and not re.search(r'[\u3400-\u9fff]', prose) and not identifier_fragment(original,prose):
         return False, 'English text has no Chinese translation'
     if re.search(r'(?:\b[A-Za-z][A-Za-z-]*[ ,;:]*){12,}', prose):
         return False, 'Long untranslated English span'
     for before, after in zip(TOKEN.split(source), TOKEN.split(candidate)):
         words = re.findall(r'\b[A-Za-z]{2,}\b', before)
-        if any(not word.isupper() for word in words) and not re.search(r'[\u3400-\u9fff]', after):
+        if any(not word.isupper() for word in words) and not re.search(r'[\u3400-\u9fff]', after) and not identifier_fragment(before,after):
             return False, 'Untranslated prose between protected tokens'
         old_words = re.findall(r'\b[A-Za-z]+\b', before.lower())
         new_words = re.findall(r'\b[A-Za-z]+\b', after.lower())
-        triples = {tuple(old_words[i:i+3]) for i in range(len(old_words)-2)}
+        original_case=re.findall(r'\b[A-Za-z]+\b',before)
+        triples = {tuple(old_words[i:i+3]) for i in range(len(old_words)-2) if not all(w.isupper() for w in original_case[i:i+3])}
         if any(tuple(new_words[i:i+3]) in triples for i in range(len(new_words)-2)):
             return False, 'Untranslated English phrase retained'
     if len(prose.strip()) < max(1, len(re.findall(r'\b[A-Za-z]+\b', original)) // 2):
@@ -176,11 +188,15 @@ def translate_plain_slots(unit, ask, directory, context, entry, deadline):
             if deadline is not None and time.time()>=deadline:raise TranslationError('Translation deadline reached')
             entry['attempts']+=1
             value=ask(part.strip(),reason)
+            if isinstance(value,str):value=re.sub(r'\bet\s+al\.', '\u7b49', value)
             ok,why=validate_unit(part,value)
             if ok:
                 translated=re.match(r'\s*',part).group()+value.strip()+re.search(r'\s*$',part).group()
                 atomic_json(cache,{'source_sha256':digest,'text':translated})
-            else:reason=why
+            else:
+                reason=why
+                entry['failed_fragment']=part
+                entry['rejected_text']=value
         if translated is None:raise TranslationError(reason)
         result.append(translated)
     candidate=''.join(result)

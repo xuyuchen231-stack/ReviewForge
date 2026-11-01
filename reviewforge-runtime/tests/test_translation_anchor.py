@@ -5,6 +5,22 @@ from translation_pipeline import mask_tex, TOKEN
 
 
 class TranslationAnchorTests(unittest.TestCase):
+    def test_plain_author_et_al_is_translated_without_changing_citation_markup(self):
+        from translation_pipeline import translate_fragment
+        with tempfile.TemporaryDirectory() as folder:
+            d=Path(folder)/'units';d.mkdir()
+            result=translate_fragment(r'Unlike Lawrence et al.\cite{L2020}',lambda *a:'\u4e0e Lawrence et al. \u4e0d\u540c',d,'',[])
+        self.assertIn('Lawrence \u7b49',result)
+        self.assertIn(r'\cite{L2020}',result)
+
+    def test_strain_fragments_and_uppercase_partition_codes_are_not_untranslated_prose(self):
+        from translation_pipeline import validate_unit
+        self.assertTrue(validate_unit('The GS','GS')[0])
+        self.assertTrue(validate_unit(' GPo','GPo')[0])
+        self.assertTrue(validate_unit('the V-I/V-E split','V-I/V-E\u5212\u5206')[0])
+        self.assertFalse(validate_unit('The model','model')[0])
+        self.assertFalse(validate_unit('the operating point','the operating point')[0])
+
     def test_plain_slots_never_send_formulas_citations_or_tokens_to_model(self):
         from translation_pipeline import translate_fragment
         source=r'Growth $x=1$ follows \cite{Smith2020} evidence.'
