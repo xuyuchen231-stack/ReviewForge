@@ -54,9 +54,9 @@ def resilient_request(request, deadline, clock=time.time, sleep=None, categories
                 raise
             if category in ('rate_limit', 'weekly_allowance_exhausted'):
                 delay = max(1, failure.get('retry_after_seconds', 60))
-            elif category in ('connection_failure', 'upstream_unavailable', 'invalid_response'):
+            elif category in ('connection_failure', 'upstream_unavailable', 'invalid_response', 'response_truncated'):
                 transient_failures += 1
-                if category == 'invalid_response' and transient_failures >= 3:
+                if category in ('invalid_response', 'response_truncated') and transient_failures >= 3:
                     raise
                 delay = min(300, 10 * (2 ** min(transient_failures-1, 5)))
             else:
@@ -88,6 +88,22 @@ def editorial_response(chat, system, payload, role, deadline):
             raise ValueError('Invalid editorial response schema: review object required')
         return decoded
     return resilient_request(request, deadline if deadline is not None else float('inf'), categories={'invalid_response'})
+
+
+def recover_model_request(api, system, user, role):
+    """A truncated completion gets a bounded output increase, not a new writing pass."""
+    ceiling = 6000 if role == 'reviewer' else 18000
+    def request():
+        try:
+            response = api.chat(system, user, role=role)
+            if getattr(api, 'last_finish_reason', None) == 'length':
+                raise ValueError('Editorial response truncated')
+            return response
+        except Exception as exc:
+            if request_failure(exc)['category'] == 'response_truncated':
+                api.max_tokens = min(ceiling, api.max_tokens * 2)
+            raise
+    return resilient_request(request, api.deadline)
 
 POLICY = 'clean-reference-evidence-then-condense-v2.1'
 ACCESS = re.compile(r'accessible abstract|abstract (?:does not|cannot)|only the abstract|because only|absence of evidence rather than|supports only the narrow statement', re.I)
@@ -494,8 +510,7 @@ def main():
             record={'stage':request_stage,'role':role,'input_chars':len(system)+len(encode_model_payload(payload)),'started_epoch':started}
             print('[editorial/request] stage='+request_stage+' role='+role,flush=True)
             try:
-                response=resilient_request(lambda: api.chat(system,encode_model_payload(payload),role=role), api.deadline)
-                if getattr(api,'last_finish_reason',None)=='length':raise ValueError('Editorial response truncated')
+                response=recover_model_request(api,system,encode_model_payload(payload),role)
                 record.update(status='RETURNED',provider=getattr(api,'last_provider','unknown'),model=getattr(api,'last_model','unknown'),account_slot=getattr(api,'last_key_slot',None),
                               usage={k:v for k,v in (getattr(api,'last_usage',{}) or {}).items() if k in ('prompt_tokens','completion_tokens','total_tokens','input_tokens','output_tokens') and isinstance(v,(int,float))})
                 return response

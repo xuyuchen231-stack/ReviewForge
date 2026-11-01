@@ -8,6 +8,20 @@ from editorial_refinement import audit, split_document, preservation_errors, ref
 
 
 class RequestDiagnosticTests(unittest.TestCase):
+    def test_truncated_review_increases_output_budget_and_retries_only_review(self):
+        from editorial_refinement import recover_model_request
+        from unittest.mock import Mock, patch
+        api=Mock();api.max_tokens=2500;api.deadline=float('inf')
+        seen=[]
+        def chat(system,user,role):
+            seen.append((role,api.max_tokens))
+            if len(seen)==1:raise RuntimeError('API attempts failed: Empty API response; finish_reason=length;')
+            api.last_finish_reason='stop';return 'ok'
+        api.chat=chat
+        with patch('editorial_refinement.time.sleep'):
+            self.assertEqual(recover_model_request(api,'s','u','reviewer'),'ok')
+        self.assertEqual(seen,[('reviewer',2500),('reviewer',5000)])
+
     def test_invalid_json_response_retries_at_parse_boundary(self):
         from editorial_refinement import editorial_response
         from unittest.mock import Mock, patch
