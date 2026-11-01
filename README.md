@@ -14,6 +14,26 @@
 
 > **Project status:** v4 source code and ChatGPT skill are available. This is a research-assistance workflow, not an autonomous scientific fact checker or a guarantee of publication-ready manuscripts.
 
+## Why ReviewForge?
+
+**ReviewForge turns AI-assisted literature review into a traceable research workflow—not a one-shot paper generator.** It connects literature discovery, DOI metadata checks, section-level manuscript revision, model-based critique, citation audits, and bilingual LaTeX/PDF production. Checkpoints support long-running work and recovery, while source verification and final scientific judgment remain with the researcher.
+
+**Bring your own API (BYO API).** The supplied example uses **MiMo for drafting and DeepSeek for review through Token Harbor**. These are configurable defaults, not mandatory services: users can provide their own credentials, compatible HTTPS API endpoint, and supported model IDs. Different writer and reviewer models are recommended for meaningful cross-model critique; provider compatibility and quotas must be verified by each user.
+
+## API and model configuration
+
+From `reviewforge-runtime/`, run `setup_secret.bat` to configure credentials locally, then `check_connection.bat` to test both roles. Advanced users can edit `%USERPROFILE%\\.reviewforge\\credentials.env` (or a local ignored `.env`):
+
+```dotenv
+RF_BASE_URL=https://your-compatible-provider.example/v1
+RF_API_KEY=your_private_api_key
+RF_WRITER_MODEL=your_writer_model_id
+RF_REVIEWER_MODEL=your_reviewer_model_id
+RF_FALLBACK_MODEL=your_fallback_model_id
+```
+
+The repository's sample `.env.example` contains Token Harbor model IDs; **replace the endpoint and IDs together** when switching providers (for example, to AMD Radeon Cloud). An API key does not guarantee that every advertised model is enabled. Keep credentials outside Git, check the provider's usage and data policies, and test the chosen models before a long run.
+
 ## At a glance
 
 ```mermaid
