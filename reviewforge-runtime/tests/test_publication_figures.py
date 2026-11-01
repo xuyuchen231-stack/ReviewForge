@@ -4,6 +4,11 @@ from unittest.mock import patch
 from publication_figures import validate_plan,add_planned_figures
 
 class PublicationFigureTests(unittest.TestCase):
+ def test_workflow_plan_has_its_own_validated_geometry(self):
+  spec=self.spec();spec.update(layout='workflow',nodes=['Define claim','Lock independent split','Final test'])
+  self.assertTrue(validate_plan(spec,['A']))
+  spec['nodes']=['Too few']
+  with self.assertRaises(ValueError):validate_plan(spec,['A'])
  def spec(self):
   return {'id':'concept','source_keys':['A'],'after_heading':r'\subsection{Model}','lead_in':'Figure~{FIG} distinguishes the interfaces.','caption':'Conceptual construction. ','panels':[{'title':'Distinct role '+str(i),'note':'An evidence-bounded question.','nodes':[{'text':'Input'},{'text':'Output'}]} for i in range(4)]}
  def test_unknown_source_or_path_id_is_rejected(self):
@@ -18,3 +23,5 @@ class PublicationFigureTests(unittest.TestCase):
    self.assertIn('Original prose.',out);self.assertIn(r'\begin{figure*}',out);self.assertIn(r'\cite{A}',out)
    self.assertEqual(report['added'],1);self.assertEqual(report['model_calls'],0)
    self.assertEqual(add_planned_figures(out,{'figures':[self.spec()]},Path(t))[0],out)
+   already_canonicalized=out.replace(r'\bibitem{A}',r'\bibitem{canonicalA}')
+   self.assertEqual(add_planned_figures(already_canonicalized,{'figures':[self.spec()]},Path(t))[0],already_canonicalized)

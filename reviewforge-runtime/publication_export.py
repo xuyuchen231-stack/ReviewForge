@@ -231,6 +231,11 @@ def make_overleaf_project(directory):
     project.mkdir()
     source=(folder/'review_en.tex').read_bytes();(project/'main.tex').write_bytes(source)
     assets=copy_project_assets(folder,project,source.decode('utf-8'))
+    for name in ('literature_evidence_ledger.csv','literature_evidence_summary.csv'):
+        path=folder/'supplement'/name
+        if path.is_file():
+            (project/'supplement').mkdir(exist_ok=True)
+            shutil.copyfile(path,project/'supplement'/name)
     if assets['missing']:raise ValueError('Overleaf source assets missing: '+','.join(assets['missing']))
     # A locally bundled standard package retains its original source and notices.
     support=folder/'tex_support'

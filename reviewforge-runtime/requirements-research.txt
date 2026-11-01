@@ -1,0 +1,3 @@
+# Optional executed synthetic benchmark and authored conceptual figures.
+numpy>=1.24
+matplotlib>=3.7

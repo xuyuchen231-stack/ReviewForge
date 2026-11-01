@@ -232,6 +232,9 @@ def checkpoint_call(api,state,path,system,payload,role):
     coherence=role=='reviewer' and 'units' in payload
     api.thinking_mode=os.environ.get('RF_COHERENCE_THINKING','disabled') if coherence else (os.environ.get('RF_PREPARATION_THINKING','disabled') if preparation else None)
     api.reasoning_effort=os.environ.get('RF_COHERENCE_REASONING_EFFORT','low') if coherence and api.thinking_mode=='enabled' else None
+    if payload.get('editorial_revision') is True:
+        api.thinking_mode='disabled';api.reasoning_effort=None
+        api.max_tokens=2500 if role=='reviewer' else max(getattr(api,'max_tokens',0),12000)
     api.request_stage='preparation' if preparation else ('coherence' if coherence else 'manuscript')
     api.request_provider=os.environ.get('RF_PREPARATION_PROVIDER','primary') if preparation else (os.environ.get('RF_COHERENCE_PROVIDER','primary') if coherence else None)
     api.request_model=(os.environ.get('RF_COHERENCE_MODEL') or getattr(api,'reviewer_model',getattr(api,'model',None))) if coherence else ((os.environ.get('RF_PREPARATION_MODEL') or getattr(api,'reviewer_model',None)) if preparation else None)
@@ -655,7 +658,11 @@ def run_review(workspace,hours=9,reserve_minutes=40,max_visits=2,new_run=False,t
             report=assemble(run,state)
             output=run/'output'
             from autonomous_delivery import deliver_outputs
-            deliver_outputs(run,state,report,lambda system,payload,role:checkpoint_call(api,state,path,system,payload,role),translate)
+            def delivery_chat(system,payload,role):
+                response=checkpoint_call(api,state,path,system,payload,role)
+                if getattr(api,'last_finish_reason',None)=='length':raise ValueError('Delivery response truncated; saved for inspection, not accepted')
+                return response
+            deliver_outputs(run,state,report,delivery_chat,translate)
             report.update(coherence={'rounds':state.get('coherence_rounds',0),'error':state.get('coherence_error'),'status':'failed' if state.get('coherence_error') else ('performed' if state.get('coherence_rounds',0) else 'not_run')},calls=state['calls'],requests_attempted=state['requests_attempted'],runtime_seconds=round(time.time()-state['session_started']),unresolved={k:v for k,v in state['tasks'].items() if v['status']!='completed' or k not in report['accepted_ids']},finished_utc=datetime.datetime.now(datetime.timezone.utc).isoformat())
             state.update(status='finished_with_unresolved' if report['unresolved'] or state.get('coherence_error') else 'finished_model_review',phase='finished');atomic_json(run/'reports/autonomous_result.json',report);atomic_json(path,state)
             print(json.dumps({'status':state['status'],'accepted_units':report['accepted_units'],'total_units':len(state['tasks']),'english_build':report.get('review_en_build',{}).get('status'),'translation':report.get('translation'),'coherence':report.get('coherence',{}).get('status'),'output':str(output),'report':str(run/'reports/autonomous_result.json')},ensure_ascii=False),flush=True)

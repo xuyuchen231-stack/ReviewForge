@@ -37,6 +37,10 @@ Consult `references/editorial-synthesis.md` for paragraph argument checks, fair 
 8. For overnight execution, use the separate ReviewForge Runtime application. A ChatGPT Skill alone does not run for nine hours unattended.
 
 ## Deliverables
+For repetitive defensive prose, full-reference preservation and separate condensation, follow
+`references/editorial-refinement.md`. The local editorial stage is opt-in through
+`RF_MANUSCRIPT_REFINEMENT=1`; it must not silently restart evidence extraction or scientific review.
+
 - Revised manuscript and original snapshot
 - Claim/evidence ledger with unresolved items
 - Review report (major/minor concerns) and revision rationale

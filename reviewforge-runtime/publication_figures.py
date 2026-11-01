@@ -6,6 +6,11 @@ from reviewforge import atomic_json
 def validate_plan(spec,known_keys):
     if not re.fullmatch(r'[a-z][a-z0-9_-]{1,60}',spec.get('id','')):raise ValueError('Invalid figure ID')
     if not spec.get('source_keys') or set(spec['source_keys'])-set(known_keys):raise ValueError('Figure needs existing source identities')
+    if spec.get('layout')=='workflow':
+        nodes=spec.get('nodes',[])
+        if not 3<=len(nodes)<=8 or any(not isinstance(n,str) or not n.strip() or len(n)>150 for n in nodes):raise ValueError('Workflow needs 3-8 short authored nodes')
+        if not spec.get('caption') or not spec.get('after_heading') or not spec.get('lead_in'):raise ValueError('Specify scientific role and insertion point')
+        return True
     if len(spec.get('panels',[]))!=4:raise ValueError('This conceptual template requires four distinct panels')
     for panel in spec['panels']:
         if not panel.get('title') or not panel.get('note') or not 2<=len(panel.get('nodes',[]))<=4:raise ValueError('Incomplete conceptual panel')
@@ -14,6 +19,7 @@ def validate_plan(spec,known_keys):
     return True
 
 def render_concept(spec,directory):
+    if spec.get('layout')=='workflow':return render_workflow(spec,directory)
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
@@ -47,13 +53,41 @@ def render_concept(spec,directory):
     report={'kind':'conceptual_schematic','experimental_data':False,'source_keys':spec['source_keys'],'semantic_verification':False,'visual_status':'PENDING','spec_sha256':hashlib.sha256(json.dumps(spec,sort_keys=True).encode()).hexdigest(),'panel_bounds':bounds,'node_text_checks':node_checks,'font_floor_pt':7.4}
     atomic_json(folder/(spec['id']+'.manifest.json'),report);return report
 
+
+def render_workflow(spec,directory):
+    """Authored classification or locked-protocol sequence, not a four-panel substitute."""
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    from matplotlib.patches import FancyBboxPatch
+    directory=Path(directory);directory.mkdir(parents=True,exist_ok=True)
+    nodes=spec['nodes'];height=max(3.2,len(nodes)*.56)
+    with plt.rc_context({'font.family':'DejaVu Sans','pdf.fonttype':42,'svg.fonttype':'none'}):
+        fig,ax=plt.subplots(figsize=(7.05,height));ax.set(xlim=(0,1),ylim=(0,len(nodes)));ax.axis('off')
+        boxes=[]
+        for i,node in enumerate(nodes):
+            y=len(nodes)-i-.85
+            box=FancyBboxPatch((.04,y),.92,.66,boxstyle='round,pad=0.01',facecolor='#EAF3F5',edgecolor='#28556A');ax.add_patch(box)
+            label=ax.text(.50,y+.33,textwrap.fill(node,92),ha='center',va='center',fontsize=9,parse_math=False)
+            boxes.append((label,box))
+            if i and spec.get('connect',True):ax.annotate('',xy=(.5,y+.68),xytext=(.5,y+.96),arrowprops={'arrowstyle':'->','color':'#28556A'})
+        fig.subplots_adjust(left=.015,right=.985,top=.99,bottom=.01);fig.canvas.draw()
+        renderer=fig.canvas.get_renderer()
+        for label,box in boxes:
+            a=label.get_window_extent(renderer);b=box.get_window_extent(renderer)
+            if a.x0<b.x0 or a.x1>b.x1 or a.y0<b.y0 or a.y1>b.y1:raise ValueError('Workflow label overflow')
+        for suffix in ('pdf','svg','png'):fig.savefig(directory/(spec['id']+'.'+suffix),dpi=300)
+        plt.close(fig)
+    report={'kind':'conceptual_workflow','experimental_data':False,'source_keys':spec['source_keys'],'semantic_verification':False,'visual_status':'PENDING','spec_sha256':hashlib.sha256(json.dumps(spec,sort_keys=True).encode()).hexdigest(),'font_floor_pt':9}
+    atomic_json(directory/(spec['id']+'.manifest.json'),report);return report
+
 def add_planned_figures(tex,plan,output):
     known=set(re.findall(r'\\bibitem(?:\[[^]]*\])?\{([^}]+)\}',tex));reports=[]
     if not isinstance(plan,dict) or not isinstance(plan.get('figures'),list):raise ValueError('Invalid publication figure plan')
     for spec in plan['figures']:
-        validate_plan(spec,known)
         label='fig:rf-'+spec['id']
         if '\\label{'+label+'}' in tex:continue
+        validate_plan(spec,known)
         marker=spec['after_heading'];start=tex.find(marker)
         if start<0:raise ValueError('Figure insertion heading missing: '+marker)
         next_heading=re.search(r'(?m)^\\(?:section|subsection)\*?\{',tex[start+len(marker):])

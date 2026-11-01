@@ -29,6 +29,31 @@ def deliver_outputs(run,state,report,chat,translate=True):
         original_blob=(out/'review_en.tex').read_bytes()
         source=(out/'review_en.tex').read_text(encoding='utf-8')
         original=source
+        import os
+        if os.environ.get('RF_MANUSCRIPT_REFINEMENT', '0') == '1':
+            from editorial_refinement import audit,evidence_ledger,refine
+            from autonomous_review import RunLock
+            editorial=run/'editorial';editorial.mkdir(exist_ok=True)
+            atomic_json(editorial/'audit.json',audit(source))
+            evidence_ledger(run,editorial/'literature_evidence_ledger.csv')
+            import shutil
+            (out/'supplement').mkdir(exist_ok=True)
+            for name in ('literature_evidence_ledger.csv','literature_evidence_summary.csv'):
+                shutil.copyfile(editorial/name,out/'supplement'/name)
+            # Reserve build time. Scientific acceptance remains unchanged by editorial review.
+            previous_deadline=state.get('delivery_request_deadline')
+            state['delivery_request_deadline']=min(state['deadline']-120,previous_deadline or float('inf'))
+            try:
+                with RunLock(editorial/'editorial.lock'):
+                    report['editorial']=refine(source,editorial,chat,deadline=state['delivery_request_deadline'])
+            except RuntimeError:
+                report['editorial']={'status':'PAUSED','reason':'Editorial workspace busy; existing process retained'}
+            finally:
+                if previous_deadline is None:state.pop('delivery_request_deadline',None)
+                else:state['delivery_request_deadline']=previous_deadline
+            version=report['editorial'].get('versions',{}).get('condense')
+            if report['editorial']['status']=='COMPLETE' and version:
+                source=Path(version['path']).read_text(encoding='utf-8')
         if (run/'publication_figure_plan.json').exists():
             import json
             from publication_figures import add_planned_figures

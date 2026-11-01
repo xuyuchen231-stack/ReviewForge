@@ -2,6 +2,19 @@ import tempfile,time,unittest
 from pathlib import Path
 from unittest.mock import patch
 class DeliveryTests(unittest.TestCase):
+ def test_editorial_deadline_is_enforced_on_request_state_and_restored(self):
+  from autonomous_delivery import deliver_outputs
+  with tempfile.TemporaryDirectory() as t:
+   run=Path(t);out=run/'output';out.mkdir()
+   (out/'review_en.tex').write_text(r'\documentclass[twocolumn]{article}\begin{document}Scientific result.\end{document}',encoding='utf-8')
+   state={'deadline':time.time()+1800};seen=[]
+   def refinement(source,folder,chat,deadline):
+    seen.append(deadline);self.assertEqual(state['delivery_request_deadline'],deadline)
+    self.assertEqual(deadline,state['deadline']-120)
+    return {'status':'PAUSED','versions':{}}
+   with patch.dict('os.environ',{'RF_MANUSCRIPT_REFINEMENT':'1'}),patch('editorial_refinement.refine',side_effect=refinement),patch('reviewforge_v4.compile_tex',return_value={'status':'SKIPPED'}),patch('publication_export.reconcile_pdf_references',side_effect=lambda folder,source,build,*a,**kw:(source,build,{'status':'NOT_APPLICABLE'})):
+    deliver_outputs(run,state,{'accepted_units':1},lambda *a:None,False)
+   self.assertEqual(len(seen),1);self.assertNotIn('delivery_request_deadline',state)
  def test_export_recovers_wide_two_column_math_without_changing_math(self):
   from autonomous_delivery import deliver_outputs
   from manuscript_integrity import citekeys
