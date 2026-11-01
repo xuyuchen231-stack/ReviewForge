@@ -159,6 +159,7 @@ def prose_units(masked, limit=1800):
 def translate_fragment(text, ask, directory, context, reports, deadline=None):
     masked, saved = mask_tex(text)
     output = []
+    failed = []
     for unit in prose_units(masked):
         if not re.search(r'[A-Za-z]{2}', TOKEN.sub('', unit)):
             output.append(unit); continue
@@ -212,7 +213,9 @@ def translate_fragment(text, ask, directory, context, reports, deadline=None):
         reports.append(entry)
         atomic_json(directory.parent/'translation_progress.json', reports)
         if candidate is None:
-            raise TranslationError('Translation unit failed: ' + digest[:12] + '; ' + entry.get('reason', 'incomplete'))
+            failed.append((digest,entry.get('reason','incomplete')))
+    if failed:
+        raise TranslationError('Translation units failed: '+str(len(failed))+'; first '+failed[0][0][:12]+'; '+failed[0][1])
     result = ''.join(output)
     return TOKEN.sub(lambda m: saved[int(m.group()[9:15])], result)
 

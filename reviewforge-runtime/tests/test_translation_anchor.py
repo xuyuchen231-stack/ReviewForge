@@ -1,8 +1,22 @@
 import unittest
+import tempfile
+from pathlib import Path
 from translation_pipeline import mask_tex, TOKEN
 
 
 class TranslationAnchorTests(unittest.TestCase):
+    def test_failed_unit_does_not_block_later_units_or_publish_partial_text(self):
+        from translation_pipeline import translate_fragment, TranslationError
+        with tempfile.TemporaryDirectory() as folder:
+            directory=Path(folder)/'units';directory.mkdir()
+            reports=[]
+            def ask(text, feedback):
+                return text if 'First' in text else '\u7b2c\u4e8c\u6bb5\u8bd1\u6587\u3002'
+            with self.assertRaises(TranslationError):
+                translate_fragment('First paragraph.\n\nSecond paragraph.\n\n',ask,directory,'',reports)
+            self.assertEqual([r['status'] for r in reports],['FAILED','PASS'])
+            self.assertEqual(len(list(directory.glob('*.json'))),1)
+
     def test_ralstonia_names_are_immutable_scientific_identifiers(self):
         for name in ('R. eutropha', 'Ralstonia eutropha', 'Cupriavidus necator', 'C. necator', 'C. autoethanogenum', 'X.~dendrorhous', 'Xanthophyllomyces dendrorhous'):
             with self.subTest(name=name):
