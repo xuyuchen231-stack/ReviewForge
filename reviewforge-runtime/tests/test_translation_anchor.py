@@ -5,6 +5,12 @@ from translation_pipeline import mask_tex, TOKEN
 
 
 class TranslationAnchorTests(unittest.TestCase):
+    def test_inline_code_citation_identifier_is_not_translatable(self):
+        source=r'\texttt{Geremia20254ccb72}'
+        masked,saved=mask_tex(source)
+        self.assertFalse(TOKEN.sub('',masked).strip())
+        self.assertIn(source,saved)
+
     def test_plain_author_et_al_is_translated_without_changing_citation_markup(self):
         from translation_pipeline import translate_fragment
         with tempfile.TemporaryDirectory() as folder:

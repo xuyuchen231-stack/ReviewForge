@@ -28,7 +28,7 @@ OPAQUE_ARGS = {'cite', 'citep', 'citet', 'parencite', 'textcite', 'autocite',
                'footcite', 'nocite', 'ref', 'eqref', 'autoref', 'cref', 'Cref',
                'label', 'includegraphics', 'bibliography', 'bibliographystyle',
                'url', 'path', 'input', 'include', 'hspace', 'vspace', 'cline',
-               'cmidrule', 'color', 'textcolor', 'href', 'hypertarget', 'hyperlink', 'begin', 'end', 'ensuremath'}
+               'cmidrule', 'color', 'textcolor', 'href', 'hypertarget', 'hyperlink', 'texttt', 'begin', 'end', 'ensuremath'}
 
 
 def group_end(text, start, left='{', right='}'):
