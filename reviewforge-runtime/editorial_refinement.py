@@ -31,11 +31,43 @@ def request_failure(exc):
         category = 'budget_ended'
     elif isinstance(exc, (TimeoutError, ConnectionError)) or any(marker in message for marker in ('TimeoutError', 'URLError', 'IncompleteRead', 'RemoteDisconnected', 'ConnectionResetError')):
         category = 'connection_failure'
+    elif re.search(r'HTTP 5\d\d\b', message):
+        category = 'upstream_unavailable'
     result = {'category': category, 'error_type': type(exc).__name__}
     retry = re.search(r'Retry-After:\s*(\d{1,9})(?!\d)', message)
     if retry:
         result['retry_after_seconds'] = int(retry.group(1))
     return result
+
+
+def resilient_request(request, deadline, clock=time.time, sleep=time.sleep):
+    """Retry the same request, never restart writing or extend the session budget."""
+    transient_failures = 0
+    while True:
+        try:
+            return request()
+        except Exception as exc:
+            failure = request_failure(exc)
+            category = failure['category']
+            if category in ('rate_limit', 'weekly_allowance_exhausted'):
+                delay = max(1, failure.get('retry_after_seconds', 60))
+            elif category in ('connection_failure', 'upstream_unavailable', 'invalid_response'):
+                transient_failures += 1
+                if category == 'invalid_response' and transient_failures >= 3:
+                    raise
+                delay = min(300, 10 * (2 ** min(transient_failures-1, 5)))
+            else:
+                raise
+            if clock() + delay + 60 >= deadline:
+                raise
+            print('[editorial/recovery] '+category+'; retrying saved request in '+str(delay)+'s', flush=True)
+            remaining = delay
+            while remaining > 0:
+                step = min(20, remaining)
+                sleep(step)
+                remaining -= step
+                if clock() + 60 >= deadline:
+                    raise
 
 POLICY = 'clean-reference-evidence-then-condense-v2.1'
 ACCESS = re.compile(r'accessible abstract|abstract (?:does not|cannot)|only the abstract|because only|absence of evidence rather than|supports only the narrow statement', re.I)
@@ -446,7 +478,7 @@ def main():
             record={'stage':request_stage,'role':role,'input_chars':len(system)+len(encode_model_payload(payload)),'started_epoch':started}
             print('[editorial/request] stage='+request_stage+' role='+role,flush=True)
             try:
-                response=api.chat(system,encode_model_payload(payload),role=role)
+                response=resilient_request(lambda: api.chat(system,encode_model_payload(payload),role=role), api.deadline)
                 if getattr(api,'last_finish_reason',None)=='length':raise ValueError('Editorial response truncated')
                 record.update(status='RETURNED',provider=getattr(api,'last_provider','unknown'),model=getattr(api,'last_model','unknown'),account_slot=getattr(api,'last_key_slot',None),
                               usage={k:v for k,v in (getattr(api,'last_usage',{}) or {}).items() if k in ('prompt_tokens','completion_tokens','total_tokens','input_tokens','output_tokens') and isinstance(v,(int,float))})

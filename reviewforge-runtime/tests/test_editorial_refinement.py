@@ -8,6 +8,33 @@ from editorial_refinement import audit, split_document, preservation_errors, ref
 
 
 class RequestDiagnosticTests(unittest.TestCase):
+    def test_transient_request_retries_without_rewriting_or_changing_payload(self):
+        from editorial_refinement import resilient_request
+        from unittest.mock import Mock
+        request = Mock(side_effect=[RuntimeError('API attempts failed: TimeoutError'), 'ok'])
+        waits=[]
+        self.assertEqual(resilient_request(request, 1000, clock=lambda: 0, sleep=waits.append), 'ok')
+        self.assertEqual(request.call_count, 2)
+        self.assertEqual(sum(waits), 10)
+
+    def test_unknown_errors_and_budget_limits_do_not_loop(self):
+        from editorial_refinement import resilient_request
+        from unittest.mock import Mock
+        for error, deadline in [(RuntimeError('unknown'), 1000), (RuntimeError('Provider rate limit (429); respect Retry-After: 3600'), 100)]:
+            request=Mock(side_effect=error)
+            with self.assertRaises(RuntimeError):
+                resilient_request(request, deadline, clock=lambda: 0, sleep=lambda _: self.fail('must not wait'))
+            self.assertEqual(request.call_count, 1)
+
+    def test_rate_limit_waits_until_retry_after_then_resumes(self):
+        from editorial_refinement import resilient_request
+        from unittest.mock import Mock
+        request=Mock(side_effect=[RuntimeError('Provider rate limit (429); respect Retry-After: 65'), 'ok'])
+        waits=[]
+        self.assertEqual(resilient_request(request, 1000, clock=lambda: 0, sleep=waits.append), 'ok')
+        self.assertEqual(sum(waits), 65)
+        self.assertLessEqual(max(waits), 20)
+
     def test_classifies_only_known_failure_markers_without_leaking_payload(self):
         from editorial_refinement import request_failure
         result = request_failure(RuntimeError('API attempts failed: critic: TimeoutError secret-key private body'))
