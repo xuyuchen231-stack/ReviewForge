@@ -93,7 +93,7 @@ def deliver_outputs(run,state,report,chat,translate=True,allow_refinement=True,s
             atomic_json(run/'reports/layout_adaptation.json',report['layout_adaptation'])
         from editorial_quality import acceptance_report
         pages=None
-        pdf=out/report['review_en_build'].get('pdf','output/review_en.pdf')
+        pdf=out/(report['review_en_build'].get('pdf') or 'output/review_en.pdf')
         if pdf.is_file() and report['review_en_build'].get('status')=='PASS':
             try:
                 import fitz
@@ -112,6 +112,9 @@ def deliver_outputs(run,state,report,chat,translate=True,allow_refinement=True,s
             try:report['overleaf']=make_overleaf_project(out)
             except (ValueError,OSError) as exc:report['overleaf']={'status':'FAILED','reason':str(exc)[:200]}
     report['translation']='not_run_time_budget_or_disabled'
+    if report.get('review_en_build',{}).get('status')=='FAILED':
+        report['translation']='not_run_english_build_failed'
+        return _compact_publication(run,out,report)
     if report.get('prose_presentation',{}).get('status') in ('FAILED','NEEDS_REVIEW'):
         report['translation']='not_run_presentation_needs_revision'
         return _compact_publication(run,out,report)

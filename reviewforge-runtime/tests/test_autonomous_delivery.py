@@ -2,6 +2,24 @@ import tempfile,time,unittest
 from pathlib import Path
 from unittest.mock import patch
 class DeliveryTests(unittest.TestCase):
+ def test_failed_build_without_pdf_does_not_crash_or_translate(self):
+  from autonomous_delivery import deliver_outputs
+  with tempfile.TemporaryDirectory() as folder:
+   run=Path(folder);out=run/'output';out.mkdir()
+   (out/'review_en.tex').write_text(r'\documentclass[twocolumn]{article}\begin{document}Result.\end{document}',encoding='utf-8')
+   report={'accepted_units':0}
+   with patch('reviewforge_v4.compile_tex',return_value={'status':'FAILED','pdf':None}),patch('publication_export.reconcile_pdf_references',side_effect=lambda folder,source,build,*a,**kw:(source,build,{'status':'FAILED'})),patch('reviewforge_v4.generate_chinese_body') as translate:
+    deliver_outputs(run,{'deadline':time.time()+1800},report,lambda *a:None,True,allow_refinement=False,source_ready=True)
+   translate.assert_not_called()
+   self.assertEqual(report['translation'],'not_run_english_build_failed')
+
+ def test_export_repairs_observed_literal_newline_without_touching_nu(self):
+  from publication_export import prepare_two_column_export
+  source=r'\documentclass{article}\begin{document}Authors et al.\nsimilarly report $\nu=1$.\end{document}'
+  result=prepare_two_column_export(source)
+  self.assertNotIn(r'\nsimilarly',result)
+  self.assertIn(r'\nu=1',result)
+
  def test_unresolved_prose_list_does_not_spend_translation_calls(self):
   from autonomous_delivery import deliver_outputs
   with tempfile.TemporaryDirectory() as folder:

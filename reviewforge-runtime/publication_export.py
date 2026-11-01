@@ -73,6 +73,9 @@ def portable_text_symbols(tex):
 
 def prepare_two_column_export(tex,force=False):
     """Keep requested columns; give figures/tables full width instead of shrinking type."""
+    # Observed double-escaped prose newline; never decode arbitrary LaTeX escapes
+    # (notably \nu, \neq, \nabla) as text newlines.
+    tex=tex.replace(r'\nsimilarly', '\n'+'similarly')
     if not force and not re.search(r'\\documentclass\[[^]]*\btwocolumn\b',active_text(tex)):return tex
     if force:
         tex=re.sub(r'(?m)^\\onecolumn\s*\n','',tex)
