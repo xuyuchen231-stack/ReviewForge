@@ -18,7 +18,7 @@
 
 **ReviewForge turns AI-assisted literature review into a traceable research workflow—not a one-shot paper generator.** It connects literature discovery, DOI metadata checks, section-level manuscript revision, model-based critique, citation audits, and bilingual LaTeX/PDF production. Checkpoints support long-running work and recovery, while source verification and final scientific judgment remain with the researcher.
 
-**Bring your own API (BYO API).** The supplied example uses **MiMo for drafting and DeepSeek for review through Token Harbor**. These are configurable defaults, not mandatory services: users can provide their own credentials, compatible HTTPS API endpoint, and supported model IDs. Different writer and reviewer models are recommended for meaningful cross-model critique; provider compatibility and quotas must be verified by each user.
+**Bring your own API (BYO API).** ReviewForge does not ship API keys, hosted inference, or model credits. Users supply their own credentials, compatible HTTPS API endpoint, and supported writer, reviewer, and fallback model IDs. Different writer and reviewer models are recommended for cross-model critique; availability, pricing, and compatibility depend on the chosen provider.
 
 ## API and model configuration
 
@@ -32,7 +32,7 @@ RF_REVIEWER_MODEL=your_reviewer_model_id
 RF_FALLBACK_MODEL=your_fallback_model_id
 ```
 
-The repository's sample `.env.example` contains Token Harbor model IDs; **replace the endpoint and IDs together** when switching providers (for example, to AMD Radeon Cloud). An API key does not guarantee that every advertised model is enabled. Keep credentials outside Git, check the provider's usage and data policies, and test the chosen models before a long run.
+The `.env.example` file is only a configuration template, not an included API service. **Set the endpoint and model IDs to match your chosen provider.** An API key does not guarantee that every advertised model is enabled. Keep credentials outside Git, check the provider's usage and data policies, and test the chosen models before a long run.
 
 ## At a glance
 
@@ -110,7 +110,7 @@ cd ReviewForge\reviewforge-runtime
 
 ### 2. Configure credentials locally
 
-Run `setup_secret.bat`, then `check_connection.bat`. Credentials are saved locally and **must not** be committed. The default workflow describes MiMo for writing and DeepSeek for independent review; actual model IDs and access depend on your provider.
+Run `setup_secret.bat`, then `check_connection.bat`. Credentials are saved locally and **must not** be committed. Choose your own supported writer and reviewer model IDs; access depends on your provider.
 
 ### 3. Import an existing LaTeX manuscript
 
