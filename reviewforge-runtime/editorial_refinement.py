@@ -12,6 +12,31 @@ import threading
 from manuscript_integrity import CITES, LABEL, REF, citekeys, tex_integrity
 from reviewforge import atomic_json, extract_json
 
+
+def request_failure(exc):
+    """Allowlisted diagnostics only: never persist upstream bodies or credentials."""
+    message = str(exc)
+    category = 'unknown'
+    if 'weekly free allowance exhausted' in message:
+        category = 'weekly_allowance_exhausted'
+    elif 'all configured account quotas unavailable (402)' in message:
+        category = 'quota_unavailable'
+    elif 'rate limit (429)' in message:
+        category = 'rate_limit'
+    elif any(marker in message for marker in ('finish_reason=length', 'Editorial response truncated')):
+        category = 'response_truncated'
+    elif any(marker in message for marker in ('Empty API response', 'Empty upstream body', 'Invalid upstream JSON')):
+        category = 'invalid_response'
+    elif any(marker in message for marker in ('Editorial budget ended', 'provider time budget reached')):
+        category = 'budget_ended'
+    elif isinstance(exc, (TimeoutError, ConnectionError)) or any(marker in message for marker in ('TimeoutError', 'URLError', 'IncompleteRead', 'RemoteDisconnected', 'ConnectionResetError')):
+        category = 'connection_failure'
+    result = {'category': category, 'error_type': type(exc).__name__}
+    retry = re.search(r'Retry-After:\s*(\d{1,9})(?!\d)', message)
+    if retry:
+        result['retry_after_seconds'] = int(retry.group(1))
+    return result
+
 POLICY = 'clean-reference-evidence-then-condense-v2.1'
 ACCESS = re.compile(r'accessible abstract|abstract (?:does not|cannot)|only the abstract|because only|absence of evidence rather than|supports only the narrow statement', re.I)
 NUMBERS = re.compile(r'(?<![\w:])\d+(?:\.\d+)?(?:[eE][+-]?\d+)?(?![\w:])')
@@ -312,7 +337,9 @@ def refine(source, directory, chat, deadline=None, chunk_limit=24000,quality_wor
                 record=_process_chunk(body,stage,chat,cache,deadline,context,binding)
             except Exception as exc:
                 # Do not serialize provider exception bodies or secrets.
-                result['reason'] = 'Editorial request paused: ' + type(exc).__name__
+                result['request_failure'] = request_failure(exc)
+                result['paused_at'] = {'stage': stage, 'chunk': i+1, 'chunks': len(chunks)}
+                result['reason'] = 'Editorial request paused: ' + result['request_failure']['category'] + ' (' + type(exc).__name__ + ')'
                 atomic_json(root/'status.json', result); return result
             result['citation_audit']['sampled_checks'] += [{'stage':stage,'chunk':i,**r} for r in record.get('citation_audit',{}).get('checks',[])]
             if not record.get('accepted'):
@@ -425,7 +452,9 @@ def main():
                               usage={k:v for k,v in (getattr(api,'last_usage',{}) or {}).items() if k in ('prompt_tokens','completion_tokens','total_tokens','input_tokens','output_tokens') and isinstance(v,(int,float))})
                 return response
             except Exception as exc:
-                record.update(status='FAILED',error_type=type(exc).__name__);raise
+                record.update(status='FAILED', **request_failure(exc))
+                print('[editorial/request] paused='+record['category']+'; candidate checkpoint retained',flush=True)
+                raise
             finally:
                 api.deadline=previous_deadline
                 stop.set();thread.join(timeout=2);record['elapsed_seconds']=round(time.time()-started,2)

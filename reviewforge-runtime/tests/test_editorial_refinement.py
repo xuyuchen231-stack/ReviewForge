@@ -7,6 +7,25 @@ from pathlib import Path
 from editorial_refinement import audit, split_document, preservation_errors, refine
 
 
+class RequestDiagnosticTests(unittest.TestCase):
+    def test_classifies_only_known_failure_markers_without_leaking_payload(self):
+        from editorial_refinement import request_failure
+        result = request_failure(RuntimeError('API attempts failed: critic: TimeoutError secret-key private body'))
+        self.assertEqual(result['category'], 'connection_failure')
+        self.assertNotIn('secret-key', json.dumps(result))
+        self.assertNotIn('private body', json.dumps(result))
+
+    def test_rate_limit_is_not_permanent_exhaustion(self):
+        from editorial_refinement import request_failure
+        result = request_failure(RuntimeError('Provider rate limit (429); respect Retry-After: 3600'))
+        self.assertEqual(result['category'], 'rate_limit')
+        self.assertEqual(result['retry_after_seconds'], 3600)
+
+    def test_unknown_runtime_error_is_not_guessed_to_be_network(self):
+        from editorial_refinement import request_failure
+        self.assertEqual(request_failure(RuntimeError('unknown secret'))['category'], 'unknown')
+
+
 class EditorialRefinementTests(unittest.TestCase):
     def approval(self):
         return '{"accept":true,"scope_preserved":true,"quantities_preserved":true,"uncertainty_preserved":true,"no_new_claims":true,"editorial_goal_met":true,"explanation":"Meaning and necessary scope preserved."}'
