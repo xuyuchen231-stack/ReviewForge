@@ -6,6 +6,26 @@
 
 > 面向科研综述写作的 AI 辅助工具：文献元数据检索、双模型写作与审稿、逐节修订、引用审计、英中 LaTeX/PDF 输出。
 
+## 项目简介
+
+**ReviewForge 将 AI 辅助文献综述从“一次性生成文本”升级为可追踪、可审计、可恢复的科研工作流。** 它串联 OpenAlex 文献发现、Crossref DOI 元数据核验、LaTeX 章节级修订、模型审稿、引用一致性检查，以及中英文 LaTeX/PDF 输出。长时间任务可记录检查点并在中断后恢复，最终的科学事实核查和投稿判断仍由研究者完成。
+
+**自带 API（Bring Your Own API）。** 项目目前的示例配置使用 **Token Harbor 提供的 MiMo 负责写作、DeepSeek 负责审稿**，但并不强制绑定 Token Harbor。用户可以自行填写兼容接口的 API Key、HTTPS Base URL，以及写作、审稿、备用模型的准确 ID。建议写作与审稿使用不同模型以实现交叉审查；具体模型是否可用、额度和兼容性以服务商为准。
+
+## 自定义 API 与模型
+
+进入 `reviewforge-runtime/`，运行 `setup_secret.bat` 在本地配置密钥，再运行 `check_connection.bat` 测试写作和审稿角色。也可以编辑 `%USERPROFILE%\\.reviewforge\\credentials.env`（或被 Git 忽略的本地 `.env`）：
+
+```dotenv
+RF_BASE_URL=https://your-compatible-provider.example/v1
+RF_API_KEY=your_private_api_key
+RF_WRITER_MODEL=your_writer_model_id
+RF_REVIEWER_MODEL=your_reviewer_model_id
+RF_FALLBACK_MODEL=your_fallback_model_id
+```
+
+仓库的 `.env.example` 提供 Token Harbor 示例模型名。**更换服务商（例如 AMD Radeon Cloud）时，需同时更换 Base URL 和模型 ID**，不能默认不同平台使用相同名称。API Key 不代表有权调用平台全部模型；请先检查额度、数据使用条款及模型连通性。不要将真实密钥提交到 GitHub。
+
 ## 两种使用方式
 
 | 方式 | 适合任务 | 入口 |
