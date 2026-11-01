@@ -8,6 +8,7 @@ import os
 import re
 from pathlib import Path
 import subprocess
+import tempfile
 import time
 import urllib.request
 import urllib.error
@@ -21,9 +22,28 @@ def encode_model_payload(payload):
 def atomic_json(path, obj):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + '.tmp')
-    tmp.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding='utf-8')
-    tmp.replace(path)
+    # One private temporary file per writer; readers may briefly hold the
+    # destination open without Windows FILE_SHARE_DELETE permission.
+    tmp = None
+    try:
+        with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', dir=path.parent,
+                                         prefix=path.name+'.', suffix='.tmp', delete=False) as stream:
+            tmp = Path(stream.name)
+            json.dump(obj, stream, ensure_ascii=False, indent=2)
+            stream.flush()
+            os.fsync(stream.fileno())
+        for attempt in range(8):
+            try:
+                tmp.replace(path)
+                break
+            except PermissionError:
+                if attempt == 7:
+                    raise
+                time.sleep(min(.5, .05 * 2**attempt))
+    finally:
+        if tmp is not None:
+            try:tmp.unlink(missing_ok=True)
+            except OSError:pass
 
 
 def load_env(path):
