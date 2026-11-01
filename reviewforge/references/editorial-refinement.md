@@ -32,3 +32,20 @@ boundaries and the M0–M4 revision ladder. Do not present conceptual curves as 
 H1–H4 numerical comparisons require an independently executed protocol with frozen train,
 validation and test splits, raw outputs and declared model assumptions. A synthetic fed-batch
 example is not experimental fermentation data or a validated PenSim replication.
+
+Critical citation sampling runs inside the same editorial writer/reviewer calls, with at most
+eight identities and 7000 characters of source anchors per chunk. Both nodes receive the same
+evidence. Require complete per-selected-key judgments and exact candidate passages; absent
+anchors cannot receive supported/qualified status. Keep uncertain and unsampled keys explicit.
+Do not describe a bounded sample as a completed whole-bibliography verification.
+
+One targeted repair is permitted per failed chunk; further failures are queued while other chunks
+continue. Resume pending reviews without rewriting their drafts. Evidence changes create separate
+version directories; reuse only content/context/prompt-bound unchanged chunks. Numerical identity
+checks permit repeated mentions to be consolidated; model review still checks their units,
+referents and conclusions. Protected mathematics remains byte-identical.
+
+The standalone refinement command compiles clean and condensed versions independently, checks
+actual PDF citation order and exports source-only Overleaf projects. Technical readiness, visual
+review, page target and scientific approval remain separate. A visual failure blocks readiness;
+pending visual review cannot be promoted to approved delivery.

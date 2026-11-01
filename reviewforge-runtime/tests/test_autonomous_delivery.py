@@ -2,13 +2,25 @@ import tempfile,time,unittest
 from pathlib import Path
 from unittest.mock import patch
 class DeliveryTests(unittest.TestCase):
+ def test_failed_planned_figures_cannot_be_marked_technically_ready(self):
+  import json
+  from autonomous_delivery import deliver_outputs
+  with tempfile.TemporaryDirectory() as t:
+   run=Path(t);out=run/'output';out.mkdir()
+   (out/'review_en.tex').write_text(r'\documentclass[twocolumn]{article}\begin{document}Scientific result.\end{document}',encoding='utf-8')
+   (run/'publication_figure_plan.json').write_text(json.dumps({'figures':[{'id':'missing','source_keys':['Unknown']}]}),encoding='utf-8')
+   report={'accepted_units':1}
+   with patch('reviewforge_v4.compile_tex',return_value={'status':'PASS','layout_status':'PASS','visual_status':'PASS'}),patch('publication_export.reconcile_pdf_references',side_effect=lambda folder,source,build,*a,**kw:(source,build,{'status':'NOT_APPLICABLE'})):
+    deliver_outputs(run,{'deadline':time.time()+1800},report,lambda *a:None,False,allow_refinement=False)
+   self.assertEqual(report['figures']['status'],'FAILED')
+   self.assertFalse(report['publication_acceptance']['technical_ready'])
  def test_editorial_deadline_is_enforced_on_request_state_and_restored(self):
   from autonomous_delivery import deliver_outputs
   with tempfile.TemporaryDirectory() as t:
    run=Path(t);out=run/'output';out.mkdir()
    (out/'review_en.tex').write_text(r'\documentclass[twocolumn]{article}\begin{document}Scientific result.\end{document}',encoding='utf-8')
    state={'deadline':time.time()+1800};seen=[]
-   def refinement(source,folder,chat,deadline):
+   def refinement(source,folder,chat,deadline,**kwargs):
     seen.append(deadline);self.assertEqual(state['delivery_request_deadline'],deadline)
     self.assertEqual(deadline,state['deadline']-120)
     return {'status':'PAUSED','versions':{}}

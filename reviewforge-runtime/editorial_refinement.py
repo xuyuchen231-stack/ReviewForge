@@ -7,11 +7,12 @@ import json
 from pathlib import Path
 import re
 import time
+import threading
 
 from manuscript_integrity import CITES, LABEL, REF, citekeys, tex_integrity
 from reviewforge import atomic_json, extract_json
 
-POLICY = 'clean-reference-then-condense-v1'
+POLICY = 'clean-reference-evidence-then-condense-v2.1'
 ACCESS = re.compile(r'accessible abstract|abstract (?:does not|cannot)|only the abstract|because only|absence of evidence rather than|supports only the narrow statement', re.I)
 NUMBERS = re.compile(r'(?<![\w:])\d+(?:\.\d+)?(?:[eE][+-]?\d+)?(?![\w:])')
 CHECKS = ('scope_preserved', 'quantities_preserved', 'uncertainty_preserved', 'no_new_claims', 'editorial_goal_met')
@@ -176,7 +177,9 @@ def preservation_errors(before, after):
     for name, pattern in (('label', LABEL), ('reference', REF)):
         if Counter(pattern.findall(before_active)) != Counter(pattern.findall(after_active)):
             errors.append(name + ' inventory changed')
-    if Counter(NUMBERS.findall(before_active)) != Counter(NUMBERS.findall(after_active)):
+    # Repeated mentions are not new measurements. Semantic review checks the
+    # roles/units; exact protected math still cannot change.
+    if set(NUMBERS.findall(before_active)) != set(NUMBERS.findall(after_active)):
         errors.append('Numerical inventory changed; requires explicit scientific revision')
     environments=r'\\(?:begin|end)\{[^{}]+\}'
     if re.findall(environments,before_active)!=re.findall(environments,after_active):errors.append('Environment boundaries changed')
@@ -185,11 +188,62 @@ def preservation_errors(before, after):
     return errors
 
 
-def refine(source, directory, chat, deadline=None, chunk_limit=24000):
+def _process_chunk(body,stage,chat,cache,deadline,context=None,binding=None):
+    from editorial_quality import review_citations
+    record=json.loads(cache.read_text(encoding='utf-8')) if cache.exists() else {}
+    if record and record.get('source_sha256')!=sha(body):raise ValueError('Editorial chunk digest mismatch')
+    if record and record.get('binding_sha256')!=binding:raise ValueError('Editorial cache binding mismatch')
+    if record.get('accepted') and not preservation_errors(body,record.get('candidate','')):return record
+    pending=record.get('pending_review') and not preservation_errors(body,record.get('candidate',''))
+    start=record.get('attempt',0)+(1 if record and not pending else 0)
+    quality_instruction=''' Check the selected citation identities against citation_context anchors.
+Return citation_checks:[{citekey,status:supported|qualified|unsupported|uncertain,reason,passage}].
+Cover every selected key exactly once. passage is an exact short candidate quotation. No available
+anchor means uncertain, never supported. Excerpts may support a narrow fitting claim but not
+control, transfer or independent validation. Do not treat this sample as a full citation audit.'''
+    for attempt in range(start,2):
+        if deadline is not None and time.time()+60>=deadline:raise TimeoutError('Editorial budget ended')
+        if pending:
+            candidate=record['candidate'];pending=False
+        else:
+            draft=record.get('candidate',body)
+            if preservation_errors(body,draft):draft=body
+            payload={'stage':stage,'editorial_revision':True,'body':draft.strip()}
+            if context is not None:payload['citation_context']=context
+            if record:payload['repair_feedback']={'errors':record.get('errors',[]),'review':record.get('review',{}),'instruction':'One targeted repair; retain already correct material.'}
+            candidate=chat(WRITERS[stage]+(' Use citation_context for factual scope; clarify prose definitions without renaming protected mathematical symbols.' if context is not None else ''),payload,'writer')
+            if candidate.lstrip().startswith(('{','```json')):
+                decoded=extract_json(candidate)
+                if not isinstance(decoded,dict) or not isinstance(decoded.get('latex'),str):raise ValueError('Missing complete LaTeX string')
+                candidate=decoded['latex']
+            candidate=body[:len(body)-len(body.lstrip())]+candidate.strip()+body[len(body.rstrip()):]
+        errors=preservation_errors(body,candidate)
+        if len(ACCESS.findall(candidate))>max(1,len(ACCESS.findall(body))):
+            errors.append('Repeated access bookkeeping increased; keep the scientific consequence once instead of duplicating retrieval disclaimers')
+        record={'source_sha256':sha(body),'binding_sha256':binding,'attempt':attempt,'accepted':False,'pending_review':not errors,'candidate':candidate,'errors':errors}
+        atomic_json(cache,record)
+        if deadline is not None and time.time()+10>=deadline:raise TimeoutError('Editorial budget ended before review')
+        payload={'stage':stage,'editorial_revision':True,'before':body,'body':candidate}
+        if context is not None:payload['citation_context']=context
+        review={} if errors else extract_json(chat(REVIEW+(quality_instruction if context is not None else ''),payload,'reviewer'))
+        if not isinstance(review,dict):review={}
+        citation=review_citations(review,context,candidate) if context is not None else {'complete':True,'unsupported':[],'checks':[]}
+        accepted=not errors and review.get('accept') is True and all(review.get(k) is True for k in CHECKS) and bool(review.get('explanation')) and citation['complete'] and not citation['unsupported']
+        record.update(accepted=bool(accepted),pending_review=False,review=review,citation_audit=citation)
+        atomic_json(cache,record)
+        if accepted:return record
+    return record
+
+
+def refine(source, directory, chat, deadline=None, chunk_limit=24000,quality_workspace=None):
     """Stage candidates under a source-addressed folder. No partial named-version publication."""
     directory = Path(directory).resolve(); directory.mkdir(parents=True, exist_ok=True)
-    fingerprint = sha(source + POLICY + json.dumps(WRITERS, sort_keys=True) + REVIEW)
+    from editorial_quality import POLICY as QUALITY_POLICY,citation_context,evidence_index,context_digest,notation_audit
+    index=evidence_index(quality_workspace) if quality_workspace is not None else None
+    prompt_signature=sha(POLICY+json.dumps(WRITERS,sort_keys=True)+REVIEW+QUALITY_POLICY)
+    fingerprint = sha(source + prompt_signature + context_digest(index))
     root = directory / fingerprint[:16]; root.mkdir(exist_ok=True)
+    cache_pool=directory/'cache';cache_pool.mkdir(exist_ok=True)
     identity=root/'identity.json'
     if identity.exists() and json.loads(identity.read_text(encoding='utf-8')).get('fingerprint')!=fingerprint:
         raise ValueError('Editorial version fingerprint collision')
@@ -201,50 +255,35 @@ def refine(source, directory, chat, deadline=None, chunk_limit=24000):
         snapshot.write_text(source, encoding='utf-8')
     elif snapshot.read_text(encoding='utf-8') != source:
         raise ValueError('Raw snapshot digest mismatch')
-    result = {'policy': POLICY, 'source_sha256': sha(source), 'status': 'PAUSED', 'expert_verified': False, 'target_pages': [25, 30], 'page_target_verified': False, 'versions': {}}
+    result = {'policy': POLICY, 'source_sha256': sha(source), 'status': 'PAUSED', 'expert_verified': False, 'target_pages': [25, 30], 'page_target_verified': False, 'versions': {},'citation_audit':{'sampled_checks':[],'expert_verified':False}}
     current = source
     for stage, filename in (('clean', 'full_cleaned.tex'), ('condense', 'refined.tex')):
         prefix, chunks, suffix = split_document(current, chunk_limit)
-        edited = []
+        notation=notation_audit(current)
+        notation_context={'scope':'Existing manuscript declarations, not primary-study evidence. Clarify scope in prose; do not globally rename math.',
+                          'declarations':[{'role':d['role'],'symbol':d['symbol']} for d in notation['definitions'][:12]],
+                          'conflicting_symbols':[d['symbol'] for d in notation['conflicts']],
+                          'conflicting_acronyms':[d['acronym'] for d in notation['acronym_conflicts']]}
+        edited = [];failed=[]
         for i, body in enumerate(chunks):
-            cache = root/(stage+'_'+str(i)+'_'+sha(body)[:16]+'.json')
-            pending=None
-            if cache.exists():
-                record = json.loads(cache.read_text(encoding='utf-8'))
-                if record.get('source_sha256')!=sha(body):raise ValueError('Editorial chunk digest mismatch')
-                if record.get('accepted') and not preservation_errors(body, record.get('candidate', '')):
-                    edited.append(record['candidate']); continue
-                if record.get('pending_review') and not preservation_errors(body,record.get('candidate','')):
-                    pending=record['candidate']
-            if deadline is not None and time.time() + 60 >= deadline:
-                result['reason'] = 'Editorial budget ended; resume reuses reviewed chunks'
-                atomic_json(root/'status.json', result); return result
+            context=citation_context(quality_workspace,body,index=index) if quality_workspace is not None else None
+            if context is not None:context['manuscript_notation']=notation_context
+            binding=sha(stage+body+context_digest(context)+prompt_signature)
+            cache = cache_pool/(stage+'_'+binding[:16]+'.json')
             try:
                 print('[editorial] '+stage+' chunk '+str(i+1)+'/'+str(len(chunks))+'; preservation + independent model review', flush=True)
-                candidate = pending if pending is not None else chat(WRITERS[stage], {'stage': stage, 'editorial_revision':True, 'body': body.strip()}, 'writer')
-                if candidate.lstrip().startswith(('{','```json')):
-                    decoded=extract_json(candidate)
-                    if not isinstance(decoded,dict) or not isinstance(decoded.get('latex'),str):raise ValueError('Missing complete LaTeX string')
-                    candidate=decoded['latex']
-                if pending is None:
-                    candidate=body[:len(body)-len(body.lstrip())]+candidate.strip()+body[len(body.rstrip()):]
-                errors = preservation_errors(body, candidate)
-                atomic_json(cache,{'source_sha256':sha(body),'accepted':False,'pending_review':not errors,'candidate':candidate,'errors':errors})
-                if deadline is not None and time.time()+10>=deadline:
-                    result['reason']='Editorial budget ended before review; no unreviewed version published'
-                    atomic_json(root/'status.json',result);return result
-                review = {} if errors else extract_json(chat(REVIEW, {'stage': stage, 'editorial_revision':True, 'before': body, 'body': candidate}, 'reviewer'))
-                accepted = not errors and isinstance(review, dict) and review.get('accept') is True and all(review.get(k) is True for k in CHECKS) and bool(review.get('explanation'))
-                record = {'source_sha256':sha(body),'accepted': accepted, 'pending_review':False, 'candidate': candidate, 'errors': errors, 'review': review}
-                atomic_json(cache, record)
+                record=_process_chunk(body,stage,chat,cache,deadline,context,binding)
             except Exception as exc:
                 # Do not serialize provider exception bodies or secrets.
                 result['reason'] = 'Editorial request paused: ' + type(exc).__name__
                 atomic_json(root/'status.json', result); return result
-            if not accepted:
-                result['reason'] = stage + ' chunk ' + str(i) + ' did not pass preservation/review'
-                atomic_json(root/'status.json', result); return result
-            edited.append(candidate)
+            result['citation_audit']['sampled_checks'] += [{'stage':stage,'chunk':i,**r} for r in record.get('citation_audit',{}).get('checks',[])]
+            if not record.get('accepted'):
+                failed.append({'stage':stage,'chunk':i,'record':str(cache)});continue
+            edited.append(record['candidate'])
+        if failed:
+            result.update(reason='Unresolved editorial chunks saved; other chunks processed and cached',unresolved_chunks=failed)
+            atomic_json(root/'status.json',result);return result
         current = prefix + ''.join(edited) + suffix
         # Versioned artifacts cannot be confused with a previous source revision.
         path = root/filename
@@ -253,6 +292,10 @@ def refine(source, directory, chat, deadline=None, chunk_limit=24000):
         # No mutable per-file aliases: a newly cleaned version must not be paired
         # with a condensed version left from another source fingerprint.
     result['status'] = 'COMPLETE'
+    checked={r['citekey'] for r in result['citation_audit']['sampled_checks']}
+    result['citation_audit']['not_sampled_citekeys']=sorted(citekeys(source)-checked)
+    result['citation_audit']['status']='MODEL_SAMPLED_WITH_UNRESOLVED' if any(r['status']=='uncertain' for r in result['citation_audit']['sampled_checks']) or citekeys(source)-checked else 'MODEL_SAMPLED'
+    result['notation']=notation_audit(current)
     atomic_json(root/'status.json', result)
     atomic_json(directory/'latest.json', result)
     return result
@@ -310,6 +353,8 @@ def main():
     source = (args.run/'output/review_en.tex').read_text(encoding='utf-8')
     folder = args.run/'editorial'; folder.mkdir(exist_ok=True)
     result = audit(source)
+    from editorial_quality import notation_audit
+    result['notation']=notation_audit(source)
     aux=args.run/'output/output/review_en.aux'
     if aux.exists():
         result['compiled_equation_labels']=dict(re.findall(r'\\newlabel\{(eq:[^}]+)\}\{\{([^}]+)\}',aux.read_text(encoding='utf-8')))
@@ -319,16 +364,38 @@ def main():
         from reviewforge import CompatibleAPI, load_env, encode_model_payload
         load_env(Path(__file__).parent/'.env')
         api = CompatibleAPI()
-        api.deadline = time.time()+args.hours*3600
+        finish_deadline=time.time()+args.hours*3600
+        api.deadline=finish_deadline-min(600,args.hours*3600*.2)
         def chat(system,payload,role):
             api.thinking_mode='disabled'
             api.max_tokens=2500 if role=='reviewer' else 12000
-            response=api.chat(system,encode_model_payload(payload),role=role)
-            if getattr(api,'last_finish_reason',None)=='length':raise ValueError('Editorial response truncated')
-            return response
+            started=time.time();stop=threading.Event()
+            def heartbeat():
+                while not stop.wait(20):print('[editorial/request] stage='+payload['stage']+' role='+role+' waiting='+str(int(time.time()-started))+'s',flush=True)
+            thread=threading.Thread(target=heartbeat,daemon=True);thread.start()
+            record={'stage':payload['stage'],'role':role,'input_chars':len(system)+len(encode_model_payload(payload)),'started_epoch':started}
+            print('[editorial/request] stage='+payload['stage']+' role='+role,flush=True)
+            try:
+                response=api.chat(system,encode_model_payload(payload),role=role)
+                if getattr(api,'last_finish_reason',None)=='length':raise ValueError('Editorial response truncated')
+                record.update(status='RETURNED',provider=getattr(api,'last_provider','unknown'),model=getattr(api,'last_model','unknown'),account_slot=getattr(api,'last_key_slot',None),
+                              usage={k:v for k,v in (getattr(api,'last_usage',{}) or {}).items() if k in ('prompt_tokens','completion_tokens','total_tokens','input_tokens','output_tokens') and isinstance(v,(int,float))})
+                return response
+            except Exception as exc:
+                record.update(status='FAILED',error_type=type(exc).__name__);raise
+            finally:
+                stop.set();thread.join(timeout=2);record['elapsed_seconds']=round(time.time()-started,2)
+                with (folder/'requests.jsonl').open('a',encoding='utf-8') as stream:stream.write(json.dumps(record,ensure_ascii=False)+'\n')
         from autonomous_review import RunLock
         with RunLock(folder/'editorial.lock'):
-            result = refine(source, folder, chat, deadline=api.deadline)
+            result = refine(source, folder, chat, deadline=api.deadline,quality_workspace=args.run)
+            if result.get('versions'):
+                from editorial_export import finalize_versions
+                result=finalize_versions(args.run,result,finish_deadline)
+        result={'source_status':result['status'],'reason':result.get('reason'),
+                'versions':result.get('versions',{}),'unresolved_chunks':len(result.get('unresolved_chunks',[])),
+                'exports':{k:{'status':v['status'],'output':v.get('output')} for k,v in result.get('exports',{}).items()},
+                'details':str(folder/'current.json'),'export_details':str(folder/'export_status.json')}
     print(json.dumps(result, ensure_ascii=True))
 
 

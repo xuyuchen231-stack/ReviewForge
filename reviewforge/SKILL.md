@@ -40,6 +40,9 @@ Consult `references/editorial-synthesis.md` for paragraph argument checks, fair 
 For repetitive defensive prose, full-reference preservation and separate condensation, follow
 `references/editorial-refinement.md`. The local editorial stage is opt-in through
 `RF_MANUSCRIPT_REFINEMENT=1`; it must not silently restart evidence extraction or scientific review.
+For an already written manuscript, `editorial_refinement.py refine --workspace .\workspace --hours 2`
+resumes cleaning/condensation and independently builds both versions. Report unresolved citation
+samples, notation conflicts, actual page goal and visual-review status separately from compilation.
 
 - Revised manuscript and original snapshot
 - Claim/evidence ledger with unresolved items

@@ -15,13 +15,13 @@ def quarantine_stale_outputs(run):
             path.replace(target);archived.append(str(target.relative_to(run)))
     return archived
 
-def deliver_outputs(run,state,report,chat,translate=True):
+def deliver_outputs(run,state,report,chat,translate=True,allow_refinement=True,source_ready=False):
     from reviewforge_v4 import compile_tex,generate_chinese_body
     run=Path(run);out=run/'output';out.mkdir(exist_ok=True)
     report.setdefault('stale_outputs_quarantined',[]).extend(quarantine_stale_outputs(run))
     report['review_en_build']={'status':'SKIPPED','reason':'No accepted units or insufficient build budget'}
     report['review_zh_build']={'status':'SKIPPED','reason':'No current successful translation'}
-    if not report['accepted_units']:
+    if not report['accepted_units'] and not source_ready:
         report['translation']='not_run_no_accepted_units';return report
     remaining=state['deadline']-time.time()
     if remaining>30:
@@ -30,7 +30,7 @@ def deliver_outputs(run,state,report,chat,translate=True):
         source=(out/'review_en.tex').read_text(encoding='utf-8')
         original=source
         import os
-        if os.environ.get('RF_MANUSCRIPT_REFINEMENT', '0') == '1':
+        if allow_refinement and os.environ.get('RF_MANUSCRIPT_REFINEMENT', '0') == '1':
             from editorial_refinement import audit,evidence_ledger,refine
             from autonomous_review import RunLock
             editorial=run/'editorial';editorial.mkdir(exist_ok=True)
@@ -45,7 +45,7 @@ def deliver_outputs(run,state,report,chat,translate=True):
             state['delivery_request_deadline']=min(state['deadline']-120,previous_deadline or float('inf'))
             try:
                 with RunLock(editorial/'editorial.lock'):
-                    report['editorial']=refine(source,editorial,chat,deadline=state['delivery_request_deadline'])
+                    report['editorial']=refine(source,editorial,chat,deadline=state['delivery_request_deadline'],quality_workspace=run)
             except RuntimeError:
                 report['editorial']={'status':'PAUSED','reason':'Editorial workspace busy; existing process retained'}
             finally:
@@ -88,7 +88,21 @@ def deliver_outputs(run,state,report,chat,translate=True):
         if report.get('layout_adaptation'):
             report['layout_adaptation']['export_sha256']=hashlib.sha256((out/'review_en.tex').read_bytes()).hexdigest()
             atomic_json(run/'reports/layout_adaptation.json',report['layout_adaptation'])
-        if report['review_en_build'].get('status')=='PASS' and report.get('citation_order',{}).get('status') in ('PASS','NOT_APPLICABLE'):
+        from editorial_quality import acceptance_report
+        pages=None
+        pdf=out/report['review_en_build'].get('pdf','output/review_en.pdf')
+        if pdf.is_file() and report['review_en_build'].get('status')=='PASS':
+            try:
+                import fitz
+                with fitz.open(pdf) as document:pages=len(document)
+            except (ImportError,OSError,ValueError):pass
+        report['publication_acceptance']=acceptance_report(source,report['review_en_build'],report.get('citation_order',{}),pages,report.get('editorial',{}).get('citation_audit'))
+        report['publication_acceptance']['planned_figures_status']=report.get('figures',{}).get('status','CHECKED' if 'figures' in report else 'NOT_CONFIGURED')
+        if report['publication_acceptance']['planned_figures_status']=='FAILED':
+            report['publication_acceptance'].update(technical_ready=False,delivery_ready=False)
+        report['review_en_build']['delivery_ready']=report['publication_acceptance']['delivery_ready']
+        atomic_json(out/'publication_acceptance.json',report['publication_acceptance'])
+        if report['publication_acceptance']['technical_ready']:
             from publication_export import make_overleaf_project
             try:report['overleaf']=make_overleaf_project(out)
             except (ValueError,OSError) as exc:report['overleaf']={'status':'FAILED','reason':str(exc)[:200]}

@@ -32,6 +32,7 @@ class EditorialRefinementTests(unittest.TestCase):
         self.assertTrue(preservation_errors(r'\begin{multline}x+y\end{multline}', r'\begin{multline}x-y\end{multline}'))
         self.assertEqual(preservation_errors(r'Claim \cite{A}. Repeated claim \cite{A}.',r'Claim \cite{A}.'), [])
         self.assertTrue(preservation_errors(r'Claim \cite{A}.',r'Claim \\cite{A}.'))
+        self.assertEqual(preservation_errors('Measured on 18 batches.','Measured on 18 batches; these 18 batches define the dataset.'),[])
 
     def test_dollars_inside_environment_do_not_swallow_following_prose(self):
         text = r'\begin{document}\begin{figure}Caption $x$.\end{figure}' + '\n\n'.join(['Dense prose $y$ and interpretation. '*40]*20) + r'\end{document}'
@@ -119,6 +120,68 @@ class EditorialRefinementTests(unittest.TestCase):
     def test_long_paragraph_diagnostics_have_a_bounded_runtime(self):
         script="from editorial_refinement import audit; audit('A clear scientific sentence. '*20000)"
         subprocess.run([sys.executable,'-c',script],timeout=8,check=True,capture_output=True)
+
+    def test_quality_context_is_shared_and_citation_findings_are_saved(self):
+        source=r'\begin{document}A reported fitting result \cite{A}.\end{document}'
+        with tempfile.TemporaryDirectory() as folder:
+            run=Path(folder)/'run';run.mkdir()
+            (run/'evidence_ledger.json').write_text(json.dumps([{'citekey':'A','claim':'Fit','source_id':'A','locator':'abstract','excerpt':'The model fitted the training trajectories.'}]),encoding='utf-8')
+            contexts=[]
+            def chat(system,payload,role):
+                contexts.append(payload['citation_context'])
+                if role=='writer':return json.dumps({'latex':payload['body']})
+                review=json.loads(self.approval());review['citation_checks']=[{'citekey':'A','status':'qualified','reason':'Training fit only','passage':'reported fitting result'}]
+                return json.dumps(review)
+            result=refine(source,Path(folder)/'editorial',chat,quality_workspace=run)
+            self.assertEqual(result['status'],'COMPLETE');self.assertEqual(contexts[0],contexts[1])
+            self.assertTrue(result['citation_audit']['sampled_checks'])
+            original_clean=Path(result['versions']['clean']['path'])
+            original_bytes=original_clean.read_bytes()
+            ledger=run/'evidence_ledger.json'
+            entries=json.loads(ledger.read_text(encoding='utf-8'));entries[0]['excerpt']='The model fitted a second set of training trajectories.'
+            ledger.write_text(json.dumps(entries),encoding='utf-8')
+            def paused(system,payload,role):
+                if payload['stage']=='condense':raise TimeoutError('Provider unavailable')
+                return chat(system,payload,role)
+            updated=refine(source,Path(folder)/'editorial',paused,quality_workspace=run)
+            self.assertEqual(updated['status'],'PAUSED')
+            self.assertNotEqual(original_clean,Path(updated['versions']['clean']['path']))
+            self.assertEqual(original_clean.read_bytes(),original_bytes)
+
+    def test_semantic_rejection_gets_one_targeted_repair_without_restarting(self):
+        source=r'\begin{document}A scientific result.\end{document}'
+        with tempfile.TemporaryDirectory() as folder:
+            calls=[];rejected=False
+            def chat(system,payload,role):
+                nonlocal rejected
+                calls.append(role)
+                if role=='writer':return payload['body']
+                if not rejected:rejected=True;return '{"accept":false,"explanation":"Remove redundant transition."}'
+                return self.approval()
+            result=refine(source,folder,chat)
+            self.assertEqual(result['status'],'COMPLETE');self.assertEqual(calls.count('writer'),3)
+
+    def test_exhausted_rejection_is_not_retried_forever_on_resume(self):
+        source=r'\begin{document}A scientific result.\end{document}'
+        with tempfile.TemporaryDirectory() as folder:
+            calls=[]
+            def chat(system,payload,role):
+                calls.append(role)
+                return payload['body'] if role=='writer' else '{"accept":false}'
+            self.assertEqual(refine(source,folder,chat)['status'],'PAUSED')
+            before=len(calls)
+            self.assertEqual(refine(source,folder,chat)['status'],'PAUSED')
+            self.assertEqual(len(calls),before)
+
+    def test_repeated_access_boilerplate_cannot_increase_despite_model_approval(self):
+        source=r'\begin{document}A scientific result.\end{document}'
+        with tempfile.TemporaryDirectory() as folder:
+            reviewers=[]
+            def chat(system,payload,role):
+                if role=='writer':return payload['body']+' The accessible abstract does not establish this. The accessible abstract does not establish that.'
+                reviewers.append(role);return self.approval()
+            self.assertEqual(refine(source,folder,chat)['status'],'PAUSED')
+            self.assertEqual(reviewers,[])
 
 
 if __name__ == '__main__':
