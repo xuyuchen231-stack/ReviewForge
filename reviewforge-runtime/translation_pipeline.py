@@ -22,7 +22,7 @@ OPAQUE = re.compile(
 COMMAND = re.compile(r'\\([A-Za-z]+\*?|.)', re.S)
 # Scientific organism names are identifiers, including when italicized. Keep
 # this explicit rather than treating every capitalized/italic English word as one.
-_SCIENTIFIC_NAMES=('Pichia pastoris','P. pastoris','Komagataella phaffii','K. phaffii','Escherichia coli','E. coli','Saccharomyces cerevisiae','S. cerevisiae','Bacillus subtilis','B. subtilis','Corynebacterium glutamicum','C. glutamicum','Aspergillus niger','A. niger','Yarrowia lipolytica','Y. lipolytica','Pseudomonas putida','P. putida','Pichia','Komagataella','Escherichia','Saccharomyces','Bacillus','Corynebacterium','Aspergillus','Yarrowia','Pseudomonas','Enterobacter')
+_SCIENTIFIC_NAMES=('Clostridium autoethanogenum','C. autoethanogenum','Xanthophyllomyces dendrorhous','X. dendrorhous','Ralstonia eutropha','R. eutropha','Cupriavidus necator','C. necator','Pichia pastoris','P. pastoris','Komagataella phaffii','K. phaffii','Escherichia coli','E. coli','Saccharomyces cerevisiae','S. cerevisiae','Bacillus subtilis','B. subtilis','Corynebacterium glutamicum','C. glutamicum','Aspergillus niger','A. niger','Yarrowia lipolytica','Y. lipolytica','Pseudomonas putida','P. putida','Pichia','Komagataella','Escherichia','Saccharomyces','Bacillus','Corynebacterium','Aspergillus','Yarrowia','Pseudomonas','Enterobacter')
 SCIENTIFIC_NAMES = re.compile(r'(?<![A-Za-z])(?:'+'|'.join(r'(?:\s+|\\\s+|~)'.join(re.escape(word) for word in name.split()) for name in _SCIENTIFIC_NAMES)+r')(?![A-Za-z])')
 OPAQUE_ARGS = {'cite', 'citep', 'citet', 'parencite', 'textcite', 'autocite',
                'footcite', 'nocite', 'ref', 'eqref', 'autoref', 'cref', 'Cref',
