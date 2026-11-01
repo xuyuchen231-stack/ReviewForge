@@ -8,6 +8,24 @@ from editorial_refinement import audit, split_document, preservation_errors, ref
 
 
 class RequestDiagnosticTests(unittest.TestCase):
+    def test_invalid_json_response_retries_at_parse_boundary(self):
+        from editorial_refinement import editorial_response
+        from unittest.mock import Mock, patch
+        chat=Mock(side_effect=['{"latex": "bad\\q"}', '{"latex":"Recovered prose."}'])
+        with patch('editorial_refinement.time.sleep'):
+            result=editorial_response(chat,'system',{'body':'Original'},'writer',None)
+        self.assertEqual(result,'Recovered prose.')
+        self.assertEqual(chat.call_count,2)
+
+    def test_invalid_reviewer_json_does_not_require_writer(self):
+        from editorial_refinement import editorial_response
+        from unittest.mock import Mock, patch
+        chat=Mock(side_effect=['{broken}', '{"accept":false}'])
+        with patch('editorial_refinement.time.sleep'):
+            result=editorial_response(chat,'system',{},'reviewer',None)
+        self.assertEqual(result,{'accept':False})
+        self.assertTrue(all(call.args[2]=='reviewer' for call in chat.call_args_list))
+
     def test_transient_request_retries_without_rewriting_or_changing_payload(self):
         from editorial_refinement import resilient_request
         from unittest.mock import Mock

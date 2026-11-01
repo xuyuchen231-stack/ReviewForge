@@ -25,7 +25,7 @@ def request_failure(exc):
         category = 'rate_limit'
     elif any(marker in message for marker in ('finish_reason=length', 'Editorial response truncated')):
         category = 'response_truncated'
-    elif any(marker in message for marker in ('Empty API response', 'Empty upstream body', 'Invalid upstream JSON')):
+    elif isinstance(exc, json.JSONDecodeError) or any(marker in message for marker in ('Empty API response', 'Empty upstream body', 'Invalid upstream JSON', 'Invalid editorial response schema')):
         category = 'invalid_response'
     elif any(marker in message for marker in ('Editorial budget ended', 'provider time budget reached')):
         category = 'budget_ended'
@@ -40,8 +40,9 @@ def request_failure(exc):
     return result
 
 
-def resilient_request(request, deadline, clock=time.time, sleep=time.sleep):
+def resilient_request(request, deadline, clock=time.time, sleep=None, categories=None):
     """Retry the same request, never restart writing or extend the session budget."""
+    sleep = time.sleep if sleep is None else sleep
     transient_failures = 0
     while True:
         try:
@@ -49,6 +50,8 @@ def resilient_request(request, deadline, clock=time.time, sleep=time.sleep):
         except Exception as exc:
             failure = request_failure(exc)
             category = failure['category']
+            if categories is not None and category not in categories:
+                raise
             if category in ('rate_limit', 'weekly_allowance_exhausted'):
                 delay = max(1, failure.get('retry_after_seconds', 60))
             elif category in ('connection_failure', 'upstream_unavailable', 'invalid_response'):
@@ -68,6 +71,23 @@ def resilient_request(request, deadline, clock=time.time, sleep=time.sleep):
                 remaining -= step
                 if clock() + 60 >= deadline:
                     raise
+
+
+def editorial_response(chat, system, payload, role, deadline):
+    """Validate at the retry boundary; malformed model JSON is not a transport success."""
+    def request():
+        response = chat(system, payload, role)
+        if role == 'writer' and not response.lstrip().startswith(('{', '```json')):
+            return response  # Compatibility with existing plain-LaTeX adapters.
+        decoded = extract_json(response)
+        if role == 'writer':
+            if not isinstance(decoded, dict) or not isinstance(decoded.get('latex'), str):
+                raise ValueError('Invalid editorial response schema: latex string required')
+            return decoded['latex']
+        if not isinstance(decoded, dict):
+            raise ValueError('Invalid editorial response schema: review object required')
+        return decoded
+    return resilient_request(request, deadline if deadline is not None else float('inf'), categories={'invalid_response'})
 
 POLICY = 'clean-reference-evidence-then-condense-v2.1'
 ACCESS = re.compile(r'accessible abstract|abstract (?:does not|cannot)|only the abstract|because only|absence of evidence rather than|supports only the narrow statement', re.I)
@@ -303,11 +323,7 @@ control, transfer or independent validation. Do not treat this sample as a full 
             payload={'stage':stage,'editorial_revision':True,'body':draft.strip()}
             if context is not None:payload['citation_context']=context
             if record:payload['repair_feedback']={'errors':record.get('errors',[]),'review':record.get('review',{}),'instruction':'One targeted repair; retain already correct material.'}
-            candidate=chat(WRITERS[stage]+(' Use citation_context for factual scope; clarify prose definitions without renaming protected mathematical symbols.' if context is not None else ''),payload,'writer')
-            if candidate.lstrip().startswith(('{','```json')):
-                decoded=extract_json(candidate)
-                if not isinstance(decoded,dict) or not isinstance(decoded.get('latex'),str):raise ValueError('Missing complete LaTeX string')
-                candidate=decoded['latex']
+            candidate=editorial_response(chat,WRITERS[stage]+(' Use citation_context for factual scope; clarify prose definitions without renaming protected mathematical symbols.' if context is not None else ''),payload,'writer',deadline)
             candidate=body[:len(body)-len(body.lstrip())]+candidate.strip()+body[len(body.rstrip()):]
         errors=preservation_errors(body,candidate)
         if len(ACCESS.findall(candidate))>max(1,len(ACCESS.findall(body))):
@@ -319,7 +335,7 @@ control, transfer or independent validation. Do not treat this sample as a full 
         if context is not None:
             payload['citation_context']=context
             payload['citation_passage_options']=[{k:v for k,v in option.items() if k!='passage'} for option in citation_passage_options(candidate,context['selected_citekeys'])]
-        review={} if errors else extract_json(chat(REVIEW+(quality_instruction if context is not None else ''),payload,'reviewer'))
+        review={} if errors else editorial_response(chat,REVIEW+(quality_instruction if context is not None else ''),payload,'reviewer',deadline)
         if not isinstance(review,dict):review={}
         citation=review_citations(review,context,candidate) if context is not None else {'complete':True,'unsupported':[],'checks':[]}
         accepted=not errors and review.get('accept') is True and all(review.get(k) is True for k in CHECKS) and bool(review.get('explanation')) and citation['complete'] and not citation['unsupported']
