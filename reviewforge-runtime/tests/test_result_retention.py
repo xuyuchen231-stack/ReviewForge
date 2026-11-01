@@ -8,6 +8,11 @@ from result_retention import publish_latest,cleanup_validation
 
 
 class ResultRetentionTests(unittest.TestCase):
+    def test_failed_chinese_reference_audit_blocks_publication(self):
+        with tempfile.TemporaryDirectory() as folder:
+            run,out,report=self.setup_run(folder)
+            report['chinese_citation_order']={'status':'UNVERIFIED'}
+            self.assertEqual(publish_latest(run,report)['status'],'WAITING_FOR_VALIDATION')
     def setup_run(self,folder):
         run=Path(folder)/'workspace/autonomous_runs/run';out=run/'output';(out/'output').mkdir(parents=True)
         for language in ('en','zh'):

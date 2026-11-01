@@ -2,6 +2,16 @@ import tempfile,time,unittest
 from pathlib import Path
 from unittest.mock import patch
 class DeliveryTests(unittest.TestCase):
+ def test_unresolved_prose_list_does_not_spend_translation_calls(self):
+  from autonomous_delivery import deliver_outputs
+  with tempfile.TemporaryDirectory() as folder:
+   run=Path(folder);out=run/'output';out.mkdir()
+   (out/'review_en.tex').write_text(r'\documentclass[twocolumn]{article}\begin{document}\begin{enumerate}\item\label{step:a}A.\end{enumerate}See \ref{step:a}.\end{document}',encoding='utf-8')
+   report={'accepted_units':1}
+   with patch('reviewforge_v4.compile_tex',return_value={'status':'PASS','layout_status':'PASS'}),patch('publication_export.reconcile_pdf_references',side_effect=lambda folder,source,build,*a,**kw:(source,build,{'status':'NOT_APPLICABLE'})),patch('reviewforge_v4.generate_chinese_body') as translate:
+    deliver_outputs(run,{'deadline':time.time()+1800},report,lambda *a:None,True,allow_refinement=False)
+   translate.assert_not_called()
+   self.assertEqual(report['translation'],'not_run_presentation_needs_revision')
  def test_failed_planned_figures_cannot_be_marked_technically_ready(self):
   import json
   from autonomous_delivery import deliver_outputs

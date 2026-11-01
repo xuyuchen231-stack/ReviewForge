@@ -6,6 +6,11 @@ from reviewforge import atomic_json
 def validate_plan(spec,known_keys):
     if not re.fullmatch(r'[a-z][a-z0-9_-]{1,60}',spec.get('id','')):raise ValueError('Invalid figure ID')
     if not spec.get('source_keys') or set(spec['source_keys'])-set(known_keys):raise ValueError('Figure needs existing source identities')
+    if spec.get('layout')=='research_diagram':
+        if spec.get('diagram') not in ('overview','scale','uncertainty'):raise ValueError('Unknown research diagram')
+        if spec.get('span','double') not in ('single','double'):raise ValueError('Invalid figure span')
+        if not all(spec.get(k) for k in ('caption','after_heading','lead_in')):raise ValueError('Scientific role and insertion point required')
+        return True
     if spec.get('layout')=='workflow':
         nodes=spec.get('nodes',[])
         if not 3<=len(nodes)<=8 or any(not isinstance(n,str) or not n.strip() or len(n)>150 for n in nodes):raise ValueError('Workflow needs 3-8 short authored nodes')
@@ -19,6 +24,9 @@ def validate_plan(spec,known_keys):
     return True
 
 def render_concept(spec,directory):
+    if spec.get('layout')=='research_diagram':
+        from review_overview_figure import render_overview
+        return render_overview(spec,directory)
     if spec.get('layout')=='workflow':return render_workflow(spec,directory)
     import matplotlib
     matplotlib.use('Agg')
@@ -82,18 +90,44 @@ def render_workflow(spec,directory):
     atomic_json(directory/(spec['id']+'.manifest.json'),report);return report
 
 def add_planned_figures(tex,plan,output):
-    known=set(re.findall(r'\\bibitem(?:\[[^]]*\])?\{([^}]+)\}',tex));reports=[]
+    from bibliography_delivery import active_text
+    known=set(re.findall(r'\\bibitem(?:\[[^]]*\])?\{([^}]+)\}',active_text(tex)));reports=[]
     if not isinstance(plan,dict) or not isinstance(plan.get('figures'),list):raise ValueError('Invalid publication figure plan')
+    # Replace only explicitly owned generated illustrations, never author data plots.
+    mappings={}
+    for spec in plan['figures']:
+        if not re.fullmatch(r'[a-z][a-z0-9_-]{1,60}',spec.get('id','')):raise ValueError('Invalid figure ID')
+        if '\\label{fig:rf-'+spec['id']+'}' not in active_text(tex):validate_plan(spec,known)
+        for old in spec.get('replaces',[]):
+            if not re.fullmatch(r'[a-z][a-z0-9_-]{1,60}',old) or old==spec['id']:raise ValueError('Invalid superseded figure ID')
+            mappings['fig:rf-'+old]='fig:rf-'+spec['id']
+    for match in reversed(list(re.finditer(r'\\begin\{figure\*?\}(?:\[[^]]*\])?[\s\S]*?\\end\{figure\*?\}',active_text(tex)))):
+        labels=re.findall(r'\\label\{([^}]+)\}',match.group(0));owned=set(labels)&set(mappings)
+        if owned:
+            if any(not label.startswith('fig:rf-') for label in labels):raise ValueError('Mixed author/generated figure labels require explicit review')
+            graphics=re.findall(r'\\includegraphics(?:\[[^]]*\])?\{([^}]+)\}',match.group(0))
+            expected={'figures/'+label[len('fig:rf-'):]+'.pdf' for label in owned}
+            if not graphics or set(graphics)-expected:raise ValueError('Generated-figure replacement has ambiguous asset provenance')
+            tex=tex[:match.start()]+tex[match.end():]
+    for spec in plan['figures']:
+        for lead in spec.get('superseded_lead_ins',[]):
+            pattern=r'\s+'.join(re.escape(word) for word in lead.split())
+            for match in reversed(list(re.finditer(pattern,active_text(tex)))):tex=tex[:match.start()]+tex[match.end():]
+    from manuscript_integrity import REF
+    for match in reversed(list(REF.finditer(active_text(tex)))):
+        keys=[mappings.get(key.strip(),key.strip()) for key in match.group(1).split(',')]
+        tex=tex[:match.start(1)]+','.join(keys)+tex[match.end(1):]
     for spec in plan['figures']:
         label='fig:rf-'+spec['id']
-        if '\\label{'+label+'}' in tex:continue
+        if '\\label{'+label+'}' in active_text(tex):continue
         validate_plan(spec,known)
-        marker=spec['after_heading'];start=tex.find(marker)
+        marker=spec['after_heading'];start=active_text(tex).find(marker)
         if start<0:raise ValueError('Figure insertion heading missing: '+marker)
         next_heading=re.search(r'(?m)^\\(?:section|subsection)\*?\{',tex[start+len(marker):])
         stop=start+len(marker)+next_heading.start() if next_heading else tex.find(r'\begin{thebibliography}')
         if stop<start:raise ValueError('Cannot place conceptual figure inside article')
         reports.append(render_concept(spec,Path(output)/'figures'))
-        block='\n'+spec['lead_in'].replace('{FIG}',r'\ref{'+label+'}')+'\n\n'+r'\begin{figure*}[!t]'+'\n'+r'\centering'+'\n'+r'\includegraphics[width=\textwidth]{figures/'+spec['id']+'.pdf}\n'+r'\caption{'+spec['caption']+r'\cite{'+','.join(spec['source_keys'])+'}.}\n'+r'\label{'+label+'}\n'+r'\end{figure*}'+'\n\n'
+        single=spec.get('span')=='single';environment='figure' if single else 'figure*';width=r'\columnwidth' if single else r'\textwidth'
+        block='\n'+spec['lead_in'].replace('{FIG}',r'\ref{'+label+'}')+'\n\n'+r'\begin{'+environment+'}[!t]'+'\n'+('% RF_SINGLE_COLUMN_FIGURE\n' if single else '')+r'\centering'+'\n'+r'\includegraphics[width='+width+']{figures/'+spec['id']+'.pdf}\n'+r'\caption{'+spec['caption']+r'\cite{'+','.join(spec['source_keys'])+'}.}\n'+r'\label{'+label+'}\n'+r'\end{'+environment+'}'+'\n\n'
         tex=tex[:stop]+block+tex[stop:]
     return tex,{'added':len(reports),'records':reports,'model_calls':0}

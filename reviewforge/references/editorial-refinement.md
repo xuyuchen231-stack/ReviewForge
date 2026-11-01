@@ -72,3 +72,19 @@ caption mathematics, numerical identities, citation identities and references re
 Old mechanically blocked drafts are re-reviewed only if the narrowed deterministic rule now
 passes. Candidate citation passage IDs provide exact copied quotes, never fuzzy matching or a
 fabricated scientific pass. Accepted existing chunks remain reusable.
+
+## Figure and citation presentation
+
+Honor the user's integrated a–d overview and single-column companion preference. Replace only
+actively labelled generated RF figures with verified generated-asset provenance, never a data
+figure whose comment happens to contain an RF label. Preserve analytic illustrations and author
+data. Remap generated references and keep explicitly single-column floats at column width.
+
+Export plain narrative instead of ordinary prose bullet lists, retaining exact scientific content.
+Equation labels inside lists do not block conversion; genuine referenced item counters do. Flag
+unresolved presentation before translation. Sort numeric parenthetical groups, preserve textual
+author order, and reconcile actual first-use order independently for English and Chinese PDFs.
+Repeated citations keep their assigned identities; do not renumber on every repeated mention.
+
+The compiler timeout covers the entire owned process tree. On Windows create the compiler root
+suspended, assign the kill-on-close job, then resume; no helper should escape before containment.

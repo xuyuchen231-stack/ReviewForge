@@ -4,6 +4,22 @@ from unittest.mock import patch
 from publication_figures import validate_plan,add_planned_figures
 
 class PublicationFigureTests(unittest.TestCase):
+ def test_commented_generated_label_cannot_delete_author_data_figure(self):
+  source=r'\subsection{Model}\begin{figure}\includegraphics{real-data.pdf}\label{fig:author-data}'+'\n% '+r'\label{fig:rf-old}'+'\n% '+r'\label{fig:rf-concept}'+'\n'+r'\end{figure}\begin{thebibliography}{9}\bibitem{A}Reference.\end{thebibliography}'
+  spec=self.spec();spec['replaces']=['old']
+  with tempfile.TemporaryDirectory() as folder,patch('publication_figures.render_concept',return_value={}):
+   result,_=add_planned_figures(source,{'figures':[spec]},Path(folder))
+  self.assertIn(r'\includegraphics{real-data.pdf}',result);self.assertIn(r'\label{fig:author-data}',result)
+  from bibliography_delivery import active_text
+  self.assertIn(r'\label{fig:rf-concept}',active_text(result))
+
+ def test_owned_replacement_maps_references_and_single_column_marker(self):
+  source=r'\subsection{Model}See \ref{fig:rf-old}.\begin{figure*}\includegraphics{figures/old.pdf}\label{fig:rf-old}\end{figure*}\begin{thebibliography}{9}\bibitem{A}Reference.\end{thebibliography}'
+  spec=self.spec();spec.update(replaces=['old'],span='single')
+  with tempfile.TemporaryDirectory() as folder,patch('publication_figures.render_concept',return_value={}):
+   result,_=add_planned_figures(source,{'figures':[spec]},Path(folder))
+  self.assertNotIn(r'\label{fig:rf-old}',result);self.assertIn(r'\ref{fig:rf-concept}',result)
+  self.assertIn('% RF_SINGLE_COLUMN_FIGURE',result);self.assertIn(r'width=\columnwidth',result)
  def test_workflow_plan_has_its_own_validated_geometry(self):
   spec=self.spec();spec.update(layout='workflow',nodes=['Define claim','Lock independent split','Final test'])
   self.assertTrue(validate_plan(spec,['A']))

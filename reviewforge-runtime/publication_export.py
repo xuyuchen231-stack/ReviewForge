@@ -82,6 +82,7 @@ def prepare_two_column_export(tex,force=False):
     tex=portable_text_symbols(tex)
     for m in reversed(list(re.finditer(r'\\begin\{(figure|table)\}(?:\[[^]]*\])?[\s\S]*?\\end\{\1\}',active_text(tex)))):
         body=tex[m.start():m.end()];kind=m.group(1)
+        if kind=='figure' and '% RF_SINGLE_COLUMN_FIGURE' in body:continue
         body=body.replace('\\begin{'+kind+'}','\\begin{'+kind+'*}',1)
         stop=body.rfind('\\end{'+kind+'}')
         body=body[:stop]+body[stop:].replace('\\end{'+kind+'}','\\end{'+kind+'*}',1)
@@ -132,6 +133,7 @@ def numeric_citation_records(raw,links,number_keys):
                     numbers.extend(range(first,last+1))
                 else:numbers.append(int(pair[0]))
             if not numbers or any(n not in number_keys for n in numbers):continue
+            if numbers!=sorted(set(numbers)):raise ReferenceCoverageError('Printed citation group is not ascending: '+match.group(0))
             anchor=boxes[0]
             for i,number in enumerate(numbers):
                 key=number_keys[number]
@@ -186,7 +188,7 @@ def pdf_citation_order(pdf,two_column=True,expected_markers=()):
             order.extend(ordered_citation_links(links,page.rect.width,bands.get(index,[]),two_column))
     return list(dict.fromkeys(order))
 
-def reconcile_pdf_references(directory,tex,build,compile_again,max_passes=3,deadline=None):
+def reconcile_pdf_references(directory,tex,build,compile_again,max_passes=3,deadline=None,basename='review_en'):
     """Reorder against visible PDF links; fail visibly on missing coverage/cycles."""
     folder=Path(directory);passes=0
     if not numeric_order_enabled(tex):return tex,build,{'status':'NOT_APPLICABLE','reason':'Author-year ordering retained','passes':0}
@@ -202,17 +204,19 @@ def reconcile_pdf_references(directory,tex,build,compile_again,max_passes=3,dead
             if cited==keys:return tex,build,{'status':'PASS','cited_references':len(keys),'passes':passes,'basis':'PDF hyperlink positions in column/float reading order'}
             if passes>=max_passes:return tex,build,{'status':'UNRESOLVED','reason':'Reference layout did not stabilize','passes':passes}
             if deadline is not None and deadline-time.time()<=30:return tex,build,{'status':'UNVERIFIED','reason':'Insufficient remaining reference-build budget; successful output retained','passes':passes}
-            old_tex=tex;old_build=build;old_pdf=pdf.read_bytes();old_source=(folder/'review_en.tex').read_bytes()
+            old_tex=tex;old_build=build;old_pdf=pdf.read_bytes();old_source=(folder/(basename+'.tex')).read_bytes()
             aux=pdf.with_suffix('.aux');old_aux=aux.read_bytes() if aux.exists() else None
-            report_path=folder/'reports/review_en_build.json';old_report=report_path.read_bytes() if report_path.exists() else None
+            report_path=folder/'reports'/(basename+'_build.json');old_report=report_path.read_bytes() if report_path.exists() else None
             tex=order_inline_bibliography(tex,keys)
+            from publication_style import sorted_citation_groups
+            tex=sorted_citation_groups(tex)
             try:
-                (folder/'review_en.tex').write_bytes(tex.encode('utf-8'))
+                (folder/(basename+'.tex')).write_bytes(tex.encode('utf-8'))
                 new_build=compile_again();passes+=1
                 if new_build.get('status')!='PASS' or (old_build.get('layout_status')=='PASS' and new_build.get('layout_status')=='FAILED'):raise RuntimeError('Reference recompile failed; restored last successful output')
                 build=new_build
             except Exception as exc:
-                (folder/'review_en.tex').write_bytes(old_source);pdf.write_bytes(old_pdf)
+                (folder/(basename+'.tex')).write_bytes(old_source);pdf.write_bytes(old_pdf)
                 if old_aux is not None:aux.write_bytes(old_aux)
                 elif aux.exists():aux.unlink()
                 if old_report is not None:report_path.write_bytes(old_report)

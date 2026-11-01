@@ -47,6 +47,9 @@ Default to a timestamped bilingual PDF pair in `workspace/成果`, with editable
 cleaned full reference archived internally. Avoid per-page PNGs and duplicate reference PDFs.
 Preserve original evidence and active checkpoints; archive/verify generated validation debris
 before any explicit-scope cleanup. Caption wording may change while scientific content stays protected.
+Use an integrated a–d framework with single-column companions when requested. Preserve author
+data/analytic figures, remove prose bullets without deleting content, and validate physical numeric
+citation order in both languages before publishing a fresh bilingual pair.
 
 - Revised manuscript and original snapshot
 - Claim/evidence ledger with unresolved items

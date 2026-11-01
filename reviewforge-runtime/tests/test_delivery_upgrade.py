@@ -156,7 +156,7 @@ class BuildTests(unittest.TestCase):
                 (ws/'output/paper.log').write_text('Output written on paper.pdf; final pass clean.')
                 from types import SimpleNamespace
                 return SimpleNamespace(returncode=0,stdout="Reference `eq:a' on page 1 undefined on input line 4.",stderr='')
-            with patch.object(rf.shutil,'which',return_value='tool'),patch.object(rf.subprocess,'run',side_effect=compile):
+            with patch.object(rf.shutil,'which',return_value='tool'),patch.object(rf,'run_process_tree',side_effect=compile):
                 result=rf.compile_tex(ws,'paper')
             self.assertEqual(result['layout_status'],'PASS')
 
@@ -172,7 +172,7 @@ class BuildTests(unittest.TestCase):
                     'rendered':{'status':'PASS','pdf_sha256':digest,'pages':[{'page':1}]}}
             (ws/'reports/paper_build.json').write_text(json.dumps(report))
             (ws/'reports/paper_visual_review.json').write_text(json.dumps({'pdf_sha256':digest,'reviewed_pages':[1], 'reviewer':'reader','approved':True}))
-            with patch.object(rf.subprocess,'run',side_effect=AssertionError('Unexpected rebuild')):
+            with patch.object(rf,'run_process_tree',side_effect=AssertionError('Unexpected rebuild')):
                 result=rf.compile_tex(ws,'paper',reuse=True)
             self.assertTrue(result['delivery_ready'])
 
@@ -214,7 +214,7 @@ class BuildTests(unittest.TestCase):
                 (ws/'output'/'paper.pdf').write_bytes(b'%PDF-test')
                 from types import SimpleNamespace
                 return SimpleNamespace(returncode=0, stdout='Overfull \\hbox (15.0pt too wide) in paragraph at lines 2--3', stderr='')
-            with patch.object(rf.shutil, 'which', return_value='tool'), patch.object(rf.subprocess, 'run', side_effect=compile):
+            with patch.object(rf.shutil, 'which', return_value='tool'), patch.object(rf,'run_process_tree', side_effect=compile):
                 result = rf.compile_tex(ws, 'paper')
             self.assertEqual(result['status'], 'PASS')
             self.assertEqual(result.get('layout_status'), 'FAILED')

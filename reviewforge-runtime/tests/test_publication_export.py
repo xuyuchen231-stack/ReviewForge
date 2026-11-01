@@ -2,6 +2,24 @@ import tempfile,unittest
 from pathlib import Path
 
 class PublicationExportTests(unittest.TestCase):
+ def test_chinese_reference_reorder_never_overwrites_english_source(self):
+  from unittest.mock import patch
+  from publication_export import reconcile_pdf_references
+  tex=r'\cite{A,B}\begin{thebibliography}{9}\bibitem{A}A.\bibitem{B}B.\end{thebibliography}'
+  with tempfile.TemporaryDirectory() as t:
+   folder=Path(t);(folder/'review_zh.tex').write_text(tex,encoding='utf-8');(folder/'review_en.tex').write_text('English untouched',encoding='utf-8');(folder/'zh.pdf').write_bytes(b'PDF')
+   build={'status':'PASS','layout_status':'PASS','pdf':'zh.pdf'}
+   with patch('publication_export.pdf_citation_order',return_value=['B','A']):
+    result,_,report=reconcile_pdf_references(folder,tex,build,lambda:build,basename='review_zh')
+   self.assertEqual(report['status'],'PASS');self.assertIn(r'\cite{B,A}',result)
+   self.assertEqual((folder/'review_en.tex').read_text(encoding='utf-8'),'English untouched')
+
+ def test_printed_unsorted_citation_group_is_not_a_pass(self):
+  from publication_export import numeric_citation_records,ReferenceCoverageError
+  chars=[{'c':c,'bbox':[10+i*5,20,15+i*5,30]} for i,c in enumerate('[2,1]')]
+  raw={'blocks':[{'lines':[{'spans':[{'chars':chars}]}]}]}
+  links=[{'key':'B','x':15,'x1':20,'y':20,'y1':30}]
+  with self.assertRaises(ReferenceCoverageError):numeric_citation_records(raw,links,{1:'A',2:'B'})
  def test_same_registered_doi_uses_first_cited_key_and_one_entry(self):
   from publication_export import canonicalize_references
   tex=r"\citep{B,A}\cite{A}\begin{thebibliography}{9}\bibitem{A}Alpha. DOI: \url{https://doi.org/10.1234/same}.\bibitem{B}Same article. DOI: \url{https://doi.org/10.1234/SAME}.\bibitem{C}Another. DOI: \url{https://doi.org/10.1234/other}.\end{thebibliography}"

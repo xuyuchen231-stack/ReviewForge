@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse, datetime, hashlib, json, os, re, shutil, subprocess, sys, time, urllib.parse, urllib.request, urllib.error
 from pathlib import Path
 from reviewforge import CompatibleAPI, load_env, atomic_json
+from bounded_process import run_process_tree
 from research_quality import evaluate as evaluate_quality, scaffold as scaffold_quality
 from evidence_context import load_context, context_digest, candidate_evidence_gate
 from delivery_checks import layout_diagnostics, render_preview, visual_status, delivery_audit, input_digests, build_is_current
@@ -460,7 +461,7 @@ def compile_tex(ws,basename,reuse=False,timeout_seconds=600):
         '-file-line-error','-outdir=output',tex.name]
   report['command']=args
   try:
-   p=subprocess.run(args,cwd=ws,capture_output=True,text=True,errors='replace',timeout=max(1,min(600,int(timeout_seconds))))
+   p=run_process_tree(args,cwd=ws,timeout=max(1,min(600,int(timeout_seconds))))
    log=(p.stdout or '')+'\n'+(p.stderr or '')
    logpath=output/(basename+'.log')
    final_log=logpath.read_text(encoding='utf-8',errors='replace') if logpath.exists() else log

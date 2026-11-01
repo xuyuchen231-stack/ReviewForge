@@ -42,3 +42,35 @@ def proposed_diagrams(tex):
                         'lead_in':'Figure~{FIG} summarizes the proposed framework and its scientific boundaries.',
                         'caption':caption+' Conceptual synthesis, not experimental observations. '})
     return figures
+
+
+def compact_figure_plan(tex,previous):
+    """Merge owned framework illustrations; keep author analytic curves untouched."""
+    import re
+    from manuscript_integrity import bibkeys
+    known=bibkeys(tex);old={f['id']:f for f in previous.get('figures',[])}
+    groups=[('framework_abcd','overview','double',r'\subsection{Where learning enters the calculation}',
+             ['learning_interfaces','learning_taxonomy','validation_claims','locked_validation','revision_ladder'],
+             'An integrated model-revision framework. (a) Learned relations enter parameters, rates or the observation map. (b) Training, validation and independent testing are separated by a locked information boundary. (c) M0 is fixed; M1 refits selected parameters; M2 uses phase-specific parameters; M3 learns a process-term correction; M4 changes structure. Candidates share a comparison protocol, without assumed nesting. (d) Internal exchange is conservative. Conceptual synthesis.'),
+            ('scale_single','scale','single',r'\subsection{Extrapolation, scale change and conservation constraints}',
+             ['scale_transfer'],'Scale transfer requires matching the relevant transport, exposure and operating conditions. Schematic vessel sizes do not encode measured volume ratios.'),
+            ('uncertainty_single','uncertainty','single',r'\subsection{Uncertainty: sources, propagation and calibration}',
+             ['uncertainty_layers'],'Parameter, state, observation and input uncertainty remain distinct. Predictive intervals require held-out calibration; the interval shown is a conceptual symbol, not a numerical result.')]
+    figures=[]
+    for identity,diagram,span,heading,replaces,caption in groups:
+        if heading not in tex:continue
+        keys=set();leads=[]
+        for old_id in replaces:
+            spec=old.get(old_id,{})
+            keys.update(k for k in spec.get('source_keys',[]) if k in known)
+            if spec.get('lead_in'):leads.append(spec['lead_in'].replace('{FIG}',r'\ref{fig:rf-'+old_id+'}'))
+            for match in re.finditer(r'\\begin\{figure\*?\}[\s\S]*?\\end\{figure\*?\}',tex):
+                if '\\label{fig:rf-'+old_id+'}' in match.group(0):keys.update(citekeys(match.group(0)))
+        if not keys:
+            for preferred in ('vonstosch2014','psichogios1992','lemperle2026'):
+                if preferred in known:keys.add(preferred)
+        if not keys:raise ValueError('Existing scientific source identities required for diagram')
+        figures.append({'id':identity,'layout':'research_diagram','diagram':diagram,'span':span,'after_heading':heading,
+                        'source_keys':sorted(keys),'replaces':replaces,'superseded_lead_ins':leads,
+                        'lead_in':{'overview':'Figure~{FIG} links learning location, validation and revision choice.','scale':'Figure~{FIG} identifies conditions to reconsider before scale transfer.','uncertainty':'Figure~{FIG} separates uncertainty sources from predictive-interval calibration.'}[diagram],'caption':caption+' '})
+    return {'version':2,'kind':'integrated_abcd_with_single_column_companions','figures':figures}

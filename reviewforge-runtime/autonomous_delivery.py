@@ -29,6 +29,7 @@ def deliver_outputs(run,state,report,chat,translate=True,allow_refinement=True,s
         original_blob=(out/'review_en.tex').read_bytes()
         source=(out/'review_en.tex').read_text(encoding='utf-8')
         original=source
+        from publication_style import prose_lists,sorted_citation_groups
         import os
         if allow_refinement and os.environ.get('RF_MANUSCRIPT_REFINEMENT', '0') == '1':
             from editorial_refinement import audit,evidence_ledger,refine
@@ -54,12 +55,14 @@ def deliver_outputs(run,state,report,chat,translate=True,allow_refinement=True,s
             version=report['editorial'].get('versions',{}).get('condense')
             if report['editorial']['status']=='COMPLETE' and version:
                 source=Path(version['path']).read_text(encoding='utf-8')
+        source,report['prose_presentation']=prose_lists(source)
         if (run/'publication_figure_plan.json').exists():
             import json
             from publication_figures import add_planned_figures
             try:source,report['figures']=add_planned_figures(source,json.loads((run/'publication_figure_plan.json').read_text(encoding='utf-8')),out)
             except (ValueError,TypeError,ImportError,OSError) as exc:report['figures']={'status':'FAILED','reason':type(exc).__name__+': '+str(exc)[:200],'model_calls':0}
         source,aliases=canonicalize_references(source);report['reference_aliases']=aliases
+        source=sorted_citation_groups(source)
         source=mark_wide_material(prepare_two_column_export(source))
         (out/'review_en.tex').write_bytes(source.encode('utf-8'))
         def build_current():
@@ -100,6 +103,8 @@ def deliver_outputs(run,state,report,chat,translate=True,allow_refinement=True,s
         report['publication_acceptance']['planned_figures_status']=report.get('figures',{}).get('status','CHECKED' if 'figures' in report else 'NOT_CONFIGURED')
         if report['publication_acceptance']['planned_figures_status']=='FAILED':
             report['publication_acceptance'].update(technical_ready=False,delivery_ready=False)
+        if report.get('prose_presentation',{}).get('status')!='PASS':
+            report['publication_acceptance'].update(technical_ready=False,delivery_ready=False)
         report['review_en_build']['delivery_ready']=report['publication_acceptance']['delivery_ready']
         atomic_json(out/'publication_acceptance.json',report['publication_acceptance'])
         if report['publication_acceptance']['technical_ready']:
@@ -107,6 +112,9 @@ def deliver_outputs(run,state,report,chat,translate=True,allow_refinement=True,s
             try:report['overleaf']=make_overleaf_project(out)
             except (ValueError,OSError) as exc:report['overleaf']={'status':'FAILED','reason':str(exc)[:200]}
     report['translation']='not_run_time_budget_or_disabled'
+    if report.get('prose_presentation',{}).get('status') in ('FAILED','NEEDS_REVIEW'):
+        report['translation']='not_run_presentation_needs_revision'
+        return _compact_publication(run,out,report)
     if not translate or state['deadline']-time.time()<=120:return _compact_publication(run,out,report)
     remaining=state['deadline']-time.time();build_reserve=min(600,max(30,remaining*.25))
     translation_deadline=state['deadline']-build_reserve
@@ -116,6 +124,9 @@ def deliver_outputs(run,state,report,chat,translate=True,allow_refinement=True,s
     english=(out/'review_en.tex').read_text(encoding='utf-8')
     try:
         chinese=generate_chinese_body(API(),english,[],out,deadline=translation_deadline,context_workspace=run)
+        from publication_style import prose_lists,sorted_citation_groups
+        chinese,report['chinese_prose_presentation']=prose_lists(chinese)
+        chinese=sorted_citation_groups(chinese)
         (out/'review_zh.tex').write_bytes(chinese.encode('utf-8'))
         report['translation']='generated'
         atomic_json(out/'translation_provenance.json',{'english_sha256':hashlib.sha256(english.encode()).hexdigest(),'chinese_sha256':hashlib.sha256(chinese.encode()).hexdigest(),'expert_verified':False})
@@ -124,6 +135,11 @@ def deliver_outputs(run,state,report,chat,translate=True,allow_refinement=True,s
     finally:state.pop('delivery_request_deadline',None)
     if report['translation']=='generated' and state['deadline']-time.time()>30:
         report['review_zh_build']=compile_tex(out,'review_zh',timeout_seconds=max(1,min(600,int(state['deadline']-time.time()-15))))
+        from publication_export import reconcile_pdf_references
+        def build_chinese():return compile_tex(out,'review_zh',timeout_seconds=max(1,min(600,int(state['deadline']-time.time()-15))))
+        chinese,report['review_zh_build'],report['chinese_citation_order']=reconcile_pdf_references(out,chinese,report['review_zh_build'],build_chinese,deadline=state['deadline'],basename='review_zh')
+        if report['chinese_citation_order'].get('status') not in ('PASS','NOT_APPLICABLE') or report.get('chinese_prose_presentation',{}).get('status')!='PASS':report['review_zh_build']['delivery_ready']=False
+        atomic_json(out/'translation_provenance.json',{'english_sha256':hashlib.sha256(english.encode()).hexdigest(),'chinese_sha256':hashlib.sha256(chinese.encode()).hexdigest(),'formatting_after_translation':['prose_lists','numeric_citation_order'],'expert_verified':False})
     return _compact_publication(run,out,report)
 
 

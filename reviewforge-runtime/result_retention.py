@@ -57,6 +57,7 @@ def publish_latest(run,report,output=None,started=None,finished=None):
     if not run.is_relative_to(scope):raise ValueError('Retention scope must contain publication run')
     if report.get('publication_acceptance',{}).get('technical_ready') is False:return {'status':'WAITING_FOR_VALIDATION'}
     if report.get('citation_order',{}).get('status') not in (None,'PASS','NOT_APPLICABLE'):return {'status':'WAITING_FOR_VALIDATION'}
+    if report.get('chinese_citation_order',{}).get('status') not in (None,'PASS','NOT_APPLICABLE') or report.get('chinese_prose_presentation',{}).get('status') in ('FAILED','NEEDS_REVIEW'):return {'status':'WAITING_FOR_VALIDATION'}
     results=_workspace(scope)/'成果';internal=results/'内部资料'
     for language,key in (('en','review_en_build'),('zh','review_zh_build')):
         build=report.get(key,{})
