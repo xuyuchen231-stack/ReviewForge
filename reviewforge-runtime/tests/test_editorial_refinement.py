@@ -8,6 +8,12 @@ from editorial_refinement import audit, split_document, preservation_errors, ref
 
 
 class RequestDiagnosticTests(unittest.TestCase):
+    def test_completion_mode_has_no_session_cutoff_but_explicit_hours_still_work(self):
+        from editorial_refinement import session_deadline
+        self.assertEqual(session_deadline(None,False,now=100),float('inf'))
+        self.assertEqual(session_deadline(9,True,now=100),float('inf'))
+        self.assertEqual(session_deadline(2,False,now=100),7300)
+
     def test_truncated_review_increases_output_budget_and_retries_only_review(self):
         from editorial_refinement import recover_model_request
         from unittest.mock import Mock, patch

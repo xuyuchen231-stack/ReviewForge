@@ -66,7 +66,7 @@ def deliver_outputs(run,state,report,chat,translate=True,allow_refinement=True,s
         source=mark_wide_material(prepare_two_column_export(source))
         (out/'review_en.tex').write_bytes(source.encode('utf-8'))
         def build_current():
-            return compile_tex(out,'review_en',timeout_seconds=max(1,min(600,int(state['deadline']-time.time()-15))))
+            return compile_tex(out,'review_en',timeout_seconds=int(max(1,min(600,state['deadline']-time.time()-15))))
         report['review_en_build']=build_current()
         build=report['review_en_build'];layout=build.get('layout',{});adjustments=[]
         eligible=build.get('status')=='PASS' and not layout.get('unresolved') and not layout.get('missing_glyphs') and re.search(r'\\documentclass\s*\[[^]]*\btwocolumn\b[^]]*\]',source)
@@ -140,9 +140,9 @@ def deliver_outputs(run,state,report,chat,translate=True,allow_refinement=True,s
         report['translation']='incomplete';report['translation_error']=type(exc).__name__+': '+str(exc)[:250]
     finally:state.pop('delivery_request_deadline',None)
     if report['translation']=='generated' and state['deadline']-time.time()>30:
-        report['review_zh_build']=compile_tex(out,'review_zh',timeout_seconds=max(1,min(600,int(state['deadline']-time.time()-15))))
+        report['review_zh_build']=compile_tex(out,'review_zh',timeout_seconds=int(max(1,min(600,state['deadline']-time.time()-15))))
         from publication_export import reconcile_pdf_references
-        def build_chinese():return compile_tex(out,'review_zh',timeout_seconds=max(1,min(600,int(state['deadline']-time.time()-15))))
+        def build_chinese():return compile_tex(out,'review_zh',timeout_seconds=int(max(1,min(600,state['deadline']-time.time()-15))))
         chinese,report['review_zh_build'],report['chinese_citation_order']=reconcile_pdf_references(out,chinese,report['review_zh_build'],build_chinese,deadline=state['deadline'],basename='review_zh')
         if report['chinese_citation_order'].get('status') not in ('PASS','NOT_APPLICABLE') or report.get('chinese_prose_presentation',{}).get('status')!='PASS':report['review_zh_build']['delivery_ready']=False
         atomic_json(out/'translation_provenance.json',{'english_sha256':hashlib.sha256(english.encode()).hexdigest(),'chinese_sha256':hashlib.sha256(chinese.encode()).hexdigest(),'formatting_after_translation':['prose_lists','numeric_citation_order'],'expert_verified':False})

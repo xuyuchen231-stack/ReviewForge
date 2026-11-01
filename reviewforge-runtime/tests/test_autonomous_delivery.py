@@ -2,6 +2,15 @@ import tempfile,time,unittest
 from pathlib import Path
 from unittest.mock import patch
 class DeliveryTests(unittest.TestCase):
+ def test_unlimited_session_still_bounds_each_compile(self):
+  from autonomous_delivery import deliver_outputs
+  with tempfile.TemporaryDirectory() as folder:
+   run=Path(folder);out=run/'output';out.mkdir()
+   (out/'review_en.tex').write_text(r'\documentclass[twocolumn]{article}\begin{document}Result.\end{document}')
+   with patch('reviewforge_v4.compile_tex',return_value={'status':'FAILED','pdf':None}) as build,patch('publication_export.reconcile_pdf_references',side_effect=lambda folder,source,build,*a,**kw:(source,build,{'status':'FAILED'})):
+    deliver_outputs(run,{'deadline':float('inf')},{'accepted_units':0},lambda *a:None,False,allow_refinement=False,source_ready=True)
+   self.assertEqual(build.call_args.kwargs['timeout_seconds'],600)
+
  def test_failed_build_without_pdf_does_not_crash_or_translate(self):
   from autonomous_delivery import deliver_outputs
   with tempfile.TemporaryDirectory() as folder:

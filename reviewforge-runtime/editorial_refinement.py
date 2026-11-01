@@ -8,9 +8,16 @@ from pathlib import Path
 import re
 import time
 import threading
+import math
 
 from manuscript_integrity import CITES, LABEL, REF, citekeys, tex_integrity
 from reviewforge import atomic_json, extract_json
+
+
+def session_deadline(hours=None, until_complete=False, now=None):
+    if until_complete or hours is None:
+        return float('inf')
+    return (time.time() if now is None else now) + hours * 3600
 
 
 def request_failure(exc):
@@ -471,9 +478,10 @@ def main():
     location=parser.add_mutually_exclusive_group(required=True)
     location.add_argument('--run', type=Path)
     location.add_argument('--workspace', type=Path)
-    parser.add_argument('--hours', type=float, default=2)
+    parser.add_argument('--hours', type=float, default=None)
+    parser.add_argument('--until-complete', action='store_true', help='No overall time cutoff; keep per-request timeouts and validation gates')
     args = parser.parse_args()
-    if args.hours<=0:parser.error('--hours must be positive')
+    if args.hours is not None and (not math.isfinite(args.hours) or args.hours<=0):parser.error('--hours must be positive and finite')
     if args.workspace is not None:
         workspace=args.workspace.resolve()
         active=json.loads((workspace/'autonomous_active.json').read_text(encoding='utf-8'))
@@ -493,8 +501,8 @@ def main():
         from reviewforge import CompatibleAPI, load_env, encode_model_payload
         load_env(Path(__file__).parent/'.env')
         api = CompatibleAPI()
-        finish_deadline=time.time()+args.hours*3600
-        api.deadline=finish_deadline-min(3600,args.hours*3600*.25)
+        finish_deadline=session_deadline(args.hours,args.until_complete)
+        api.deadline=finish_deadline if not math.isfinite(finish_deadline) else finish_deadline-min(3600,args.hours*3600*.25)
         def chat(system,payload,role):
             bound=payload.get('_delivery_deadline')
             payload={k:v for k,v in payload.items() if k!='_delivery_deadline'}
