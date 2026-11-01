@@ -46,7 +46,9 @@ def layout_diagnostics(log):
             'visual_guarantee':False}
 
 
-def render_preview(pdf, directory):
+def render_preview(pdf, directory, save_images=None):
+    import os
+    if save_images is None:save_images=os.environ.get('RF_SAVE_PAGE_PREVIEWS','0')=='1'
     pdf, directory = Path(pdf), Path(directory)
     report = {'status': 'UNAVAILABLE', 'pages': [], 'visual_status': 'PENDING',
               'pdf_sha256': hashlib.sha256(pdf.read_bytes()).hexdigest()}
@@ -56,10 +58,11 @@ def render_preview(pdf, directory):
         with fitz.open(pdf) as doc:
             for index, page in enumerate(doc):
                 filename = f'page-{index+1:03d}.png'
-                page.get_pixmap(matrix=fitz.Matrix(1.5, 1.5)).save(directory/filename)
-                report['pages'].append({'page': index+1, 'image': filename,
+                if save_images:page.get_pixmap(matrix=fitz.Matrix(1.5, 1.5)).save(directory/filename)
+                report['pages'].append({'page': index+1, 'image': filename if save_images else None,
                                         'width_pt': page.rect.width, 'height_pt': page.rect.height})
-        report['status'] = 'PASS' if report['pages'] else 'FAILED'
+        report['status'] = ('PASS' if save_images else 'NOT_SAVED') if report['pages'] else 'FAILED'
+        report['reason']='Page images saved by explicit request' if save_images else 'Compact mode: PDF retained; per-page images generated only on request'
     except ImportError:
         report['reason'] = 'Install optional PyMuPDF to render page previews'
     except Exception as exc:

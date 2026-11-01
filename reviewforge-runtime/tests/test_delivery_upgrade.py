@@ -197,10 +197,14 @@ class BuildTests(unittest.TestCase):
             with fitz.open() as doc:
                 doc.new_page().insert_text((50, 50), 'ReviewForge preview test')
                 doc.save(ws/'test.pdf')
-            result=render_preview(ws/'test.pdf',ws/'preview')
+            result=render_preview(ws/'test.pdf',ws/'preview',save_images=True)
             self.assertEqual(result['status'],'PASS')
             self.assertTrue((ws/'preview/page-001.png').is_file())
             self.assertEqual(result['visual_status'],'PENDING')
+            compact=render_preview(ws/'test.pdf',ws/'compact',save_images=False)
+            self.assertEqual(compact['status'],'NOT_SAVED')
+            self.assertFalse(list((ws/'compact').glob('*.png')))
+            self.assertEqual(len(compact['pages']),1)
 
     def test_successful_compile_with_overflow_is_not_layout_pass(self):
         with tempfile.TemporaryDirectory() as tmp:

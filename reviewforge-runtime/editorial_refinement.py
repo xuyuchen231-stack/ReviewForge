@@ -156,6 +156,37 @@ def split_document(text, limit=24000):
     return text[:start], chunks, text[end:]
 
 
+def _caption_inventory(block):
+    """Mask caption wording only; keep caption math as an exact separate inventory."""
+    active=active_tex(block);spans=[];math=[]
+    for match in re.finditer(r'\\caption\*?\s*(?:\[[^\]\n]*\]\s*)?\{',active):
+        start=match.end();index=start;depth=1
+        while index<len(active) and depth:
+            if active[index]=='\\':index+=2;continue
+            if active[index]=='{':depth+=1
+            elif active[index]=='}':depth-=1
+            index+=1
+        if depth:raise ValueError('Unclosed caption')
+        content=block[start:index-1]
+        math.extend(content[a:b] for a,b in protected_spans(content))
+        math.append(('caption_numerical_values',sorted(set(NUMBERS.findall(active_tex(content))))))
+        spans.append((start,index-1,'@@CAPTION@@' if content.strip() else '@@EMPTY_CAPTION@@'))
+    for start,end,marker in reversed(spans):block=block[:start]+marker+block[end:]
+    return block,math
+
+
+def _scientific_inventory(text):
+    narrative=re.compile(r'\\(?:begin|end)\{(?:abstract|itemize|enumerate|description|quote|quotation|center|flushleft|flushright)\}')
+    scan=narrative.sub(lambda m:' '*len(m.group(0)),text);inventory=[]
+    for start,end in protected_spans(scan):
+        block=text[start:end]
+        if re.match(r'\\begin\{(?:table|figure)\*?\}',block):
+            block,caption_math=_caption_inventory(block)
+            inventory.append((block,caption_math))
+        else:inventory.append(block)
+    return inventory
+
+
 def preservation_errors(before, after):
     errors = []
     if not after.strip():
@@ -164,11 +195,8 @@ def preservation_errors(before, after):
     if len(re.findall(doubled,after))>len(re.findall(doubled,before)) or (after.lstrip().startswith(r'\n') and not before.lstrip().startswith(r'\n')):
         errors.append('JSON escaping leaked into LaTeX')
     try:
-        narrative=re.compile(r'\\(?:begin|end)\{(?:abstract|itemize|enumerate|description|quote|quotation|center|flushleft|flushright)\}')
-        old_scan=narrative.sub(lambda m:' '*len(m.group(0)),before)
-        new_scan=narrative.sub(lambda m:' '*len(m.group(0)),after)
-        old_protected=[before[a:b] for a,b in protected_spans(old_scan)]
-        new_protected=[after[a:b] for a,b in protected_spans(new_scan)]
+        old_protected=_scientific_inventory(before)
+        new_protected=_scientific_inventory(after)
         if old_protected!=new_protected:errors.append('Protected mathematical/environment inventory changed')
     except ValueError:
         errors.append('Malformed mathematical/environment boundary')
@@ -189,16 +217,23 @@ def preservation_errors(before, after):
 
 
 def _process_chunk(body,stage,chat,cache,deadline,context=None,binding=None):
-    from editorial_quality import review_citations
+    from editorial_quality import review_citations,citation_passage_options
     record=json.loads(cache.read_text(encoding='utf-8')) if cache.exists() else {}
     if record and record.get('source_sha256')!=sha(body):raise ValueError('Editorial chunk digest mismatch')
     if record and record.get('binding_sha256')!=binding:raise ValueError('Editorial cache binding mismatch')
+    if record.get('errors') and not preservation_errors(body,record.get('candidate','')):
+        # A former broad protection error may now be resolved by a narrower rule.
+        # Reuse the draft, but require real review; never flip acceptance automatically.
+        record.update(pending_review=True,errors=[])
+    if record.get('citation_transport')!='exact-span-id-v1' and record.get('review',{}).get('accept') is True and all(record.get('review',{}).get(k) is True for k in CHECKS) and record.get('citation_audit',{}).get('complete') is False and not record.get('citation_audit',{}).get('unsupported') and not preservation_errors(body,record.get('candidate','')):
+        record['pending_review']=True
     if record.get('accepted') and not preservation_errors(body,record.get('candidate','')):return record
     pending=record.get('pending_review') and not preservation_errors(body,record.get('candidate',''))
     start=record.get('attempt',0)+(1 if record and not pending else 0)
     quality_instruction=''' Check the selected citation identities against citation_context anchors.
-Return citation_checks:[{citekey,status:supported|qualified|unsupported|uncertain,reason,passage}].
-Cover every selected key exactly once. passage is an exact short candidate quotation. No available
+Return citation_checks:[{citekey,status:supported|qualified|unsupported|uncertain,reason,passage_id}].
+Cover every selected key exactly once. Select passage_id from citation_passage_options for that
+same citekey; code copies the exact candidate text. Never retype or paraphrase the quotation. No available
 anchor means uncertain, never supported. Excerpts may support a narrow fitting claim but not
 control, transfer or independent validation. Do not treat this sample as a full citation audit.'''
     for attempt in range(start,2):
@@ -224,12 +259,14 @@ control, transfer or independent validation. Do not treat this sample as a full 
         atomic_json(cache,record)
         if deadline is not None and time.time()+10>=deadline:raise TimeoutError('Editorial budget ended before review')
         payload={'stage':stage,'editorial_revision':True,'before':body,'body':candidate}
-        if context is not None:payload['citation_context']=context
+        if context is not None:
+            payload['citation_context']=context
+            payload['citation_passage_options']=[{k:v for k,v in option.items() if k!='passage'} for option in citation_passage_options(candidate,context['selected_citekeys'])]
         review={} if errors else extract_json(chat(REVIEW+(quality_instruction if context is not None else ''),payload,'reviewer'))
         if not isinstance(review,dict):review={}
         citation=review_citations(review,context,candidate) if context is not None else {'complete':True,'unsupported':[],'checks':[]}
         accepted=not errors and review.get('accept') is True and all(review.get(k) is True for k in CHECKS) and bool(review.get('explanation')) and citation['complete'] and not citation['unsupported']
-        record.update(accepted=bool(accepted),pending_review=False,review=review,citation_audit=citation)
+        record.update(accepted=bool(accepted),pending_review=False,review=review,citation_audit=citation,citation_transport='exact-span-id-v1')
         atomic_json(cache,record)
         if accepted:return record
     return record
@@ -337,6 +374,7 @@ def evidence_ledger(run, destination):
 
 
 def main():
+    session_started=time.time()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('command', choices=['audit', 'refine'])
     location=parser.add_mutually_exclusive_group(required=True)
@@ -365,16 +403,21 @@ def main():
         load_env(Path(__file__).parent/'.env')
         api = CompatibleAPI()
         finish_deadline=time.time()+args.hours*3600
-        api.deadline=finish_deadline-min(600,args.hours*3600*.2)
+        api.deadline=finish_deadline-min(3600,args.hours*3600*.25)
         def chat(system,payload,role):
+            bound=payload.get('_delivery_deadline')
+            payload={k:v for k,v in payload.items() if k!='_delivery_deadline'}
+            previous_deadline=api.deadline
+            if bound is not None:api.deadline=min(previous_deadline,bound)
+            request_stage=payload.get('stage','translation')
             api.thinking_mode='disabled'
             api.max_tokens=2500 if role=='reviewer' else 12000
             started=time.time();stop=threading.Event()
             def heartbeat():
-                while not stop.wait(20):print('[editorial/request] stage='+payload['stage']+' role='+role+' waiting='+str(int(time.time()-started))+'s',flush=True)
+                while not stop.wait(20):print('[editorial/request] stage='+request_stage+' role='+role+' waiting='+str(int(time.time()-started))+'s',flush=True)
             thread=threading.Thread(target=heartbeat,daemon=True);thread.start()
-            record={'stage':payload['stage'],'role':role,'input_chars':len(system)+len(encode_model_payload(payload)),'started_epoch':started}
-            print('[editorial/request] stage='+payload['stage']+' role='+role,flush=True)
+            record={'stage':request_stage,'role':role,'input_chars':len(system)+len(encode_model_payload(payload)),'started_epoch':started}
+            print('[editorial/request] stage='+request_stage+' role='+role,flush=True)
             try:
                 response=api.chat(system,encode_model_payload(payload),role=role)
                 if getattr(api,'last_finish_reason',None)=='length':raise ValueError('Editorial response truncated')
@@ -384,6 +427,7 @@ def main():
             except Exception as exc:
                 record.update(status='FAILED',error_type=type(exc).__name__);raise
             finally:
+                api.deadline=previous_deadline
                 stop.set();thread.join(timeout=2);record['elapsed_seconds']=round(time.time()-started,2)
                 with (folder/'requests.jsonl').open('a',encoding='utf-8') as stream:stream.write(json.dumps(record,ensure_ascii=False)+'\n')
         from autonomous_review import RunLock
@@ -391,7 +435,9 @@ def main():
             result = refine(source, folder, chat, deadline=api.deadline,quality_workspace=args.run)
             if result.get('versions'):
                 from editorial_export import finalize_versions
-                result=finalize_versions(args.run,result,finish_deadline)
+                api.deadline=finish_deadline-60
+                result['run_started_epoch']=session_started
+                result=finalize_versions(args.run,result,finish_deadline,chat=chat)
         result={'source_status':result['status'],'reason':result.get('reason'),
                 'versions':result.get('versions',{}),'unresolved_chunks':len(result.get('unresolved_chunks',[])),
                 'exports':{k:{'status':v['status'],'output':v.get('output')} for k,v in result.get('exports',{}).items()},

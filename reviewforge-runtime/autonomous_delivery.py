@@ -107,7 +107,7 @@ def deliver_outputs(run,state,report,chat,translate=True,allow_refinement=True,s
             try:report['overleaf']=make_overleaf_project(out)
             except (ValueError,OSError) as exc:report['overleaf']={'status':'FAILED','reason':str(exc)[:200]}
     report['translation']='not_run_time_budget_or_disabled'
-    if not translate or state['deadline']-time.time()<=120:return report
+    if not translate or state['deadline']-time.time()<=120:return _compact_publication(run,out,report)
     remaining=state['deadline']-time.time();build_reserve=min(600,max(30,remaining*.25))
     translation_deadline=state['deadline']-build_reserve
     state['delivery_request_deadline']=translation_deadline
@@ -124,6 +124,17 @@ def deliver_outputs(run,state,report,chat,translate=True,allow_refinement=True,s
     finally:state.pop('delivery_request_deadline',None)
     if report['translation']=='generated' and state['deadline']-time.time()>30:
         report['review_zh_build']=compile_tex(out,'review_zh',timeout_seconds=max(1,min(600,int(state['deadline']-time.time()-15))))
+    return _compact_publication(run,out,report)
+
+
+def _compact_publication(run,out,report):
+    import os
+    from result_retention import publish_latest,prune_build_artifacts
+    try:
+        report['compact_results']=publish_latest(run,report,output=out)
+        if report['compact_results']['status']=='PUBLISHED':report['build_cleanup']=prune_build_artifacts(out,remove_page_images=os.environ.get('RF_SAVE_PAGE_PREVIEWS','0')!='1')
+    except (OSError,ValueError) as exc:
+        report['compact_results']={'status':'NOT_PUBLISHED','reason':type(exc).__name__}
     return report
 
 def copy_project_assets(workspace,output,tex):

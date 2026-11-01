@@ -46,6 +46,38 @@ class EditorialRefinementTests(unittest.TestCase):
         self.assertTrue(preservation_errors(before,before.replace('x+y','x-y')))
         self.assertTrue(preservation_errors(before,before.replace('abstract','quote')))
 
+    def test_caption_wording_can_change_but_table_data_and_caption_math_cannot(self):
+        old=r'\begin{table}\caption{Evidence boundary for 12 runs. Access status is recorded in the ledger. $x+y$}\label{tab:a}\begin{tabular}{cc}A&12\\B&15\end{tabular}\end{table}'
+        new=old.replace(' Access status is recorded in the ledger.','')
+        self.assertEqual(preservation_errors(old,new),[])
+        self.assertTrue(preservation_errors(old,new.replace('x+y','x-y')))
+        self.assertTrue(preservation_errors(old,new.replace('A&12','A&15')))
+        self.assertTrue(preservation_errors(old,new.replace('12 runs','15 runs')))
+
+    def test_old_caption_rejection_resumes_with_review_without_rewriting(self):
+        from editorial_refinement import _process_chunk,sha
+        body=r'\begin{table}\caption{Evidence. Access is recorded.}\begin{tabular}{c}12\end{tabular}\end{table}'
+        candidate=body.replace(' Access is recorded.','')
+        with tempfile.TemporaryDirectory() as folder:
+            cache=Path(folder)/'cache.json'
+            cache.write_text(json.dumps({'source_sha256':sha(body),'binding_sha256':'test','attempt':1,'accepted':False,'pending_review':False,'candidate':candidate,'errors':['Protected mathematical/environment inventory changed']}),encoding='utf-8')
+            def chat(system,payload,role):
+                self.assertEqual(role,'reviewer');return self.approval()
+            self.assertTrue(_process_chunk(body,'clean',chat,cache,None,binding='test')['accepted'])
+
+    def test_old_quote_transport_failure_resumes_as_exact_span_id_review(self):
+        from editorial_refinement import _process_chunk,sha
+        body=r'A specific scientific fitting result \cite{A}.'
+        with tempfile.TemporaryDirectory() as folder:
+            cache=Path(folder)/'cache.json';review=json.loads(self.approval())
+            cache.write_text(json.dumps({'source_sha256':sha(body),'binding_sha256':'test','attempt':1,'accepted':False,'candidate':body,'errors':[],'review':review,'citation_audit':{'complete':False,'unsupported':[]}}),encoding='utf-8')
+            def chat(system,payload,role):
+                self.assertEqual(role,'reviewer')
+                result=json.loads(self.approval());result['citation_checks']=[{'citekey':'A','status':'supported','reason':'Fitting only','passage_id':payload['citation_passage_options'][0]['id']}]
+                return json.dumps(result)
+            context={'selected_citekeys':['A'],'anchors':[{'citekey':'A'}],'missing_citekeys':[]}
+            self.assertTrue(_process_chunk(body,'clean',chat,cache,None,context,'test')['accepted'])
+
     def test_comment_commands_do_not_create_false_unclosed_environments(self):
         text='Text.\n% '+r'\begin{equation}'+'\nMore text.'
         prefix,chunks,suffix=split_document(text)

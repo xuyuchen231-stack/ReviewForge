@@ -656,6 +656,7 @@ def run_review(workspace,hours=9,reserve_minutes=40,max_visits=2,new_run=False,t
                 print(f'[{key}] {task["status"]}; completed={sum(t["status"]=="completed" for t in state["tasks"].values())}/{len(state["tasks"])} calls={state["calls"]}',flush=True)
             state.update(phase='delivery',status='assembling');atomic_json(path,state)
             report=assemble(run,state)
+            report['run_started_epoch']=state.get('session_started')
             output=run/'output'
             from autonomous_delivery import deliver_outputs
             def delivery_chat(system,payload,role):

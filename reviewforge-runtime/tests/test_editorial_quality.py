@@ -2,7 +2,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
-from editorial_quality import notation_audit, citation_context, review_citations, acceptance_report
+from editorial_quality import notation_audit, citation_context, review_citations, acceptance_report,citation_passage_options
 
 
 class EditorialQualityTests(unittest.TestCase):
@@ -37,6 +37,15 @@ class EditorialQualityTests(unittest.TestCase):
         result=review_citations({'citation_checks':[{'citekey':'A','status':'supported','reason':'fit only'}]},context)
         self.assertTrue(result['complete'])
         self.assertFalse(review_citations({'citation_checks':[{'citekey':'A','status':'supported','reason':'claim'}]},dict(context,anchors=[],missing_citekeys=['A']))['complete'])
+
+    def test_passage_ids_copy_exact_candidate_text_and_reject_wrong_identity(self):
+        candidate=r'A concrete fitting result is reported \cite{A}.'
+        context={'selected_citekeys':['A'],'anchors':[{'citekey':'A'}],'missing_citekeys':[]}
+        option=citation_passage_options(candidate,['A'])[0]
+        review={'citation_checks':[{'citekey':'A','status':'supported','reason':'fit only','passage_id':option['id']}]}
+        self.assertTrue(review_citations(review,context,candidate)['complete'])
+        review['citation_checks'][0]['passage_id']='invented'
+        self.assertFalse(review_citations(review,context,candidate)['complete'])
 
     def test_build_and_page_goal_are_separate_from_scientific_approval(self):
         result=acceptance_report(r'\documentclass[twocolumn]{article}\begin{document}Text.\end{document}',{'status':'PASS','layout_status':'PASS'},{'status':'PASS'},pages=83)

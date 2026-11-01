@@ -49,3 +49,26 @@ The standalone refinement command compiles clean and condensed versions independ
 actual PDF citation order and exports source-only Overleaf projects. Technical readiness, visual
 review, page target and scientific approval remain separate. A visual failure blocks readiness;
 pending visual review cannot be promoted to approved delivery.
+
+## Compact publication
+
+Default to final English/Chinese PDFs only in `workspace/成果`, with
+explicit local start/end times in filenames and offset-aware timestamps in the internal manifest.
+Keep the cleaned complete reference source, editable bilingual source/assets and run metadata in
+one internal source ZIP. Keep original literature and resumable scientific/evidence checkpoints;
+never delete them merely to reduce visible clutter.
+
+Publish only a fresh pair bound to both build source/PDF hashes and translation provenance. Keep
+the previous complete pair if Chinese fails. Build only the condensed version by default and
+translate it once. Do not persist per-page PNG previews unless explicitly requested. Remove only
+known regenerable build debris after publication.
+
+Historical generated validation directories may be archived and removed only through an explicit
+allowlist, root/link guards, verified archive hashes and unchanged-file checks. Preserve unique
+logs/results and referenced manuscript assets. Do not interrupt active work.
+
+Caption prose may change under semantic review. Exact table data/structure, figure construction,
+caption mathematics, numerical identities, citation identities and references remain protected.
+Old mechanically blocked drafts are re-reviewed only if the narrowed deterministic rule now
+passes. Candidate citation passage IDs provide exact copied quotes, never fuzzy matching or a
+fabricated scientific pass. Accepted existing chunks remain reusable.

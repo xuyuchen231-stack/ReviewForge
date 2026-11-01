@@ -105,8 +105,29 @@ def context_digest(context):
     return hashlib.sha256(json.dumps(context,sort_keys=True,ensure_ascii=False).encode()).hexdigest()
 
 
+def citation_passage_options(candidate,keys):
+    options=[];counts=Counter()
+    for match in CITES.finditer(candidate):
+        for key in match.group(1).split(','):
+            key=key.strip()
+            if key not in keys or counts[key]>=3:continue
+            start=max(0,match.start()-220);end=min(len(candidate),match.end()+100)
+            passage=candidate[start:end].strip()
+            identity=hashlib.sha256((key+'\0'+str(start)+'\0'+passage).encode()).hexdigest()[:16]
+            options.append({'id':identity,'citekey':key,'start_anchor':passage[:65],'end_anchor':passage[-45:],'passage':passage})
+            counts[key]+=1
+    return options
+
+
 def review_citations(review,context,candidate=None):
     rows=review.get('citation_checks',[])
+    if isinstance(rows,list):
+        lookup={r['id']:r for r in citation_passage_options(candidate or '',context['selected_citekeys'])}
+        rows=[dict(r) if isinstance(r,dict) else r for r in rows]
+        for row in rows:
+            if isinstance(row,dict) and 'passage_id' in row:
+                option=lookup.get(row['passage_id'])
+                row['passage']=option['passage'] if option and option['citekey']==row.get('citekey') else ''
     expected=set(context['selected_citekeys']);anchored={r['citekey'] for r in context['anchors']}
     valid=isinstance(rows,list) and all(isinstance(r,dict) and r.get('status') in ('supported','qualified','unsupported','uncertain') and isinstance(r.get('reason'),str) and r['reason'].strip() for r in rows)
     complete=valid and Counter(r.get('citekey') for r in rows)==Counter(expected)

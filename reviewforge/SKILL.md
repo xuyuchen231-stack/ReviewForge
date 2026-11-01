@@ -43,6 +43,10 @@ For repetitive defensive prose, full-reference preservation and separate condens
 For an already written manuscript, `editorial_refinement.py refine --workspace .\workspace --hours 2`
 resumes cleaning/condensation and independently builds both versions. Report unresolved citation
 samples, notation conflicts, actual page goal and visual-review status separately from compilation.
+Default to a timestamped bilingual PDF pair in `workspace/成果`, with editable sources and the
+cleaned full reference archived internally. Avoid per-page PNGs and duplicate reference PDFs.
+Preserve original evidence and active checkpoints; archive/verify generated validation debris
+before any explicit-scope cleanup. Caption wording may change while scientific content stays protected.
 
 - Revised manuscript and original snapshot
 - Claim/evidence ledger with unresolved items

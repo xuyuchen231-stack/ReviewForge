@@ -1,4 +1,4 @@
-"""Compile complete editorial versions separately, preserving all original outputs."""
+"""Build the final bilingual version; retain the cleaned full reference as source."""
 import json
 from pathlib import Path
 import shutil
@@ -6,10 +6,16 @@ import time
 from reviewforge import atomic_json
 
 
-def finalize_versions(run,result,deadline):
+def finalize_versions(run,result,deadline,chat=None,export_reference=False):
     from autonomous_delivery import deliver_outputs,copy_project_assets
     run=Path(run).resolve();exports={}
+    from editorial_refinement import sha
     for stage in ('clean','condense'):
+        entry=result.get('versions',{}).get(stage)
+        if not entry:continue
+        path=Path(entry['path']).resolve()
+        if not path.is_relative_to((run/'editorial').resolve()) or sha(path.read_text(encoding='utf-8'))!=entry.get('sha256'):raise ValueError('Editorial source digest changed or path outside run')
+    for stage in (('clean','condense') if export_reference else ('condense',)):
         entry=result.get('versions',{}).get(stage)
         if not entry:continue
         source_path=Path(entry['path']).resolve()
@@ -31,9 +37,13 @@ def finalize_versions(run,result,deadline):
             if item.exists():
                 (output/'supplement').mkdir(exist_ok=True);shutil.copyfile(item,output/'supplement'/name)
         report={'accepted_units':0,'editorial_version':stage,'scientific_acceptance_unchanged':True,
-                'editorial':{'citation_audit':result.get('citation_audit',{})}}
+                'editorial':{'citation_audit':result.get('citation_audit',{})},'retention_run':str(run),'source_versions':result.get('versions',{}),'run_started_epoch':result.get('run_started_epoch')}
         def no_model(*args):raise AssertionError('Publication build must not call a model')
-        deliver_outputs(version_run,{'deadline':deadline,'phase':'delivery'},report,no_model,False,allow_refinement=False,source_ready=True)
+        delivery_state={'deadline':deadline,'phase':'delivery'}
+        def bounded_chat(system,payload,role):
+            bound=min(deadline,delivery_state.get('delivery_request_deadline',deadline))
+            return (chat or no_model)(system,{**payload,'_delivery_deadline':bound},role)
+        deliver_outputs(version_run,delivery_state,report,bounded_chat,stage=='condense' and chat is not None,allow_refinement=False,source_ready=True)
         acceptance=report.get('publication_acceptance',{})
         exports[stage]={'status':'READY_FOR_READING' if acceptance.get('delivery_ready') else ('COMPILED_PENDING_VISUAL_REVIEW' if acceptance.get('technical_ready') else 'NEEDS_ATTENTION'),
                         'output':str(output),'report':report}

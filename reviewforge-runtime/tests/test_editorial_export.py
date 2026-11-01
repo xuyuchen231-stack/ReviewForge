@@ -20,7 +20,7 @@ class EditorialExportTests(unittest.TestCase):
                 self.assertFalse(kwargs['allow_refinement']);self.assertTrue(kwargs['source_ready']);self.assertFalse(translate)
                 calls.append(run);report['publication_acceptance']={'technical_ready':True,'delivery_ready':True}
             with patch('autonomous_delivery.deliver_outputs',side_effect=deliver):
-                result=finalize_versions(run,{'versions':versions},time.time()+300)
+                result=finalize_versions(run,{'versions':versions},time.time()+300,export_reference=True)
             self.assertEqual(len(calls),2);self.assertNotEqual(calls[0],calls[1])
             self.assertEqual(result['exports']['clean']['status'],'READY_FOR_READING')
             self.assertFalse((run/'output/review_en.tex').exists())
