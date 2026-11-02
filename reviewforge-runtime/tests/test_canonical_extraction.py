@@ -9,6 +9,24 @@ from test_study_registry import packet
 
 
 class CanonicalExtractionTests(unittest.TestCase):
+    def test_quote_limit_prompt_update_reuses_previously_accepted_cards(self):
+        import canonical_extraction as module
+        old=module.EXTRACT.replace('Every reported field needs exact supplied evidence IDs. Prefer a few precise spans, but retain all distinct complementary spans needed for a compound field;', 'Every reported field needs exact supplied evidence IDs, preferably up to three and no more than eight complementary spans;')
+        calls=[]
+        def ask(system,payload,required,role):
+            calls.append(required)
+            if required=='fields':return {'fields':{f:{'status':'unknown','value':None} for f in FIELDS}}
+            return {'facts':[]}
+        with tempfile.TemporaryDirectory() as d:
+            with patch.object(module,'EXTRACT',old):ensure_card(d,packet(),ask,lambda p:p)
+            before=len(calls);ensure_card(d,packet(),ask,lambda p:p);self.assertEqual(len(calls),before)
+
+    def test_review_field_can_retain_thirteen_valid_distinct_spans(self):
+        from study_registry import empty_registry,ingest_card,study_view
+        p=packet();p['evidence_spans']=[{'id':'s'+str(i),'text':'Organism '+str(i),'locator':'p1'} for i in range(13)]
+        r=empty_registry();ingest_card(r,p,{'fields':{'organism':{'status':'reported','value':['several reviewed organisms'],'evidence_ids':['s'+str(i) for i in range(13)]}}})
+        self.assertEqual(len(study_view(r,'A')['facts']['organism']['anchors']),13)
+
     def test_bad_field_is_repaired_without_resending_the_full_document(self):
         calls=[]
         def ask(system,payload,required,role):

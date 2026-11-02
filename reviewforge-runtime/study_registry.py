@@ -46,7 +46,7 @@ def ingest_card(registry,packet,card):
         anchors=[]
         if status=='reported':
             ids=original.get('evidence_ids',[])
-            if not isinstance(ids,list) or not 1<=len(ids)<=8 or any(not isinstance(i,str) or i not in spans for i in ids) or value is None or value=='':raise ValueError('Unanchored canonical fact: '+field)
+            if not isinstance(ids,list) or not ids or any(not isinstance(i,str) or i not in spans for i in ids) or len(set(ids))!=len(ids) or value is None or value=='':raise ValueError('Unanchored canonical fact: '+field)
             anchors=[{'span_id':i,'excerpt':spans[i]['text'],'locator':spans[i]['locator'],'source_sha256':sha} for i in ids]
             if isinstance(value,(int,float)) and not isinstance(value,bool):
                 if not re.search(r'(?<![\d.])'+re.escape(str(value))+r'(?![\d.])',' '.join(a['excerpt'] for a in anchors)):
