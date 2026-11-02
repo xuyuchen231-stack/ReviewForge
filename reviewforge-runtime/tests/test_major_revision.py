@@ -8,6 +8,17 @@ from test_scientific_quality import registry,verdict
 
 
 class MajorRevisionTests(unittest.TestCase):
+    def test_validation_failure_preserves_safe_reason_and_location(self):
+        from major_revision import failure_record
+        from study_registry import ingest_card,empty_registry
+        from test_study_registry import packet
+        try:ingest_card(empty_registry(),packet(),{'fields':{'hardware':{'status':'reported','value':'x','evidence_ids':['bad']}}})
+        except ValueError as exc:report=failure_record(exc,Path('run'),{'stage':'facts','study':'A'})
+        self.assertEqual(report['request_failure']['category'],'validation_failure')
+        self.assertIn('Unanchored canonical fact',report['reason'])
+        self.assertEqual(report['study'],'A')
+        self.assertEqual(report['error_site']['file'],'study_registry.py')
+
     def test_real_translation_route_preserves_plain_text_response(self):
         from reviewforge_v4 import generate_chinese_body
         class Provider:

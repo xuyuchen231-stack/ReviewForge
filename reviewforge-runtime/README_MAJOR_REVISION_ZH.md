@@ -15,6 +15,8 @@ cd "D:\拓展和skill\ReviewForge-repo\reviewforge-runtime"
 
 只想预检时用 `prepare`，它不调用模型；`facts` 只做共享研究记录。`run` 才执行大修与导出。重跑同一指令复用已经通过的源卡、章节和审查；最终审查指出问题的章节可继续修复。
 
+事实卡会先保存模型原回复，再做格式校验。明确的状态别名及分类值误填会记录纠正；不能机械纠正的字段只补修该字段，保留其余有效内容。每项事实可保留最多8段互补原文，仍须核对原始片段ID并接受独立复核。异常报告包含当前阶段、文献、校验原因和代码位置，避免只有泛化的 `ValueError`。
+
 内部记录位于当前运行的 `study_registry.json`、`reports/study_evidence_matrix.json`、`reports/study_comparison_wide.csv`、`major_revision/<版本>/progress.json`、`status.json` 和 `delivery_report.json`。最终成功导出的中英PDF仍通过原来的保留机制发布到 `workspace/成果`。
 
 `PREPARED_ONLY` 仅表示计划已准备；`PROVISIONAL_MODEL_PASS` 仅表示本次模型审查通过；`NEEDS_REVISION` 表示还有问题。它们都不代表专家认可或达到投稿标准。当前已核实的三项核心案例不等于全部参考文献都核实完成。

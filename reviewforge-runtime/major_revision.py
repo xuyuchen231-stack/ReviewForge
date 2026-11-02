@@ -178,6 +178,20 @@ def provider_request(api,system,payload,required,role,retry=None):
     finally:finished.set();thread.join(timeout=1)
 
 
+def failure_record(exc,root,progress=None):
+    import traceback
+    from editorial_refinement import request_failure
+    progress=progress or {};frames=traceback.extract_tb(exc.__traceback__);site=frames[-1] if frames else None
+    report={'status':'PAUSED','error_type':type(exc).__name__,'request_failure':request_failure(exc),'expert_verified':False,'submission_ready':False,'details':str(root),
+            'stage':progress.get('stage'),'study':progress.get('study')}
+    if site:
+        filename=Path(site.filename).name
+        report['error_site']={'file':filename,'line':site.lineno,'function':site.name}
+        if type(exc) is ValueError and filename in {'canonical_extraction.py','study_registry.py','scientific_quality.py','major_revision.py'}:
+            report['reason']=str(exc)[:500];report['request_failure']['category']='validation_failure'
+    return report
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('command',choices=['prepare','facts','run','audit']);parser.add_argument('--workspace',type=Path,required=True);parser.add_argument('--source',type=Path)
     args=parser.parse_args();ws=args.workspace.resolve();active=json.loads((ws/'autonomous_active.json').read_text(encoding='utf-8'));run=(ws/active['run_directory']).resolve()
@@ -220,8 +234,8 @@ def main():
         result={'status':'FACTS_RECORDED','expert_verified':False} if args.command=='facts' else export_candidate(build(args.source,run,ask),args.source,run,ask)
         print(json.dumps(result,ensure_ascii=True))
     except Exception as exc:
-        from editorial_refinement import request_failure
-        failure={'status':'PAUSED','error_type':type(exc).__name__,'request_failure':request_failure(exc),'expert_verified':False,'submission_ready':False,'details':str(root)}
+        progress=json.loads((root/'progress.json').read_text(encoding='utf-8')) if (root/'progress.json').exists() else {}
+        failure=failure_record(exc,root,progress)
         atomic_json(root/'failure.json',failure);print(json.dumps(failure,ensure_ascii=True));return 1
 
 

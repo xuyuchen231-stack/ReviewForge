@@ -42,15 +42,15 @@ def ingest_card(registry,packet,card):
     for field,original in card.get('fields',{}).items():
         if field not in FIELDS:raise ValueError('Unknown canonical field: '+field)
         status=original.get('status');value=original.get('value')
-        if status not in ('reported','unknown','not_in_inspected_material','not_reported','not_applicable'):raise ValueError('Invalid canonical fact status')
+        if status not in ('reported','unknown','not_in_inspected_material','not_reported','not_applicable'):raise ValueError('Invalid canonical fact status: '+field)
         anchors=[]
         if status=='reported':
             ids=original.get('evidence_ids',[])
-            if not 1<=len(ids)<=3 or any(i not in spans for i in ids) or value is None or value=='':raise ValueError('Unanchored canonical fact')
+            if not isinstance(ids,list) or not 1<=len(ids)<=8 or any(not isinstance(i,str) or i not in spans for i in ids) or value is None or value=='':raise ValueError('Unanchored canonical fact: '+field)
             anchors=[{'span_id':i,'excerpt':spans[i]['text'],'locator':spans[i]['locator'],'source_sha256':sha} for i in ids]
             if isinstance(value,(int,float)) and not isinstance(value,bool):
                 if not re.search(r'(?<![\d.])'+re.escape(str(value))+r'(?![\d.])',' '.join(a['excerpt'] for a in anchors)):
-                    raise ValueError('Numeric fact absent from supporting quotation')
+                    raise ValueError('Numeric fact absent from supporting quotation: '+field)
         if status=='not_reported':
             inspection=original.get('inspection',{})
             if access!='full_text' or source['inspection_coverage']!='complete_document' or not inspection.get('sections_checked') or not inspection.get('search_terms'):
