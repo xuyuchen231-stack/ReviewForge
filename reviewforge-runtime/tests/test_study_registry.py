@@ -11,6 +11,16 @@ def packet(text='The study used 230 batches. Hardware was reported.',key='A',sha
 
 
 class StudyRegistryTests(unittest.TestCase):
+    def test_csv_export_handles_pdf_null_glyph_without_mutating_source_quote(self):
+        from study_registry import export_matrix
+        r=empty_registry();p=packet(text='Reported hardware\x00configuration.')
+        ingest_card(r,p,{'fields':{'hardware':{'status':'reported','value':'configuration','evidence_ids':['s0']}}})
+        with tempfile.TemporaryDirectory() as d:
+            result=export_matrix(Path(d),r)
+            self.assertIn('\u2400',Path(result['path']).read_text(encoding='utf-8-sig'))
+            saved=json.loads((Path(d)/'reports/study_evidence_matrix.json').read_text(encoding='utf-8'))
+            self.assertEqual(saved['studies'][0]['facts']['hardware']['anchors'][0]['excerpt'],'Reported hardware\x00configuration.')
+
     def test_unknown_cannot_overwrite_reported_fact(self):
         r=empty_registry();p=packet()
         ingest_card(r,p,{'fields':{'sample_size':{'status':'reported','value':230,'evidence_ids':['s0']}}})

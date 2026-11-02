@@ -169,9 +169,12 @@ def export_matrix(run,registry):
                             'locators':' | '.join(a['locator'] for a in anchors),'quotations':' | '.join(a['excerpt'] for a in anchors),
                             'semantic_status':cell.get('semantic_status','not_reviewed')})
     target=folder/'study_evidence_matrix.csv'
+    # Python 3.10's CSV writer treats NUL as its unset escape character.
+    # Show PDF extraction control glyphs visibly in CSV; keep exact originals in JSON.
+    display=lambda rows:({k:v.replace('\x00','\u2400') if isinstance(v,str) else v for k,v in row.items()} for row in rows)
     with target.open('w',encoding='utf-8-sig',newline='') as stream:
-        writer=csv.DictWriter(stream,fieldnames=list(records[0]) if records else ['citekey','field','status']);writer.writeheader();writer.writerows(records)
-    atomic_json(folder/'study_evidence_matrix.json',{'policy':POLICY,'studies':facts_for_studies(registry,registry['studies']),'expert_verified':False})
+        writer=csv.DictWriter(stream,fieldnames=list(records[0]) if records else ['citekey','field','status']);writer.writeheader();writer.writerows(display(records))
+    atomic_json(folder/'study_evidence_matrix.json',{'policy':POLICY,'studies':facts_for_studies(registry,registry['studies']),'expert_verified':False,'csv_display_note':'NUL glyphs are displayed as U+2400 in CSV only; exact original quotations and source hashes remain in this JSON.'})
     # One row per study for actual horizontal comparison; long-form remains the provenance ledger.
     wide=[]
     for key in sorted(registry['studies']):
@@ -182,5 +185,5 @@ def export_matrix(run,registry):
                      'source_access':'; '.join(sorted({s['document_access'] for s in view['sources']})),
                      'conflicts':'; '.join(view['conflicts'])})
     with (folder/'study_comparison_wide.csv').open('w',encoding='utf-8-sig',newline='') as stream:
-        writer=csv.DictWriter(stream,fieldnames=['citekey','cohort',*FIELDS,'source_access','conflicts']);writer.writeheader();writer.writerows(wide)
+        writer=csv.DictWriter(stream,fieldnames=['citekey','cohort',*FIELDS,'source_access','conflicts']);writer.writeheader();writer.writerows(display(wide))
     return {'path':str(target),'studies':len(registry['studies']),'rows':len(records),'expert_verified':False}
