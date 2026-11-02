@@ -63,12 +63,11 @@ def deliver_outputs(run,state,report,chat,translate=True,allow_refinement=True,s
             except (ValueError,TypeError,ImportError,OSError) as exc:report['figures']={'status':'FAILED','reason':type(exc).__name__+': '+str(exc)[:200],'model_calls':0}
         from compact_publication import compact_figures,column_math
         source,report['compact_figure_policy']=compact_figures(source,out)
-        source,column_math_count=column_math(source)
+        source,column_math_count=column_math(source,out,state['deadline'])
         report['column_math_reflow']=column_math_count
         source,aliases=canonicalize_references(source);report['reference_aliases']=aliases
         source=sorted_citation_groups(source)
-        from publication_export import prefer_multiline_displays
-        source,multiline_count=prefer_multiline_displays(source)
+        multiline_count=column_math_count
         report['multiline_equations']={'changed':multiline_count,'policy':'single-column-first; algebra and labels preserved'}
         source=mark_wide_material(prepare_two_column_export(source))
         (out/'review_en.tex').write_bytes(source.encode('utf-8'))
@@ -78,7 +77,7 @@ def deliver_outputs(run,state,report,chat,translate=True,allow_refinement=True,s
         build=report['review_en_build'];layout=build.get('layout',{});adjustments=[]
         eligible=build.get('status')=='PASS' and not layout.get('unresolved') and not layout.get('missing_glyphs') and re.search(r'\\documentclass\s*\[[^]]*\btwocolumn\b[^]]*\]',source)
         if eligible and layout.get('overflows') and state['deadline']-time.time()>30:
-            source,count=column_math(source)
+            source,count=column_math(source,out,state['deadline'])
             if count:
                 source=mark_wide_material(source)
                 (out/'review_en.tex').write_bytes(source.encode('utf-8'));adjustments.append('full_width_math_strips:'+str(count))

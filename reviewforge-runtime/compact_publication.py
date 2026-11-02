@@ -7,29 +7,20 @@ OWNED={'fig:process','fig:model','fig:alternatives','fig:validation',
        'fig:rf-framework_abcd','fig:rf-scale_single','fig:rf-uncertainty_single'}
 
 
-def column_math(tex):
-    from publication_export import prefer_multiline_displays
+def column_math(tex,directory=None,deadline=None):
     pattern=re.compile(r'\\begin\{strip\}([\s\S]*?)\\end\{strip\}')
     def unwrap(match):
         body=match.group(1)
         if not re.search(r'\\\[|\\begin\{(?:equation|align)',body):return match.group()
-        owned=bool(re.search(r'\\hypertarget\{rf-wide-\d+-start\}\{\}',body)) and bool(re.search(r'(?m)^\s*\\small\s*$',body))
-        if owned:
-            def continuation(aligned):
-                rows=[row.strip() for row in aligned.group(1).split(r'\\')]
-                if not all(row.startswith('&') for row in rows):return aligned.group()
-                rows=[row[1:].strip() for row in rows]
-                # Independent author equations retain their row boundaries.
-                if any(not (a.endswith((',', ';')) or re.match(r'^(?:[+=-]|\\(?:qquad|quad|;))',b)) for a,b in zip(rows,rows[1:])):return aligned.group()
-                return ' '.join(rows)
-            body=re.sub(r'\\begin\{aligned\}([\s\S]*?)\\end\{aligned\}',continuation,body)
         body=re.sub(r'\\hypertarget\{rf-wide-\d+-(?:start|end)\}\{\}','',body)
         body=re.sub(r'(?m)^\s*\\small\s*$','',body)
         return body.strip()
     tex=pattern.sub(unwrap,tex)
-    # Genuine author aligned systems remain opaque; only exporter continuations
-    # inside identified legacy wrappers are reflowed above.
-    return prefer_multiline_displays(tex,minimum=90,aggressive=True)
+    # Genuine author aligned systems remain opaque. The measured formatter
+    # reflows only explicitly tagged continuations.
+    if directory is None:return tex,0
+    from math_layout import balanced_math
+    return balanced_math(tex,directory,deadline)
 
 
 def render_compact(directory):

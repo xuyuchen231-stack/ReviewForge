@@ -127,10 +127,16 @@ def publish_latest(run,report,output=None,started=None,finished=None):
               'directory':str(results),'source_archive':str(archive),'obsolete_files':sorted(obsolete),
               'visual_status':{lang:report['review_'+lang+'_build'].get('visual_status','PENDING') for lang in ('en','zh')},'expert_verified':False}
     atomic_json(latest,manifest)
+    deferred=[]
     for name in obsolete:
         if Path(name).name!=name or not name.startswith('ReviewForge_') or not name.endswith('.pdf'):continue
         path=_safe(results/name,results)
-        if path.exists():path.unlink()
+        if path.exists():
+            try:path.unlink()
+            except PermissionError:deferred.append(name)
+    if deferred:
+        manifest['cleanup_deferred']=deferred
+        atomic_json(latest,manifest)
     return manifest
 
 

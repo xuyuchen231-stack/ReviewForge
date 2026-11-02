@@ -8,6 +8,20 @@ from result_retention import publish_latest,cleanup_validation
 
 
 class ResultRetentionTests(unittest.TestCase):
+    def test_open_old_pdf_defers_cleanup_without_failing_new_publication(self):
+        with tempfile.TemporaryDirectory() as folder:
+            run,out,report=self.setup_run(folder)
+            old=publish_latest(run,report,started=1700000000,finished=1700003600)
+            locked=old['files']['zh'];original=Path.unlink
+            def unlink(path,*args,**kwargs):
+                if path.name==locked:raise PermissionError('PDF viewer holds old file')
+                return original(path,*args,**kwargs)
+            with patch.object(Path,'unlink',unlink):
+                new=publish_latest(run,report,started=1700004000,finished=1700007600)
+            self.assertEqual(new['status'],'PUBLISHED')
+            self.assertIn(locked,new['cleanup_deferred'])
+            self.assertTrue(all((Path(new['directory'])/name).exists() for name in new['files'].values()))
+
     def test_failed_chinese_reference_audit_blocks_publication(self):
         with tempfile.TemporaryDirectory() as folder:
             run,out,report=self.setup_run(folder)
