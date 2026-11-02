@@ -72,7 +72,7 @@ def portable_text_symbols(tex):
     return tex
 
 def prepare_two_column_export(tex,force=False):
-    """Keep requested columns; give figures/tables full width instead of shrinking type."""
+    """Keep figures within columns; reserve full width for explicitly wide tables."""
     # Observed double-escaped prose newline; never decode arbitrary LaTeX escapes
     # (notably \nu, \neq, \nabla) as text newlines.
     tex=tex.replace(r'\nsimilarly', '\n'+'similarly')
@@ -83,9 +83,16 @@ def prepare_two_column_export(tex,force=False):
     # The portable Latin Modern text face lacks Greek prose glyphs. Math fonts
     # supply these symbols without changing the symbol or requiring a private font.
     tex=portable_text_symbols(tex)
+    # Figures belong to one column by default. Wide tables remain an explicit
+    # layout exception; figures never expand merely because the paper is two-column.
+    tex=tex.replace(r'\begin{figure*}',r'\begin{figure}').replace(r'\end{figure*}',r'\end{figure}')
     for m in reversed(list(re.finditer(r'\\begin\{(figure|table)\}(?:\[[^]]*\])?[\s\S]*?\\end\{\1\}',active_text(tex)))):
         body=tex[m.start():m.end()];kind=m.group(1)
-        if kind=='figure' and '% RF_SINGLE_COLUMN_FIGURE' in body:continue
+        if kind=='figure':
+            body=body.replace(r'\textwidth',r'\columnwidth')
+            body=re.sub(r'\\begin\{figure\}(?:\[[^]]*\])?',lambda _:r'\begin{figure}[!t]',body,1)
+            tex=tex[:m.start()]+body+tex[m.end():]
+            continue
         body=body.replace('\\begin{'+kind+'}','\\begin{'+kind+'*}',1)
         stop=body.rfind('\\end{'+kind+'}')
         body=body[:stop]+body[stop:].replace('\\end{'+kind+'}','\\end{'+kind+'*}',1)
@@ -96,7 +103,7 @@ def prepare_two_column_export(tex,force=False):
     tex=re.sub(r'\\begin\{(figure\*|table\*)\}(?:\[[^]]*\])?',lambda m:'\\begin{'+m.group(1)+'}[!tp]',tex)
     return tex
 
-def prefer_multiline_displays(tex, minimum=120):
+def prefer_multiline_displays(tex, minimum=120, aggressive=False):
     """Break at existing top-level separators; never rewrite algebra or shrink type."""
     pattern=re.compile(r'\\begin\{(equation\*?)\}([\s\S]*?)\\end\{\1\}|\\\[([\s\S]*?)\\\]')
     count=0
@@ -106,13 +113,15 @@ def prefer_multiline_displays(tex, minimum=120):
         if len(body)<minimum or re.search(r'\\begin\{|\\\\|&|\\tag\b',body):return match.group()
         labels=re.findall(r'\\label\{[^{}]+\}',body)
         core=re.sub(r'\\label\{[^{}]+\}','',body)
-        cuts=[];depth=0;paren=0;left=0;i=0
+        cuts=[];depth=0;paren=0;left=0;escaped=0;i=0
         while i<len(core):
             command=re.match(r'\\[A-Za-z]+|\\.',core[i:])
             if command:
                 token=command.group()
                 if token==r'\left':left+=1
                 elif token==r'\right':left=max(0,left-1)
+                elif token==r'\{':escaped+=1
+                elif token==r'\}':escaped=max(0,escaped-1)
                 if token in (r'\qquad',r'\quad') and depth==0 and paren==0 and left==0:cuts.append(i)
                 i+=len(token);continue
             c=core[i]
@@ -122,6 +131,10 @@ def prefer_multiline_displays(tex, minimum=120):
                 if c in '([':paren+=1
                 elif c in ')]':paren=max(0,paren-1)
                 elif c=='+' and paren==0 and left==0:cuts.append(i)
+                elif aggressive and left==0 and escaped==0:
+                    if c=='=' and paren==0:cuts.append(i)
+                    elif c==',' and paren==1:cuts.append(i+1)
+                    elif c=='-' and paren==0 and core[:i].rstrip() and core[:i].rstrip()[-1] not in '^_({[=,+-':cuts.append(i)
             i+=1
         cuts=sorted(set(c for c in cuts if core[:c].strip()))
         if not cuts:return match.group()
@@ -138,7 +151,7 @@ def prefer_multiline_displays(tex, minimum=120):
         inner=strip.group(1).strip()
         clean=re.sub(r'\\hypertarget\{rf-wide-\d+-(?:start|end)\}\{\}','',inner).strip()
         if not pattern.fullmatch(clean):continue
-        changed,n=prefer_multiline_displays(clean,minimum)
+        changed,n=prefer_multiline_displays(clean,minimum,aggressive)
         if n:
             tex=tex[:strip.start()]+inner.replace(clean,changed)+tex[strip.end():];count+=n
         else:
@@ -147,18 +160,10 @@ def prefer_multiline_displays(tex, minimum=120):
 
 
 def reflow_wide_displays(tex,layout):
-    """Wrap only reported overwide displays; keep their complete math source unchanged."""
-    lines=[d.get('start_line') for d in layout.get('overflow_details',[]) if d.get('kind')=='hbox' and isinstance(d.get('start_line'),int)]
-    pattern=re.compile(r'\\begin\{(equation\*?|align\*?|gather\*?|multline\*?)\}[\s\S]*?\\end\{\1\}|\\\[[\s\S]*?\\\]')
-    spans=list(re.finditer(r'\\begin\{strip\}[\s\S]*?\\end\{strip\}',active_text(tex)));selected=[]
-    for m in pattern.finditer(active_text(tex)):
-        if any(s.start()<=m.start()<s.end() for s in spans):continue
-        start=tex.count('\n',0,m.start())+1;end=tex.count('\n',0,m.end())+1
-        if any(start<=line<=end+1 for line in lines):selected.append(m)
-    for m in reversed(selected):tex=tex[:m.start()]+'\n\\begin{strip}\n'+tex[m.start():m.end()]+'\n\\end{strip}\n'+tex[m.end():]
-    if selected and not re.search(r'\\usepackage(?:\[[^]]*\])?\{cuted\}',active_text(tex)):
-        tex=tex.replace(r'\begin{document}',r'\usepackage{cuted}'+'\n'+r'\setlength{\stripsep}{6pt plus 2pt minus 2pt}'+'\n'+r'\begin{document}',1)
-    return tex,len(selected)
+    """Compatibility entry point: wrap lines locally, never switch to full width."""
+    from compact_publication import column_math
+    return column_math(tex)
+
 
 class ReferenceCoverageError(ValueError):pass
 

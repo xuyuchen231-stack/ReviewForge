@@ -42,7 +42,7 @@ class PublicationExportTests(unittest.TestCase):
   math=r"\begin{equation}a=b+c\label{eq:a}\end{equation}"
   tex=r"\documentclass[twocolumn]{article}"+"\n"+r"\begin{document}"+"\n"+math+"\n"+r"\end{document}"
   result,count=reflow_wide_displays(tex,{'overflow_details':[{'kind':'hbox','start_line':3}]})
-  self.assertEqual(count,1);self.assertIn(math,result);self.assertIn(r"\begin{strip}",result);self.assertNotIn(r"\onecolumn",result)
+  self.assertEqual(count,0);self.assertIn(math,result);self.assertNotIn(r"\begin{strip}",result);self.assertNotIn(r"\onecolumn",result)
   self.assertEqual(reflow_wide_displays(result,{'overflow_details':[]})[0],result)
  def test_two_column_export_uses_wide_floats_not_single_column_body(self):
   from publication_export import prepare_two_column_export

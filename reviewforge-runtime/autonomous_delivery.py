@@ -56,11 +56,15 @@ def deliver_outputs(run,state,report,chat,translate=True,allow_refinement=True,s
             if report['editorial']['status']=='COMPLETE' and version:
                 source=Path(version['path']).read_text(encoding='utf-8')
         source,report['prose_presentation']=prose_lists(source)
-        if (run/'publication_figure_plan.json').exists():
+        if (run/'publication_figure_plan.json').exists() and r'\label{fig:rf-compact}' not in source:
             import json
             from publication_figures import add_planned_figures
             try:source,report['figures']=add_planned_figures(source,json.loads((run/'publication_figure_plan.json').read_text(encoding='utf-8')),out)
             except (ValueError,TypeError,ImportError,OSError) as exc:report['figures']={'status':'FAILED','reason':type(exc).__name__+': '+str(exc)[:200],'model_calls':0}
+        from compact_publication import compact_figures,column_math
+        source,report['compact_figure_policy']=compact_figures(source,out)
+        source,column_math_count=column_math(source)
+        report['column_math_reflow']=column_math_count
         source,aliases=canonicalize_references(source);report['reference_aliases']=aliases
         source=sorted_citation_groups(source)
         from publication_export import prefer_multiline_displays
@@ -74,7 +78,7 @@ def deliver_outputs(run,state,report,chat,translate=True,allow_refinement=True,s
         build=report['review_en_build'];layout=build.get('layout',{});adjustments=[]
         eligible=build.get('status')=='PASS' and not layout.get('unresolved') and not layout.get('missing_glyphs') and re.search(r'\\documentclass\s*\[[^]]*\btwocolumn\b[^]]*\]',source)
         if eligible and layout.get('overflows') and state['deadline']-time.time()>30:
-            source,count=reflow_wide_displays(source,layout)
+            source,count=column_math(source)
             if count:
                 source=mark_wide_material(source)
                 (out/'review_en.tex').write_bytes(source.encode('utf-8'));adjustments.append('full_width_math_strips:'+str(count))
@@ -136,6 +140,8 @@ def deliver_outputs(run,state,report,chat,translate=True,allow_refinement=True,s
         from publication_style import prose_lists,sorted_citation_groups
         chinese,report['chinese_prose_presentation']=prose_lists(chinese)
         chinese=sorted_citation_groups(chinese)
+        from compact_publication import compact_figures
+        chinese,report['chinese_compact_figure_policy']=compact_figures(chinese,out)
         (out/'review_zh.tex').write_bytes(chinese.encode('utf-8'))
         report['translation']='generated'
         atomic_json(out/'translation_provenance.json',{'english_sha256':hashlib.sha256(english.encode()).hexdigest(),'chinese_sha256':hashlib.sha256(chinese.encode()).hexdigest(),'expert_verified':False})
@@ -154,6 +160,9 @@ def deliver_outputs(run,state,report,chat,translate=True,allow_refinement=True,s
 
 def _compact_publication(run,out,report):
     import os
+    if any(report.get(key,{}).get('status')=='NEEDS_REVIEW' for key in ('compact_figure_policy','chinese_compact_figure_policy')):
+        report['compact_results']={'status':'NOT_PUBLISHED','reason':'Ambiguous figure ownership requires review; author material preserved'}
+        return report
     from result_retention import publish_latest,prune_build_artifacts
     try:
         report['compact_results']=publish_latest(run,report,output=out)

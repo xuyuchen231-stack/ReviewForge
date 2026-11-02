@@ -64,7 +64,7 @@ class DeliveryTests(unittest.TestCase):
    with patch.dict('os.environ',{'RF_MANUSCRIPT_REFINEMENT':'1'}),patch('editorial_refinement.refine',side_effect=refinement),patch('reviewforge_v4.compile_tex',return_value={'status':'SKIPPED'}),patch('publication_export.reconcile_pdf_references',side_effect=lambda folder,source,build,*a,**kw:(source,build,{'status':'NOT_APPLICABLE'})):
     deliver_outputs(run,state,{'accepted_units':1},lambda *a:None,False)
    self.assertEqual(len(seen),1);self.assertNotIn('delivery_request_deadline',state)
- def test_export_recovers_wide_two_column_math_without_changing_math(self):
+ def test_unbreakable_math_is_reported_instead_of_switching_to_full_width(self):
   from autonomous_delivery import deliver_outputs
   from manuscript_integrity import citekeys
   import json
@@ -78,9 +78,11 @@ class DeliveryTests(unittest.TestCase):
     return {'status':'PASS','layout_status':'PASS','layout':{'overflows':[],'unresolved':[],'missing_glyphs':[]}}
    report={'accepted_units':1}
    with patch('reviewforge_v4.compile_tex',side_effect=build):deliver_outputs(run,{'deadline':time.time()+1800},report,lambda *a:None,False)
-   self.assertEqual(len(calls),3);self.assertNotIn(r'\onecolumn',calls[1]);self.assertIn(r'\begin{strip}',calls[1]);self.assertIn(r'\addtolength{\textheight}{3pt}',calls[2])
-   self.assertIn(r'\begin{equation}a=b\end{equation}',calls[2]);self.assertEqual(citekeys(source),citekeys(calls[2]))
-   self.assertEqual(report['review_en_build']['layout_status'],'PASS');self.assertEqual((run/'reports/layout_original_english.tex').read_text(encoding='utf-8'),source)
+   self.assertEqual(len(calls),1)
+   self.assertNotIn(r'\onecolumn',calls[0]);self.assertNotIn(r'\begin{strip}',calls[0])
+   self.assertIn(r'\begin{equation}a=b\end{equation}',calls[0]);self.assertEqual(citekeys(source),citekeys(calls[0]))
+   self.assertEqual(report['review_en_build']['layout_status'],'FAILED')
+
  def test_unresolved_citations_do_not_trigger_formatting_recovery(self):
   from autonomous_delivery import deliver_outputs
   with tempfile.TemporaryDirectory() as t:
