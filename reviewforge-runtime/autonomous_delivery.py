@@ -56,6 +56,13 @@ def deliver_outputs(run,state,report,chat,translate=True,allow_refinement=True,s
             if report['editorial']['status']=='COMPLETE' and version:
                 source=Path(version['path']).read_text(encoding='utf-8')
         source,report['prose_presentation']=prose_lists(source)
+        citation_plan=run/'intro_citation_repairs.json'
+        if citation_plan.exists():
+            import json
+            from citation_coverage import apply_verified_patches
+            scope=Path(report.get('retention_run',run)).resolve()
+            workspace=scope.parent.parent if scope.parent.name=='autonomous_runs' else scope
+            source,report['intro_citation_repairs']=apply_verified_patches(source,json.loads(citation_plan.read_text(encoding='utf-8')),workspace)
         if (run/'publication_figure_plan.json').exists() and r'\label{fig:rf-compact}' not in source:
             import json
             from publication_figures import add_planned_figures

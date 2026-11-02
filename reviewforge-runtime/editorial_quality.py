@@ -141,11 +141,12 @@ def review_citations(review,context,candidate=None):
 
 def acceptance_report(text,build,citation_order,pages=None,citation_audit=None):
     from editorial_refinement import active_tex
+    from citation_coverage import intro_citation_audit
     active=active_tex(text);integrity=tex_integrity(active)
     two_column=bool(re.search(r'\\documentclass\s*\[[^]]*\btwocolumn\b[^]]*\]',active))
     visual=build.get('visual_status','PENDING')
     technical=build.get('status')=='PASS' and build.get('layout_status')=='PASS' and visual!='FAILED' and citation_order.get('status') in ('PASS','NOT_APPLICABLE') and not integrity and two_column
-    return {'policy':POLICY,'technical_ready':technical,'delivery_ready':technical and visual=='PASS','visual_status':visual,'two_column':two_column,
+    return {'policy':POLICY,'technical_ready':technical,'delivery_ready':technical and visual=='PASS','visual_status':visual,'two_column':two_column,'intro_citation_coverage':intro_citation_audit(text),
             'pages':pages,'target_pages':[25,30],'page_target_met':25<=pages<=30 if isinstance(pages,int) else None,
             'figure_count':len(re.findall(r'\\begin\{figure\*?\}',active)),
             'citation_order':citation_order.get('status','NOT_CHECKED'),'integrity_findings':integrity,

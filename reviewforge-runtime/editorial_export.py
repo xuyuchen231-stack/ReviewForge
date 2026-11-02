@@ -32,6 +32,7 @@ def finalize_versions(run,result,deadline,chat=None,export_reference=False):
             exports[stage]={'status':'MISSING_ASSETS','missing':assets['missing']};continue
         (output/'review_en.tex').write_text(source,encoding='utf-8')
         if (run/'publication_figure_plan.json').exists():shutil.copyfile(run/'publication_figure_plan.json',version_run/'publication_figure_plan.json')
+        if (run/'intro_citation_repairs.json').exists():shutil.copyfile(run/'intro_citation_repairs.json',version_run/'intro_citation_repairs.json')
         for name in ('literature_evidence_ledger.csv','literature_evidence_summary.csv'):
             item=run/'editorial'/name
             if item.exists():
