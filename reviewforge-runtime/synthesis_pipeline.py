@@ -100,7 +100,8 @@ def matrix_for_unit(workspace,unit_id,fallback=None):
     for row in matrix.get('studies',[]):
         source=(Path(workspace)/row.get('source_text_file','')).resolve()
         if source.is_relative_to(Path(workspace).resolve()) and source.is_file():row['source_text_sha256']=hashlib.sha256(source.read_bytes()).hexdigest()
-    return matrix
+    from study_registry import load_registry,overlay_matrix
+    return overlay_matrix(matrix,load_registry(workspace))
 
 def contract_digest(plan,matrix,evidence,unit_id=None):
     # User approval metadata changes after a sample review; its scientific contract must not.
@@ -186,20 +187,20 @@ def audit_contract(workspace,unit_id=None):
         for key in keys:
             row=bykey.get(key)
             if not row:issues.append(prefix+'missing_study:'+key);continue
-            if row.get('source_type') not in ('full_text','full_text_excerpt','abstract_only'):issues.append(prefix+'unknown_access:'+key)
+            if row.get('source_type') not in ('full_text','full_text_excerpt','abstract_only','publisher_excerpt'):issues.append(prefix+'unknown_access:'+key)
             supplied_axes=set(u.get('comparison_axes',[]))|{axis for axis,field in row.get('fields',{}).items() if field.get('status')=='supported'}
             for axis in supplied_axes:
                 field=row.get('fields',{}).get(axis,{})
                 status=field.get('status')
                 if status not in ('supported','not_reported','not_accessible','not_applicable'):issues.append(prefix+'missing_axis:'+key+':'+axis)
                 elif status=='supported':
-                    if not all(field.get(f) for f in ('value','locator','excerpt')):issues.append(prefix+'unanchored_field:'+key+':'+axis)
+                    if field.get('value') is None or field.get('value')=='' or not all(field.get(f) for f in ('locator','excerpt')):issues.append(prefix+'unanchored_field:'+key+':'+axis)
                     if row.get('source_type')=='abstract_only' and axis in DETAIL_FIELDS and not field.get('explicit_in_abstract'):
                         issues.append(prefix+'abstract_detail_requires_explicit_evidence:'+key+':'+axis)
                     # Match against an inspected source excerpt, never just bibliography metadata.
                     evidence=anchors.get(key,{})
                     quote=field.get('excerpt','')
-                    if not quote or quote not in evidence.get('excerpt',''):
+                    if not quote or not any(quote in e.get('excerpt','') for e in context['entries'] if e['citekey']==key):
                         local=ws/str(row.get('source_text_file',''))
                         if not (local.resolve().is_relative_to(ws.resolve()) and local.is_file() and quote and quote in re.sub(r'\s+',' ',local.read_text(encoding='utf-8'))):
                             issues.append(prefix+'field_excerpt_not_matched:'+key+':'+axis)

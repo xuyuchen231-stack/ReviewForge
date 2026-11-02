@@ -37,6 +37,12 @@ Consult `references/editorial-synthesis.md` for paragraph argument checks, fair 
 8. For overnight execution, use the separate ReviewForge Runtime application. A ChatGPT Skill alone does not run for nine hours unattended.
 
 ## Deliverables
+For factual contradictions, repetitive structure or insufficient comparative synthesis, follow
+`references/scientific-major-revision.md` before language polishing. The runtime major-revision
+route uses one canonical study registry, a complete provenance matrix, seven mapped sections and
+sentence-bound whole-manuscript checks. A prepared plan or compiled PDF is not a completed
+scientific revision. Keep source originals and distinguish provisional model review from expert approval.
+
 For repetitive defensive prose, full-reference preservation and separate condensation, follow
 `references/editorial-refinement.md`. The local editorial stage is opt-in through
 `RF_MANUSCRIPT_REFINEMENT=1`; it must not silently restart evidence extraction or scientific review.

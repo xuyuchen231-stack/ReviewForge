@@ -52,12 +52,13 @@ def notation_audit(text):
 def evidence_index(workspace):
     """Read once. Original quotation provenance is retained; no fuzzy author matching."""
     path=Path(workspace)/'evidence_ledger.json'
-    if not path.exists():return {}
-    data=json.loads(path.read_text(encoding='utf-8'))
+    data=json.loads(path.read_text(encoding='utf-8')) if path.exists() else []
     rows=data.get('entries',[]) if isinstance(data,dict) else data
     if not isinstance(rows,list):raise ValueError('Invalid evidence ledger')
     index={}
-    for row in rows:
+    from study_registry import load_registry,evidence_rows
+    canonical=evidence_rows(load_registry(workspace))
+    for row in canonical+rows:
         if not isinstance(row,dict) or not isinstance(row.get('citekey'),str):continue
         index.setdefault(row['citekey'],[]).append(row)
     return index
@@ -75,7 +76,10 @@ def citation_context(workspace,text,budget=7000,index=None,max_keys=8):
     anchors=[];missing=[];deferred=[]
     for key in selected:
         found=False
-        for row in index.get(key,[]):
+        local_text=' '.join(text[max(0,m.start()-400):m.end()+150] for m in CITES.finditer(text) if key in m.group(1).split(','))
+        terms=set(re.findall(r'[A-Za-z]{4,}',local_text.lower()))
+        candidates=sorted(index.get(key,[]),key=lambda row:(bool(row.get('canonical_fact_id')),sum(word in ((row.get('canonical_field','')+' '+row.get('excerpt','')).lower()) for word in terms)),reverse=True)
+        for row in candidates:
             quote=row.get('excerpt') or row.get('quote','')
             locator=row.get('locator') or row.get('evidence_location','')
             source_id=row.get('source_id') or row.get('doi','')
@@ -95,7 +99,11 @@ def citation_context(workspace,text,budget=7000,index=None,max_keys=8):
             anchors.append(anchor);found=True;break
         if not found:missing.append(key)
     selected=[k for k in selected if k not in deferred]
+    from study_registry import load_registry,registry_digest,compact_facts
+    registry=load_registry(workspace)
     return {'policy':POLICY,'selected_citekeys':selected,'anchors':anchors,'missing_citekeys':missing,
+            'registry_digest':registry_digest(registry,set(scores)),
+            'canonical_studies':compact_facts(registry,selected),
             'deferred_citekeys':sorted(set(scores)-set(selected)),
             'claim_offsets':{k:positions[k] for k in selected},'semantic_verification':False,
             'scope':'Bounded critical-citation sample in this chunk; not a full-source or whole-bibliography audit.'}

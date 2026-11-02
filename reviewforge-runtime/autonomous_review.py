@@ -169,26 +169,41 @@ def choose_task(state,max_visits):
     # immediately select the same expensive unit again after refunding its visit.
     return min(candidates,key=lambda pair:(pair[1].get('service_failures',0),not pair[1].get('preparation_ready',False),pair[1].get('visits',0),pair[1].get('priority',0),pair[0]))[0] if candidates else None
 
-def source_packet(workspace,run,entry,query,max_chars=8500):
+def source_packet(workspace,run,entry,query,max_chars=8500,complete=False):
     ws=Path(workspace).resolve();run=Path(run);key=entry['citekey'];text='';access='anchor_only'
     folder=(ws/entry.get('source_directory','__missing__')).resolve()
     if folder.is_relative_to(ws) and folder.is_dir():
+        if (folder/'fulltext').is_dir():
+            folder=(folder/'fulltext').resolve()
+            if not folder.is_relative_to(ws):raise ValueError('Full-text source outside workspace')
         if (folder/'source.txt').is_file():text=(folder/'source.txt').read_text(encoding='utf-8');access='full_text_excerpt'
         elif (folder/'sections.json').is_file():text='\n'.join(p['text'] for p in read(folder/'sections.json'));access='full_text_excerpt'
-        elif (folder/'pages.json').is_file():text='\n'.join(read(folder/'pages.json'));access='full_text_excerpt'
+        elif (folder/'pages.json').is_file():text='\n'.join(p.get('text','') if isinstance(p,dict) else p for p in read(folder/'pages.json'));access='full_text_excerpt'
         elif (folder/'abstract.txt').is_file():text=(folder/'abstract.txt').read_text(encoding='utf-8');access='abstract_only'
     if not text:text=entry.get('excerpt','')
     text=re.sub(r'\s+',' ',text)
-    target=run/'auto_sources'/(hashlib.sha256(key.encode()).hexdigest()[:20]+'.txt');target.parent.mkdir(exist_ok=True);target.write_bytes(text.encode('utf-8'))
+    source_sha=hashlib.sha256(text.encode('utf-8')).hexdigest()
+    target=run/'auto_sources'/(hashlib.sha256(key.encode()).hexdigest()[:12]+'_'+source_sha+'.txt');target.parent.mkdir(exist_ok=True)
+    if target.exists() and target.read_bytes()!=text.encode('utf-8'):raise ValueError('Immutable primary-source snapshot changed')
+    if not target.exists():target.write_bytes(text.encode('utf-8'))
     tokens=set(re.findall(r'[A-Za-z]{5,}',query.lower()))-{'model','models','study','studies','their','which','these','those'}
     windows=[(i,text[i:i+2200]) for i in range(0,len(text),1800)]
     scored=sorted(windows,key=lambda x:sum(x[1].lower().count(k) for k in tokens)+sum(x[1].lower().count(k) for k in ('validat','train','test','conclu')),reverse=True)
-    chosen=sorted({i:s for i,s in (windows[:1]+scored[:4])}.items());chunks=[];remaining=max_chars
+    chosen=([(i,text[i:i+2200]) for i in range(0,min(len(text),max_chars),2200)] if complete else sorted({i:s for i,s in (windows[:1]+scored[:4])}.items()));chunks=[];remaining=max_chars
     for offset,part in chosen:
         if remaining<=0:break
         part=part[:remaining];chunks.append({'locator':'normalized source text offset '+str(offset),'text':part});remaining-=len(part)
-    return {'citekey':key,'access':access,'source_type':'abstract_only' if access=='abstract_only' or entry.get('source_type')=='abstract_only' else 'full_text_excerpt',
-            'source_text_file':str(target.relative_to(run)),'claim_anchor':entry,'chunks':chunks,'selective_excerpt_warning':True}
+    metadata=read(folder/'source.json') if folder.is_relative_to(ws) and (folder/'source.json').exists() else {}
+    def normalized_doi(value):return re.sub(r'^https?://(?:dx\.)?doi\.org/','',str(value).strip(),flags=re.I).lower()
+    if entry.get('doi') and metadata.get('doi') and normalized_doi(entry['doi'])!=normalized_doi(metadata['doi']):raise ValueError('Primary-source DOI conflicts with study identity: '+key)
+    document_access='publisher_excerpt' if metadata.get('kind')=='publisher_excerpt' else ('full_text' if access=='full_text_excerpt' else access)
+    inspected=sum(len(c['text']) for c in chunks)
+    coverage='complete_document' if complete and inspected==len(text) and document_access=='full_text' else 'selected_excerpt'
+    return {'citekey':key,'access':access,'document_access':document_access,'inspection_coverage':coverage,'inspected_characters':inspected,'document_characters':len(text),
+            'source_sha256':hashlib.sha256(text.encode('utf-8')).hexdigest(),
+            'source_id':metadata.get('doi') or entry.get('doi') or entry.get('source_id',''),
+            'source_type':'publisher_excerpt' if document_access=='publisher_excerpt' else ('abstract_only' if access=='abstract_only' or (access=='anchor_only' and entry.get('source_type')=='abstract_only') else 'full_text_excerpt'),
+            'source_text_file':str(target.relative_to(run)),'claim_anchor':entry,'chunks':chunks,'selective_excerpt_warning':coverage!='complete_document'}
 
 def compact_evidence_payload(payload):
     """Deduplicate only repeated quote text; identities and locators stay in their records."""
@@ -324,15 +339,28 @@ def prepare_unit(workspace,run,state,unit,api):
     available=sorted(required|set(ranked[:2]));packets=[source_packet(workspace,run,anchors[k],query,max_chars=min(8500,max(1000,100000//max(1,len(available))))) for k in available]
     # Source access is not invented. Selective chunks and their actual local files are recorded.
     packet_index={p['citekey']:p for p in packets}
+    canonical_mode=(run/'scientific_revision_policy.json').exists()
+    if canonical_mode:
+        from canonical_extraction import ensure_card,QUERY
+        from study_registry import load_registry,compact_facts,registry_digest,study_view
+        def ask_card(system,payload,required_key,role):
+            state['phase']='evidence_extraction';api.max_tokens=6500
+            return structured_call(api,state,run/'autonomous_state.json',system,payload,required_key,role=role)
+        for key in available:
+            fixed_packet=source_packet(workspace,run,anchors[key],QUERY,max_chars=100000,complete=True)
+            ensure_card(run,fixed_packet,ask_card,indexed_source)
+        registry=load_registry(run)
+        if any(study_view(registry,key)['conflicts'] for key in available):raise ValueError('Canonical study facts conflict; reconcile before chapter drafting')
     summaries=[{'citekey':p['citekey'],'access':p['access'],'claim_anchor':{k:str(p['claim_anchor'].get(k,''))[:500] for k in ('claim','limitations')},'selected_excerpt':p['chunks'][0]['text'][:700] if p['chunks'] else ''} for p in packets]
     payload={'heading':unit['heading'],'body':unit['body'],'available_keys':available,'required_original_keys':sorted(required),'sources':summaries,
              'scope':'Planning summaries only. Detailed per-source extraction follows; do not invent unseen evidence.'}
+    if canonical_mode:payload['canonical_studies']=compact_facts(registry,available)
     if len(json.dumps(payload))>60000:raise ValueError('Unit exceeds planning context budget; requires argument-based split')
     cache=run/'planning_cache'/unit['id'];cache.mkdir(parents=True,exist_ok=True)
     feedback=[]
     for attempt in range(2):
         plan_payload={**payload,'previous_contract_errors':feedback}
-        signature=digest(json.dumps(plan_payload,sort_keys=True));plan_cache=cache/('plan_'+signature+'.json')
+        signature=digest(json.dumps({'planning_policy':PLAN_ONLY,'request':plan_payload},sort_keys=True));plan_cache=cache/('plan_'+signature+'.json')
         if plan_cache.exists():
             try:validate_argument(read(plan_cache),required,available)
             except (ValueError,TypeError,KeyError):plan_cache.replace(plan_cache.with_suffix('.invalid'))
@@ -353,8 +381,14 @@ def prepare_unit(workspace,run,state,unit,api):
             request={'schema_version':4,'question':argument.get('question'),'comparison_axes':argument.get('comparison_axes',[]),'sources':sources}
             prompt=EXTRACT_STUDY.replace('Read ONE supplied source packet','Read EACH supplied source packet')+' Return one study card for EACH supplied citekey. Keep evidence IDs scoped to that source; never borrow another source span. Do not compare papers during extraction.'
             return structured_call(api,state,run/'autonomous_state.json',prompt,request,'studies')
-        extracted=extract_sources(run,unit['id'],argument.get('question'),argument.get('comparison_axes',[]),[packet_index[key] for key in selected],ask_batch,indexed_source,normalize_study,materialize_evidence,validate_study,seed_rows=studies)
-        studies=list(extracted.values())
+        if canonical_mode:
+            from study_registry import overlay_matrix
+            base={'studies':[{'citekey':key,'source_type':packet_index[key]['source_type'],'source_text_file':packet_index[key]['source_text_file'],
+                             'fields':{axis:{'status':'not_accessible','value':'','locator':'','excerpt':''} for axis in argument.get('comparison_axes',[])}} for key in selected]}
+            studies=overlay_matrix(base,registry)['studies']
+        else:
+            extracted=extract_sources(run,unit['id'],argument.get('question'),argument.get('comparison_axes',[]),[packet_index[key] for key in selected],ask_batch,indexed_source,normalize_study,materialize_evidence,validate_study,seed_rows=studies)
+            studies=list(extracted.values())
         if not isinstance(argument,dict) or not isinstance(studies,list):raise ValueError('Invalid automatic plan schema')
         if not required.issubset(set(argument.get('study_keys',[]))) or set(argument.get('study_keys',[]))-set(available):raise ValueError('Automatic plan changed citation scope')
         plan=read(run/'synthesis_plan.json');target=next(u for u in plan['units'] if u['id']==unit['id'])
@@ -532,7 +566,8 @@ to agree with an unsupported original assertion. Do not reward length or manufac
                         locations[identifier]={'unit_id':packet['unit_id'],'heading':packet['heading'],'review_status':packet['review_status'],'passage_id':identifier,'passage':excerpt}
                         options.append({'id':identifier,'anchor':excerpt[:56],'end_anchor':excerpt[-28:]})
                 annotated.append({**packet,'passage_options':options})
-            batch={**batch,'units':annotated}
+            from study_registry import load_registry,compact_facts
+            batch={**batch,'units':annotated,'canonical_studies':compact_facts(load_registry(run),{k for p in batch['units'] for k in citekeys(p['text'])})}
             def validate_coherence(verdict):
                 if not isinstance(verdict.get('issues'),list):return False
                 for issue in verdict['issues']:

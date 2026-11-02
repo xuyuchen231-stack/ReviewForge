@@ -78,6 +78,24 @@ def deliver_outputs(run,state,report,chat,translate=True,allow_refinement=True,s
         report['multiline_equations']={'changed':multiline_count,'policy':'single-column-first; algebra and labels preserved'}
         source=mark_wide_material(prepare_two_column_export(source))
         (out/'review_en.tex').write_bytes(source.encode('utf-8'))
+        from scientific_quality import audit as scientific_audit,review_manuscript
+        from study_registry import load_registry
+        registry=load_registry(run)
+        report['scientific_quality']={**scientific_audit(source,registry),'status':'NOT_SEMANTICALLY_REVIEWED'}
+        if (run/'scientific_revision_policy.json').exists():
+            import json
+            def scientific_chat(system,payload,required,role):
+                from reviewforge import extract_json
+                response=chat(system,payload,role)
+                data=extract_json(response) if isinstance(response,str) else response
+                if required not in data:raise ValueError('Missing scientific review output')
+                return data
+            report['scientific_quality']=review_manuscript(source,registry,scientific_chat,out/'reports/scientific_quality')
+            if report['scientific_quality']['status']!='PROVISIONAL_MODEL_PASS':
+                report['translation']='not_run_scientific_revision_required'
+                atomic_json(out/'scientific_quality.json',report['scientific_quality'])
+                return report
+        atomic_json(out/'scientific_quality.json',report['scientific_quality'])
         def build_current():
             return compile_tex(out,'review_en',timeout_seconds=int(max(1,min(600,state['deadline']-time.time()-15))))
         report['review_en_build']=build_current()
@@ -116,6 +134,18 @@ def deliver_outputs(run,state,report,chat,translate=True,allow_refinement=True,s
                 with fitz.open(pdf) as document:pages=len(document)
             except (ImportError,OSError,ValueError):pass
         report['publication_acceptance']=acceptance_report(source,report['review_en_build'],report.get('citation_order',{}),pages,report.get('editorial',{}).get('citation_audit'))
+        from study_registry import signature
+        quality=report['scientific_quality']
+        if quality['manuscript_sha256']!=signature(source):
+            if (run/'scientific_revision_policy.json').exists():quality=review_manuscript(source,registry,scientific_chat,out/'reports/scientific_quality')
+            else:quality={**scientific_audit(source,registry),'status':'NOT_SEMANTICALLY_REVIEWED'}
+            report['scientific_quality']=quality
+            atomic_json(out/'scientific_quality.json',quality)
+        report['publication_acceptance']['scientific_quality']=quality
+        report['publication_acceptance']['scientific_ready']=False
+        report['publication_acceptance']['submission_ready']=False
+        if (run/'scientific_revision_policy.json').exists() and quality['status']!='PROVISIONAL_MODEL_PASS':
+            report['publication_acceptance']['delivery_ready']=False
         report['publication_acceptance']['planned_figures_status']=report.get('figures',{}).get('status','CHECKED' if 'figures' in report else 'NOT_CONFIGURED')
         if report['publication_acceptance']['planned_figures_status']=='FAILED':
             report['publication_acceptance'].update(technical_ready=False,delivery_ready=False)

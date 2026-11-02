@@ -1,4 +1,4 @@
-> 2026-10-24 更新：[v4.2 综述深度改写流程](reviewforge-runtime/README_SYNTHESIS_ZH.md)。新增小节论证设计、研究比较表、样板校准和整节审查；与原有断点续跑分开，生成候选稿，不自动覆盖主稿。
+> 2026-11-03 更新：[证据优先的科学大修流程](reviewforge-runtime/README_MAJOR_REVISION_ZH.md)。统一研究事实、公开全文补取、证据矩阵、七章重构及整篇原句核查；用于事实矛盾、重复过多和综合不足。旧的语言凝练命令不能替代本流程。
 
 # ReviewForge · 中文指南
 

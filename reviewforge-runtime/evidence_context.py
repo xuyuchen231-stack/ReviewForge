@@ -10,14 +10,19 @@ def load_context(workspace, text, heading=''):
     path = ws/'evidence_ledger.json'
     result = {'entries': [], 'status': 'MISSING', 'semantic_verification': False,
               'unanchored_citekeys': sorted(citekeys(text))}
-    if not path.exists(): return result
-    raw = path.read_bytes()
+    from study_registry import load_registry,evidence_rows,registry_digest
+    registry=load_registry(ws);canonical=evidence_rows(registry)
+    relevant_keys=citekeys(text)
+    result['registry_digest']=registry_digest(registry,relevant_keys)
+    result['canonical_facts']=[row for row in canonical if row['citekey'] in relevant_keys]
+    if not path.exists() and not canonical:return result
+    raw = path.read_bytes() if path.exists() else b'[]'
     result['ledger_sha256'] = hashlib.sha256(raw).hexdigest()
     try:
         data = json.loads(raw)
         entries = data.get('entries', []) if isinstance(data, dict) else data
         if not isinstance(entries, list): raise ValueError('Expected list of evidence entries')
-        for row in entries:
+        for row in canonical+entries:
             if not isinstance(row, dict): raise ValueError('Invalid evidence entry')
             key = row.get('citekey', '')
             if key not in citekeys(text) and row.get('section') != heading: continue
