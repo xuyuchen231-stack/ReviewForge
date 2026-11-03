@@ -36,7 +36,7 @@ class PublicationFigureTests(unittest.TestCase):
   source=r'\subsection{Model}'+'\nOriginal prose.\n'+r'\subsection{Next}Next.\begin{thebibliography}{9}\bibitem{A}Reference.\end{thebibliography}'
   with tempfile.TemporaryDirectory() as t,patch('publication_figures.render_concept',return_value={'semantic_verification':False}):
    out,report=add_planned_figures(source,{'figures':[self.spec()]},Path(t))
-   self.assertIn('Original prose.',out);self.assertIn(r'\begin{figure*}',out);self.assertIn(r'\cite{A}',out)
+   self.assertIn('Original prose.',out);self.assertIn(r'\begin{figure}',out);self.assertIn(r'\cite{A}',out)
    self.assertEqual(report['added'],1);self.assertEqual(report['model_calls'],0)
    self.assertEqual(add_planned_figures(out,{'figures':[self.spec()]},Path(t))[0],out)
    already_canonicalized=out.replace(r'\bibitem{A}',r'\bibitem{canonicalA}')

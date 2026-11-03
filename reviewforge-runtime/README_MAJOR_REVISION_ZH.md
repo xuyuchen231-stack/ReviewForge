@@ -30,3 +30,26 @@ cd "D:\拓展和skill\ReviewForge-repo\reviewforge-runtime"
 本机 `workspace/retention_policy.json` 启用 `require_improvement_before_replacement` 后，生成时间更晚不会自动替换旧成稿。新中英PDF、翻译对应关系、引用与视觉检查及当前科学审查通过后，程序会对照完整新旧英文稿作一次质量比较并缓存结果。比较须确认必要科学内容保留、无新增重大问题、综合性、重复和可读性改善；不确定或未通过时，保留上一份完整PDF及可编辑源码包，新候选仍留在工作目录。模型比较不是专家认可或投稿承诺。
 
 通过比较后，成果目录只保留最新中英PDF和源码包；旧PDF被阅读器占用时延后删除，不影响新版本发布。原始文献和续跑缓存保留。旧 `workspace_backup_时间戳` 工作区可用 `python storage_cleanup.py --execute` 去重归档到一个 `historical-workspaces.zip`，逐对象核对后再删除展开副本。默认只清理明确可再生成、未被TEX引用的排版文件和预览图，不删除论文配图或主文献。开启 `compact_historical_workspaces` 后，后续成功发布会继续处理历史备份和此前被占用的文件。
+
+
+### Original scientific-figure contract
+
+Use original local drawing code, not Vivid code, templates or assets (its license
+requires separate permission for adaptation). Borrow only general workflow ideas:
+choose the scientific question and route first, use distinct a-d panel roles,
+semantic colors and explicitly authored connections. Conceptual diagrams must not
+invent empirical data; numerical plots retain datum-level source IDs and compatible
+units/protocols. Do not add an illustration merely to increase figure count.
+
+Generated publication plans default to one-column inclusion. Render native 89 x
+68 mm diagrams, wrap/shorten labels rather than shrink fonts, and retain PDF, editable
+SVG and authored spec in the manifest. Do not emit PNG copies on every export.
+`figure_contract.py` checks declared inclusion width, page-area fraction (<=1/8),
+vector text size and page clipping. Mathematical scripts are distinguished by
+relative size and baseline displacement; small ordinary labels must still fail.
+Oversized legacy overviews require re-layout, not blind scaling.
+
+These are standalone checks at declared width, not measurements of final manuscript
+placement or proof of nonoverlap/semantic correctness. Manifests keep visual status
+PENDING and final_manuscript_placement_verified=false. Final compiled manuscript
+visual QA remains required; technical PASS never implies scientific approval.

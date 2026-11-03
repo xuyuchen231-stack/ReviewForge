@@ -67,6 +67,13 @@ def render_compact(directory):
         plt.close(fig)
         from review_overview_figure import portable_svg
         portable_svg(directory/'compact_synthesis.svg')
+        from figure_contract import require_vector_contract
+        require_vector_contract(directory/'compact_synthesis.pdf', {
+            'kind':'analytical_synthesis','experimental_data':False,
+            'panel_roles':['learning interface','conservation','analytical non-identifiability example','validation protocol'],
+            'editable_source':'compact_publication.py:render_compact',
+            'vector_source':'compact_synthesis.svg',
+            'analytical_example':'M=1-exp(-t); R_f=exp(-t)+a; D=a; not observed data'})
 
 
 def compact_figures(tex,output):

@@ -201,3 +201,26 @@ completed critical-synthesis upgrade. Reconcile source changes before reusing pl
 or approved samples. Human feedback calibrates preferences; model reviews remain
 provisional. Technical validation and more words do not guarantee author satisfaction
 or journal readiness.
+
+
+### Original scientific-figure contract
+
+Use original local drawing code, not Vivid code, templates or assets (its license
+requires separate permission for adaptation). Borrow only general workflow ideas:
+choose the scientific question and route first, use distinct a-d panel roles,
+semantic colors and explicitly authored connections. Conceptual diagrams must not
+invent empirical data; numerical plots retain datum-level source IDs and compatible
+units/protocols. Do not add an illustration merely to increase figure count.
+
+Generated publication plans default to one-column inclusion. Render native 89 x
+68 mm diagrams, wrap/shorten labels rather than shrink fonts, and retain PDF, editable
+SVG and authored spec in the manifest. Do not emit PNG copies on every export.
+`figure_contract.py` checks declared inclusion width, page-area fraction (<=1/8),
+vector text size and page clipping. Mathematical scripts are distinguished by
+relative size and baseline displacement; small ordinary labels must still fail.
+Oversized legacy overviews require re-layout, not blind scaling.
+
+These are standalone checks at declared width, not measurements of final manuscript
+placement or proof of nonoverlap/semantic correctness. Manifests keep visual status
+PENDING and final_manuscript_placement_verified=false. Final compiled manuscript
+visual QA remains required; technical PASS never implies scientific approval.
