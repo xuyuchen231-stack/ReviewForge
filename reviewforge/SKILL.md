@@ -224,3 +224,15 @@ These are standalone checks at declared width, not measurements of final manuscr
 placement or proof of nonoverlap/semantic correctness. Manifests keep visual status
 PENDING and final_manuscript_placement_verified=false. Final compiled manuscript
 visual QA remains required; technical PASS never implies scientific approval.
+
+
+### Bounded long-section reconstruction
+For subsequent major_revision starts, substantial long sections use source-covered
+argument units, complete-candidate checkpoints and independent unit reviews before
+whole-section/global scientific review. Filter inputs to the current source blocks
+and study facts. Preserve analytical derivations without inventing empirical citations.
+Cache identity includes planning/writing/review rules and upstream findings; changed
+upstream findings invalidate pending reports as well as accepted reviews. Scoped
+repairs keep unaffected units. Never append truncated JSON/TeX or treat a nonstream
+wait heartbeat as evidence of continuous output. Do not restart an active run merely
+to deploy this change. Existing completion-mail-shutdown authorization remains intact.

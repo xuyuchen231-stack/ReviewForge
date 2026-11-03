@@ -85,6 +85,17 @@ def review_section(ask,payload,candidate,save,pending=None):
             if attempt==1:raise ValueError('Section reviewer schema incomplete after bounded repair: '+feedback) from exc
 
 
+def needs_argument_units(payload):
+    return payload.get('word_budget',0)>=3000 and len(payload.get('original_material','').split())>=1800
+
+
+def write_candidate(ask,payload,root,eligible):
+    if needs_argument_units(payload):
+        from bounded_writing import write_units
+        return write_units(ask,payload,root,WRITE,review_section,CHECKS,eligible,REVIEW)
+    return ask(WRITE,payload,'latex','writer')
+
+
 def build(source,run,ask,global_repairs=1):
     root=prepare(source,run);original=(root/'original.tex').read_text(encoding='utf-8');old=sections(original)
     registry=load_registry(run);keys=citekeys(original)
@@ -103,7 +114,7 @@ def build(source,run,ask,global_repairs=1):
                  'previous_section_summaries':[{'title':m['title'],'findings':m['findings']} for m in manifest]}
         payload['previous_paragraph_messages']=[{'section':m['title'],**p} for m in manifest for p in m.get('paragraph_messages',[])]
         if number==7:payload['conclusion_scope']='Synthesize the evidence established across the preceding sections; original local source pairings do not define the whole field. Do not introduce a new case or re-explain the framework.'
-        binding=signature([POLICY,WRITE,REVIEW,payload]);cache=root/(str(number)+'_'+binding+'.json')
+        binding=signature([POLICY,WRITE,REVIEW,payload]+(['bounded-argument-units-v1'] if needs_argument_units(payload) else []));cache=root/(str(number)+'_'+binding+'.json')
         if cache.exists():
             record=json.loads(cache.read_text(encoding='utf-8'))
             if record.get('binding')!=binding:raise ValueError('Major revision cache identity mismatch')
@@ -116,7 +127,7 @@ def build(source,run,ask,global_repairs=1):
                 if resumed:
                     candidate=record['candidate']
                     if record.get('candidate_sha256')!=signature(candidate):raise ValueError('Pending section candidate binding mismatch')
-                else:candidate=ask(WRITE,{**payload,'repair_feedback':record.get('review',{}),'previous_candidate':record.get('candidate',{}).get('latex')},'latex','writer')
+                else:candidate=write_candidate(ask,{**payload,'_repair_generation':record.get('attempt',0),'repair_feedback':record.get('review',{}),'previous_candidate':record.get('candidate',{}).get('latex')},root,eligible)
                 body=candidate['latex'];errors=[e for e in tex_integrity(body) if e.get('kind')!='unresolved_references']
                 if citekeys(body)-keys:errors.append('Unknown citation keys')
                 if len(sections(body))!=1:errors.append('Expected one complete section')
@@ -215,11 +226,19 @@ def provider_request(api,system,payload,required,role,retry=None):
     from editorial_refinement import resilient_request
     from reviewforge import encode_model_payload,extract_json
     retry=retry or resilient_request
-    api.deadline=time.time()+600;api.call_timeout=600;api.request_timeout=150;api.max_tokens=12000 if role=='reviewer' else 18000
+    request_limit=420 if role=='reviewer' else 360
+    api.deadline=time.time()+request_limit;api.call_timeout=request_limit;api.request_timeout=90;api.max_tokens=12000 if role=='reviewer' else 18000
+    if required=='units':api.max_tokens=3500
+    elif role=='writer' and payload.get('unit_id'):api.max_tokens=10000
+    elif role=='writer' and required=='latex' and payload.get('word_budget',0)>=5000:
+        api.max_tokens=36000
     def request():
         response=api.chat(system,encode_model_payload(payload),role=role)
         if getattr(api,'last_finish_reason',None)=='length':
-            api.max_tokens=min(24000,api.max_tokens*2)
+            # The evidence-comparison section can exhaust 24k tokens including
+            # LaTeX/structured findings. Grow only after proven truncation; do
+            # not repeatedly retry at the same former ceiling or accept a cut.
+            api.max_tokens=min(48000,api.max_tokens*2)
             raise ValueError('Editorial response truncated')
         if required is None:
             if not isinstance(response,str) or not response.strip():raise ValueError('Empty API response')
@@ -229,7 +248,7 @@ def provider_request(api,system,payload,required,role,retry=None):
         return data
     finished=threading.Event();started=time.monotonic()
     def heartbeat():
-        while not finished.wait(20):print('[major-revision] waiting role='+role+' elapsed='+str(int(time.monotonic()-started))+'s request_limit=600s',flush=True)
+        while not finished.wait(20):print('[major-revision] waiting role='+role+' elapsed='+str(int(time.monotonic()-started))+'s request_limit='+str(request_limit)+'s phase=awaiting_response stream_progress=unavailable',flush=True)
     thread=threading.Thread(target=heartbeat,daemon=True);thread.start()
     try:return retry(request,api.deadline)
     finally:finished.set();thread.join(timeout=1)

@@ -53,3 +53,13 @@ These are standalone checks at declared width, not measurements of final manuscr
 placement or proof of nonoverlap/semantic correctness. Manifests keep visual status
 PENDING and final_manuscript_placement_verified=false. Final compiled manuscript
 visual QA remains required; technical PASS never implies scientific approval.
+
+### 长章节分单元写作与恢复（2026-11-03）
+
+后续启动的大修任务中，目标不少于3000词且原始材料不少于1800词的长章节，先规划2–8个论证单元；每个原始材料块只分配一次，数学环境和显示公式不在空行处切断。写作时只传当前单元原文、相关文献事实及已有结论，单元软目标不超过1400词，不设置最低字数。
+
+每个完整候选立即保存，再进行独立审查。写作或审查中断后复用已完成单元；整章不通过时定位需要修改的单元，其他单元保留。上游结论改变会清除下游过期审核结果并重新审查，保留其正文候选。纯分析单元可不含实证引文，数学及推理仍须审核；整章和全稿科学审查继续执行，模型通过不代表投稿准备完成。
+
+非流式接口不能判断模型是否持续输出，日志明确显示 awaiting_response / stream_progress=unavailable。单次写作调用总预算360秒、审稿420秒、底层读取超时90秒；重试和截断恢复有上限，不拼接半截JSON或公式。没有全流程小时截止。新增单元缓存绑定规划规则、写作/审核合同、事实、原文和上下文，避免沿用旧规则下的审核。
+
+这次更新不重启已经运行的任务；新流程在后续启动时启用。额外单元审查有调用开销，实际节省来自缩小输入范围和避免整章失败重写，尚未声称实网耗时或token节省比例。
