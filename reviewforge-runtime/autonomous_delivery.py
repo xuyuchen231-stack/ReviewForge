@@ -160,11 +160,11 @@ def deliver_outputs(run,state,report,chat,translate=True,allow_refinement=True,s
     report['translation']='not_run_time_budget_or_disabled'
     if report.get('review_en_build',{}).get('status')=='FAILED':
         report['translation']='not_run_english_build_failed'
-        return _compact_publication(run,out,report)
+        return _compact_publication(run,out,report,chat)
     if report.get('prose_presentation',{}).get('status') in ('FAILED','NEEDS_REVIEW'):
         report['translation']='not_run_presentation_needs_revision'
-        return _compact_publication(run,out,report)
-    if not translate or state['deadline']-time.time()<=120:return _compact_publication(run,out,report)
+        return _compact_publication(run,out,report,chat)
+    if not translate or state['deadline']-time.time()<=120:return _compact_publication(run,out,report,chat)
     remaining=state['deadline']-time.time();build_reserve=min(600,max(30,remaining*.25))
     translation_deadline=state['deadline']-build_reserve
     state['delivery_request_deadline']=translation_deadline
@@ -191,20 +191,33 @@ def deliver_outputs(run,state,report,chat,translate=True,allow_refinement=True,s
         chinese,report['review_zh_build'],report['chinese_citation_order']=reconcile_pdf_references(out,chinese,report['review_zh_build'],build_chinese,deadline=state['deadline'],basename='review_zh')
         if report['chinese_citation_order'].get('status') not in ('PASS','NOT_APPLICABLE') or report.get('chinese_prose_presentation',{}).get('status')!='PASS':report['review_zh_build']['delivery_ready']=False
         atomic_json(out/'translation_provenance.json',{'english_sha256':hashlib.sha256(english.encode()).hexdigest(),'chinese_sha256':hashlib.sha256(chinese.encode()).hexdigest(),'formatting_after_translation':['prose_lists','numeric_citation_order'],'expert_verified':False})
-    return _compact_publication(run,out,report)
+    return _compact_publication(run,out,report,chat)
 
 
-def _compact_publication(run,out,report):
+def _compact_publication(run,out,report,chat=None):
     import os
     if any(report.get(key,{}).get('status')=='NEEDS_REVIEW' for key in ('compact_figure_policy','chinese_compact_figure_policy')):
         report['compact_results']={'status':'NOT_PUBLISHED','reason':'Ambiguous figure ownership requires review; author material preserved'}
         return report
-    from result_retention import publish_latest,prune_build_artifacts
+    from result_retention import publish_latest,prune_build_artifacts,compare_completed_versions
     try:
         report['compact_results']=publish_latest(run,report,output=out)
-        if report['compact_results']['status']=='PUBLISHED':report['build_cleanup']=prune_build_artifacts(out,remove_page_images=os.environ.get('RF_SAVE_PAGE_PREVIEWS','0')!='1')
+        if report['compact_results']['status']=='WAITING_FOR_IMPROVEMENT_REVIEW' and chat is not None:
+            report['supersession_review']=compare_completed_versions(run,out,report,chat)
+            report['compact_results']=publish_latest(run,report,output=out)
     except (OSError,ValueError) as exc:
         report['compact_results']={'status':'NOT_PUBLISHED','reason':type(exc).__name__}
+    if report['compact_results']['status']=='PUBLISHED':
+        try:report['build_cleanup']=prune_build_artifacts(out,remove_page_images=os.environ.get('RF_SAVE_PAGE_PREVIEWS','0')!='1')
+        except OSError as exc:report['build_cleanup']={'status':'DEFERRED','reason':type(exc).__name__}
+        try:
+            import json
+            from result_retention import _workspace
+            workspace=_workspace(Path(report.get('retention_run',run)).resolve());policy=workspace/'retention_policy.json'
+            if workspace.name=='workspace' and policy.exists() and json.loads(policy.read_text(encoding='utf-8')).get('compact_historical_workspaces') is True:
+                from storage_cleanup import compact_storage
+                report['historical_cleanup']=compact_storage(workspace.parent,execute=True,include_derived=False)
+        except Exception as exc:report['historical_cleanup']={'status':'DEFERRED','reason':type(exc).__name__}
     return report
 
 def copy_project_assets(workspace,output,tex):

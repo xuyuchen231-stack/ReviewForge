@@ -56,6 +56,11 @@ resumes cleaning/condensation and independently builds both versions. Report unr
 samples, notation conflicts, actual page goal and visual-review status separately from compilation.
 Default to a timestamped bilingual PDF pair in `workspace/成果`, with editable sources and the
 cleaned full reference archived internally. Avoid per-page PNGs and duplicate reference PDFs.
+When quality-guarded retention is enabled, retire the previous complete pair only after an
+exact-source-bound new-versus-old comparison and current scientific, bilingual and visual checks.
+Newer timestamps and compiler success alone do not establish improvement. Keep the previous
+pair on uncertainty; preserve primary sources and resume caches, and archive verified historical
+workspace copies with deduplication before removing their expanded folders.
 Preserve original evidence and active checkpoints; archive/verify generated validation debris
 before any explicit-scope cleanup. Caption wording may change while scientific content stays protected.
 Use an integrated a–d framework with single-column companions when requested. Preserve author
