@@ -9,6 +9,31 @@ from test_study_registry import packet
 
 
 class CanonicalExtractionTests(unittest.TestCase):
+    def test_reported_unknown_is_metadata_not_a_positive_source_fact(self):
+        from canonical_extraction import normalize_card
+        from study_registry import empty_registry,ingest_card,study_view
+        card={'fields':{'domain':{'status':'reported','value':'unknown','evidence_ids':['s0']},'study_type':{'status':'reported','value':'unknown','evidence_ids':['s0']}}}
+        fixed,changes=normalize_card(card);r=empty_registry();ingest_card(r,packet(),fixed)
+        self.assertTrue(changes)
+        for name in ('domain','study_type'):
+            self.assertEqual(study_view(r,'A')['facts'][name]['status'],'unknown')
+            self.assertIsNone(fixed['fields'][name]['value'])
+
+    def test_semantic_rejection_repairs_only_failed_field_and_records_review(self):
+        review_calls=[];repair_calls=[]
+        def ask(system,payload,required,role):
+            if required=='fields' and 'repair_fields' in payload:
+                repair_calls.append(payload);return {'fields':{'sample_size':{'status':'reported','value':230,'evidence_ids':['s0']}}}
+            if required=='fields':return {'fields':{f:({'status':'reported','value':'240 batches','evidence_ids':['s0']} if f=='sample_size' else {'status':'unknown','value':None}) for f in FIELDS}}
+            review_calls.append(payload)
+            return {'facts':[{'fact_id':f['id'],'status':'fail' if len(review_calls)==1 else 'pass','reason':'Wrong batch count' if len(review_calls)==1 else 'Correct count in source.'} for f in payload['facts']]}
+        with tempfile.TemporaryDirectory() as d:
+            view=ensure_card(d,packet(),ask,lambda p:p)
+            self.assertEqual(view['facts']['sample_size']['value'],230)
+            self.assertEqual(len(review_calls),2);self.assertEqual(repair_calls[0]['repair_fields'],['sample_size'])
+            saved=json.loads(next((Path(d)/'canonical_cards').glob('*.draft.json')).read_text())
+            self.assertEqual(saved['review_history'][0]['review']['facts'][0]['status'],'fail')
+
     def test_quote_limit_prompt_update_reuses_previously_accepted_cards(self):
         import canonical_extraction as module
         old=module.EXTRACT.replace('Every reported field needs exact supplied evidence IDs. Prefer a few precise spans, but retain all distinct complementary spans needed for a compound field;', 'Every reported field needs exact supplied evidence IDs, preferably up to three and no more than eight complementary spans;')

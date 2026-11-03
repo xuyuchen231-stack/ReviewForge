@@ -26,6 +26,8 @@ def normalize_card(card):
     for field,cell in result.get('fields',{}).items():
         if not isinstance(cell,dict):continue
         before=copy.deepcopy(cell)
+        if cell.get('status')=='reported' and isinstance(cell.get('value'),str) and cell['value'].strip().lower()=='unknown':
+            cell.update(status='unknown',value=None,evidence_ids=[])
         if cell.get('status')=='not_inspected_material':cell['status']='not_in_inspected_material'
         if field in taxonomy and isinstance(cell.get('status'),str) and cell['status'] in taxonomy[field]:
             classification=cell['status'];value=cell.get('value')
@@ -91,12 +93,38 @@ def ensure_card(run,packet,ask,index_source):
             saved.setdefault('repairs',[]).append({'issues':issues,'response':correction});saved.update(normalized_card=card,normalizations=saved['normalizations']+edits);atomic_json(draft,saved)
             remaining=card_issues(indexed,card)
             if remaining:raise ValueError('Canonical fields still invalid after bounded repair: '+json.dumps(remaining,sort_keys=True))
-        temporary=empty_registry();ingest_card(temporary,indexed,card)
-        facts=[cell for cell in study_view(temporary,packet['citekey'])['facts'].values() if cell['status']=='reported']
-        review=ask(REVIEW,{'study':packet['citekey'],'facts':facts},'facts','reviewer') if facts else {'facts':[]}
-        record_fact_review(temporary,packet['citekey'],review,packet['source_sha256'])
-        if any(row['status']=='fail' for row in review['facts']):raise ValueError('Canonical fact review rejected an extraction')
-        atomic_json(cache,{'fingerprint':fingerprint,'card':card,'review':review,'normalizations':changes,'expert_verified':False})
+        def review_current(current):
+            temporary=empty_registry();ingest_card(temporary,indexed,current)
+            facts=[cell for cell in study_view(temporary,packet['citekey'])['facts'].values() if cell['status']=='reported']
+            binding=signature({'prompt':REVIEW,'facts':facts,'source_sha256':packet['source_sha256']})
+            pending=saved.get('pending_review',{});feedback=None
+            for attempt in range(2):
+                if attempt==0 and pending.get('binding')==binding:report=pending['review']
+                else:
+                    report=ask(REVIEW,{'study':packet['citekey'],'facts':facts,'schema_feedback':feedback},'facts','reviewer') if facts else {'facts':[]}
+                    saved.setdefault('review_history',[]).append({'binding':binding,'review':report})
+                saved['pending_review']={'binding':binding,'review':report};saved['stage']='semantic_review';atomic_json(draft,saved)
+                try:record_fact_review(temporary,packet['citekey'],report,packet['source_sha256'])
+                except ValueError as exc:
+                    feedback=str(exc)
+                    if attempt==1:raise
+                    continue
+                return report,{f['id']:f for f in facts}
+        review,byid=review_current(card)
+        rejected={byid[row['fact_id']]['field']:row['reason'] for row in review['facts'] if row['status']=='fail'}
+        if rejected:
+            print('[canonical] repairing '+str(len(rejected))+' source-rejected fields for '+packet['citekey']+'; other facts retained',flush=True)
+            correction=ask(REPAIR,repair_payload(indexed,card,rejected),'fields','writer')
+            if not isinstance(correction.get('fields'),dict) or set(correction['fields'])!=set(rejected):raise ValueError('Canonical semantic repair must cover exactly the rejected fields')
+            fixed,edits=normalize_card(correction);card['fields'].update(fixed['fields'])
+            saved.setdefault('semantic_repairs',[]).append({'rejected_fields':rejected,'response':correction})
+            saved.update(normalized_card=card,normalizations=saved['normalizations']+edits);atomic_json(draft,saved)
+            remaining=card_issues(indexed,card)
+            if remaining:raise ValueError('Canonical semantic repair has invalid source bindings: '+json.dumps(remaining,sort_keys=True))
+            review,byid=review_current(card)
+            rejected={byid[row['fact_id']]['field']:row['reason'] for row in review['facts'] if row['status']=='fail'}
+            if rejected:raise ValueError('Canonical fact review still rejected fields after bounded repair: '+json.dumps(rejected,sort_keys=True))
+        atomic_json(cache,{'fingerprint':fingerprint,'card':card,'review':review,'normalizations':saved['normalizations'],'semantic_repairs':saved.get('semantic_repairs',[]),'expert_verified':False})
     # Revalidate cache contents, and review only this extraction's immutable facts.
     # Prior positive observations remain visible as conflicts, never silently overwritten.
     temporary=empty_registry();ingest_card(temporary,indexed,card)
