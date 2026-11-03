@@ -43,6 +43,7 @@ class UnitWritingTests(unittest.TestCase):
  def test_invented_fact_id_is_never_cached_as_accepted(self):
   ask,review,calls=self.service()
   def bad(system,payload,required,role):
+   if required=='evidence_synthesis':return {'evidence_synthesis':[{'finding':'unsupported','citekeys':['A'],'fact_ids':['fake']}]}
    result=ask(system,payload,required,role)
    if required=='latex':result['evidence_synthesis'][0]['fact_ids']=['fake']
    return result
@@ -113,3 +114,32 @@ class UnitWritingTests(unittest.TestCase):
     return review(ask,payload,candidate,save,pending)
    write_units(ask,self.payload(),Path(d),'writer',verify,{'facts'},{'f1':('A',{})})
    self.assertEqual(reviewed,['u2']);self.assertEqual(calls.count(('latex','u2')),1)
+
+ def test_evidence_metadata_repair_preserves_body_and_runs_full_review(self):
+  ask,review,calls=self.service();reviewed=[]
+  def metadata(system,payload,required,role):
+   if required=='evidence_synthesis':return {'evidence_synthesis':[{'finding':'230 batches','citekeys':['A'],'fact_ids':['f1']}]}
+   result=ask(system,payload,required,role)
+   if required=='latex':result['evidence_synthesis'][0]['fact_ids']=[]
+   return result
+  def verify(ask,payload,candidate,save,pending=None):
+   reviewed.append(candidate['latex']);return review(ask,payload,candidate,save,pending)
+  with tempfile.TemporaryDirectory() as d:
+   result=write_units(metadata,self.payload(),Path(d),'writer',verify,{'facts'},{'f1':('A',{})})
+   self.assertEqual(calls.count(('latex','u1')),1)
+   self.assertEqual(len(reviewed),2)
+   self.assertTrue(all(text==r'Reported cohort evidence \cite{A}.' for text in reviewed))
+
+ def test_metadata_repair_is_bounded_once_per_unit_invocation(self):
+  ask,review,calls=self.service();patches=[]
+  def invalid(system,payload,required,role):
+   if required=='evidence_synthesis':
+    patches.append(1);return {'evidence_synthesis':[{'finding':'unsupported','citekeys':['A'],'fact_ids':[]}]}
+   result=ask(system,payload,required,role)
+   if required=='latex':result['evidence_synthesis'][0]['fact_ids']=[]
+   return result
+  with tempfile.TemporaryDirectory() as d:
+   for invocation in range(2):
+    before=len(patches)
+    with self.assertRaises(ValueError):write_units(invalid,self.payload(),Path(d),'writer',review,{'facts'},{'f1':('A',{})})
+    self.assertEqual(len(patches)-before,1)
