@@ -45,3 +45,21 @@ old conclusion's locally supplied pair of papers. For each takeaway retain the m
 evidence and its material boundary. A mathematical example earns its place by changing a modeling
 judgment, not by making the prose look rigorous. Keep physical balance terms, training objectives,
 constraints and numerical procedures conceptually distinct when editing terminology.
+
+## Executable paragraph review
+
+The major-revision runtime supplies immutable paragraph IDs to the existing independent section
+review. Every prose paragraph receives a primary function, actual message, contribution, placement
+and keep/revise/merge/move/delete decision. A section cannot pass with omitted paragraphs or with
+outstanding relocation/revision requests, even when high-level checks are all positive. Headings,
+equation-only blocks and figure/table-only blocks are not forced into prose templates.
+
+Accepted paragraph messages are passed to later sections to check whether a repeated claim now
+performs a different useful function. This is an internal audit, not text to insert into the paper.
+Requested relocations preserve the original wording and citation context in an internal log; the
+log does not constitute a submission-ready supplementary note or new research evidence.
+
+Candidates are checkpointed before review. A failed review request resumes with the same saved
+candidate; missing review fields trigger bounded reviewer-only recovery. Genuine content rejection
+goes back to the writer with paragraph-specific feedback. Do not equate this coverage with proof
+of scientific correctness or author approval.

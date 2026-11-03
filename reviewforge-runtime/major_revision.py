@@ -10,6 +10,7 @@ from reviewforge import atomic_json
 from study_registry import load_registry,signature,compact_facts,facts_for_studies,export_matrix,eligible_facts,facts_for_prose
 from scientific_quality import audit,review_manuscript
 from prose_quality import PROSE_CONTRACT,PROSE_REVIEW,prose_diagnostics
+from paragraph_review import CONTRACT as PARAGRAPH_CONTRACT,paragraph_options,validate_paragraph_review,preserve_relocations
 
 POLICY='evidence-first-major-revision-v1'
 SECTIONS=[
@@ -29,6 +30,7 @@ CONSTRAINT_ROLE_GUARD=' A physical formation, degradation or outflow term in a m
 WRITE=WRITE.replace('The word budget is a soft editing target, never a reason to cut essential evidence or truncate a sentence.', 'The word budget is a soft upper guide, not a quota. Finish earlier when the argument is complete; retain essential evidence without truncating a sentence.')+'\n'+PROSE_CONTRACT
 WRITE+=' In evidence_synthesis list only facts actually needed to support each finding; do not copy a study\'s entire inventory. Unknown fields are missingness metadata and provide no supporting fact IDs.'
 REVIEW=REVIEW.replace('"technical_contract_met":bool','"technical_contract_met":bool,"nonredundant_argument":bool,"concrete_language":bool,"each_paragraph_adds_information":bool')+'\n'+PROSE_REVIEW
+REVIEW+='\n'+PARAGRAPH_CONTRACT
 CHECKS+=('nonredundant_argument','concrete_language','each_paragraph_adds_information')
 
 
@@ -69,6 +71,20 @@ def prepare(source,run):
     return root
 
 
+def review_section(ask,payload,candidate,save,pending=None):
+    body=candidate['latex'];feedback=None
+    for attempt in range(2):
+        report=pending if attempt==0 and pending is not None else ask(REVIEW,{**payload,'candidate':candidate,'paragraph_options':paragraph_options(body),'prose_diagnostics':prose_diagnostics(body),'schema_feedback':feedback},'accepted','reviewer')
+        save(report)
+        try:
+            if not isinstance(report,dict) or type(report.get('accepted')) is not bool or not isinstance(report.get('issues'),list) or not isinstance(report.get('checks'),dict) or any(type(report['checks'].get(c)) is not bool for c in CHECKS):raise ValueError('Section review must include all declared checks and issue inventory')
+            changes=validate_paragraph_review(body,report)
+            return report,changes
+        except ValueError as exc:
+            feedback=str(exc)
+            if attempt==1:raise ValueError('Section reviewer schema incomplete after bounded repair: '+feedback) from exc
+
+
 def build(source,run,ask,global_repairs=1):
     root=prepare(source,run);original=(root/'original.tex').read_text(encoding='utf-8');old=sections(original)
     registry=load_registry(run);keys=citekeys(original)
@@ -85,16 +101,22 @@ def build(source,run,ask,global_repairs=1):
                  'section_ownership':'Definitions and physical guarantees: section 2. Empirical comparisons: section 3. Identifiability/history: section 4. Revision decisions: section 5. Validation protocol: section 6. Conclusions: section 7. Retain necessary local qualifications, but develop only the new evidence or inference here; refer back briefly instead of repeating another section.',
                  'canonical_studies':facts_for_prose(registry,relevant,established_fact_ids),'known_citekeys':sorted(keys),
                  'previous_section_summaries':[{'title':m['title'],'findings':m['findings']} for m in manifest]}
+        payload['previous_paragraph_messages']=[{'section':m['title'],**p} for m in manifest for p in m.get('paragraph_messages',[])]
         if number==7:payload['conclusion_scope']='Synthesize the evidence established across the preceding sections; original local source pairings do not define the whole field. Do not introduce a new case or re-explain the framework.'
         binding=signature([POLICY,WRITE,REVIEW,payload]);cache=root/(str(number)+'_'+binding+'.json')
         if cache.exists():
             record=json.loads(cache.read_text(encoding='utf-8'))
             if record.get('binding')!=binding:raise ValueError('Major revision cache identity mismatch')
+            if record.get('accepted') and record.get('candidate_sha256')!=signature(record.get('candidate')):raise ValueError('Accepted section candidate binding mismatch')
         else:record={'binding':binding,'accepted':False}
         if not record.get('accepted'):
             previous_attempts=record.get('attempt',0)
             for attempt in range(2):
-                candidate=ask(WRITE,{**payload,'repair_feedback':record.get('review',{}),'previous_candidate':record.get('candidate',{}).get('latex')},'latex','writer')
+                resumed=attempt==0 and record.get('stage')=='pending_review' and isinstance(record.get('candidate'),dict)
+                if resumed:
+                    candidate=record['candidate']
+                    if record.get('candidate_sha256')!=signature(candidate):raise ValueError('Pending section candidate binding mismatch')
+                else:candidate=ask(WRITE,{**payload,'repair_feedback':record.get('review',{}),'previous_candidate':record.get('candidate',{}).get('latex')},'latex','writer')
                 body=candidate['latex'];errors=[e for e in tex_integrity(body) if e.get('kind')!='unresolved_references']
                 if citekeys(body)-keys:errors.append('Unknown citation keys')
                 if len(sections(body))!=1:errors.append('Expected one complete section')
@@ -102,13 +124,25 @@ def build(source,run,ask,global_repairs=1):
                 for finding in candidate.get('evidence_synthesis',[]):
                     ids=finding.get('fact_ids',[]);refs=finding.get('citekeys',[])
                     if not finding.get('finding') or not ids or not refs or not set(refs)<=keys or any(i not in eligible or eligible[i][0] not in refs for i in ids):errors.append('Synthesis finding lacks matching reviewed study facts')
-                review=ask(REVIEW,{**payload,'candidate':candidate,'prose_diagnostics':prose_diagnostics(body)},'accepted','reviewer') if not errors else {'accepted':False,'issues':errors,'checks':{}}
-                accepted=review.get('accepted') is True and all(review.get('checks',{}).get(c) is True for c in CHECKS)
-                record={'binding':binding,'candidate':candidate,'review':review,'accepted':accepted,'attempt':previous_attempts+attempt+1,'expert_verified':False}
+                paragraph_changes=[]
+                if not errors:
+                    pending=record.get('review') if resumed else None
+                    record={'binding':binding,'candidate':candidate,'candidate_sha256':signature(candidate),'review':pending,'accepted':False,'stage':'pending_review','attempt':previous_attempts+attempt+1,'expert_verified':False}
+                    atomic_json(cache,record)
+                    def save_review(report):
+                        record['review']=report;atomic_json(cache,record)
+                    review,paragraph_changes=review_section(ask,payload,candidate,save_review,pending)
+                else:review={'accepted':False,'issues':errors,'checks':{}}
+                if paragraph_changes:
+                    preserve_relocations(root,body,paragraph_changes)
+                    review={**review,'paragraph_changes_required':paragraph_changes}
+                accepted=review.get('accepted') is True and all(review.get('checks',{}).get(c) is True for c in CHECKS) and not paragraph_changes
+                record={'binding':binding,'candidate':candidate,'candidate_sha256':signature(candidate),'review':review,'accepted':accepted,'stage':'reviewed','attempt':previous_attempts+attempt+1,'expert_verified':False}
                 atomic_json(cache,record)
                 if accepted:break
         if not record.get('accepted'):raise ValueError('Section '+str(number)+' needs scientific revision; accepted sections remain cached')
-        outputs.append(record['candidate']['latex']);section_records.append((cache,record));manifest.append({'title':title,'findings':record['candidate']['evidence_synthesis'],'changes':record['candidate'].get('removed_redundancy',[])})
+        messages=[{k:p[k] for k in ('paragraph_id','function','message')} for p in record['review'].get('paragraph_review',[])]
+        outputs.append(record['candidate']['latex']);section_records.append((cache,record));manifest.append({'title':title,'findings':record['candidate']['evidence_synthesis'],'changes':record['candidate'].get('removed_redundancy',[]),'paragraph_messages':messages})
         atomic_json(root/'progress.json',{'stage':'reconstruction','sections_completed':number,'sections_total':7,'expert_verified':False})
     first=original.index(old[1])
     # Determine the suffix from the last mapped section rather than character sums across removed whitespace.
@@ -127,6 +161,7 @@ def build(source,run,ask,global_repairs=1):
     supplement=root/'supplement';supplement.mkdir(exist_ok=True)
     for name in ('study_evidence_matrix.json','study_evidence_matrix.csv','study_comparison_wide.csv'):
         shutil.copyfile(Path(run)/'reports'/name,supplement/name)
+    if (root/'paragraph_relocations.json').exists():shutil.copyfile(root/'paragraph_relocations.json',supplement/'editorial_relocation_log.json')
     quality=review_manuscript(candidate,registry,ask,root/'scientific_review')
     # Editorial density is a real gate, but never forcibly truncate a scientific paragraph.
     quality['structure_issues']=[]

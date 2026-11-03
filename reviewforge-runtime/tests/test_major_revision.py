@@ -2,18 +2,47 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
-from major_revision import build,prepare,sections,CHECKS,provider_request,delivery_chat
+from major_revision import build,prepare,sections,CHECKS,provider_request,delivery_chat,review_section
 from reviewforge import atomic_json
 from test_scientific_quality import registry,verdict
+from paragraph_review import paragraph_options
+from test_paragraph_review import keep
 
 
 class MajorRevisionTests(unittest.TestCase):
+    def test_missing_paragraph_map_repairs_reviewer_only(self):
+        candidate={'latex':r'\section{Scope} The held-out batch comparison establishes the scope of the reported forecast \cite{A}.'};calls=[];saved=[]
+        def ask(system,payload,required,role):
+            calls.append(role);result={'accepted':True,'issues':[],'checks':{c:True for c in CHECKS}}
+            if len(calls)>1:result.update(keep(paragraph_options(candidate['latex'])))
+            return result
+        result,changes=review_section(ask,{},candidate,saved.append)
+        self.assertEqual(calls,['reviewer','reviewer']);self.assertEqual(len(saved),2)
+        self.assertFalse(changes);self.assertTrue(result['accepted'])
+
+    def test_network_failure_during_review_resumes_without_regenerating_section(self):
+        r,fid=registry();fail=[True];writers=[]
+        def ask(system,payload,required,role):
+            if required=='latex':
+                writers.append(payload['title']);return {'latex':'\\section{'+payload['title']+'}\nThe reported cohort contains 230 batches and defines the scope of this comparison \\cite{A}.','evidence_synthesis':[{'finding':'The cohort has 230 batches.','citekeys':['A'],'fact_ids':[fid]}]}
+            if required=='accepted':
+                if fail[0]:raise TimeoutError('Simulated reviewer network failure')
+                return {'accepted':True,'issues':[],'checks':{c:True for c in CHECKS},**keep(paragraph_options(payload['candidate']['latex']))}
+            if required=='examined_passage_ids':return {'examined_passage_ids':[p['id'] for p in payload['passages']],'status':'pass','reason':'Consistent cohort descriptions.','conflicts':[]}
+            return verdict(payload['passages'],fid)
+        with tempfile.TemporaryDirectory() as d:
+            run=Path(d);source=run/'source.tex';source.write_text('\\begin{document}\n'+'\n'.join('\\section{Old '+str(i)+'} Original reported cohort evidence \\cite{A}.' for i in range(13))+'\n\\end{document}');atomic_json(run/'study_registry.json',r)
+            with self.assertRaises(TimeoutError):build(source,run,ask)
+            self.assertEqual(len(writers),1)
+            fail[0]=False;result=build(source,run,ask)
+            self.assertEqual(result['status'],'PROVISIONAL_MODEL_PASS');self.assertEqual(len(writers),7)
+
     def test_filler_review_failure_blocks_even_when_other_checks_pass(self):
         r,fid=registry()
         def ask(system,payload,required,role):
             if required=='latex':return {'latex':r'\section{Argument} '+('This abstract principle merits careful consideration in the broader methodological landscape. '*35)+r'\cite{A}', 'evidence_synthesis':[{'finding':'Cohort count reported.','citekeys':['A'],'fact_ids':[fid]}]}
             checks={c:True for c in CHECKS};checks['nonredundant_argument']=False
-            return {'accepted':True,'checks':checks,'issues':['Repeated sentences add no comparison or result.']}
+            return {'accepted':True,'checks':checks,'issues':['Repeated sentences add no comparison or result.'],**keep(paragraph_options(payload['candidate']['latex']))}
         with tempfile.TemporaryDirectory() as d:
             run=Path(d);source=run/'source.tex';source.write_text('\n'.join('\\section{Old '+str(i)+'} original source evidence \\cite{A}.' for i in range(13)))
             atomic_json(run/'study_registry.json',r)
@@ -69,7 +98,7 @@ class MajorRevisionTests(unittest.TestCase):
             if required=='latex':
                 prose=' '.join('Specific comparative evidence informs the stated modeling decision and its practical interpretation.' for _ in range(30))
                 return {'latex':'\\section{'+payload['title']+'}\n'+prose+r' \cite{A}.','evidence_synthesis':[{'finding':'The source cohort count is explicit.','citekeys':['A'],'fact_ids':[fid]}],'removed_redundancy':['Repeated general warnings.']}
-            if required=='accepted':return {'accepted':allow[0],'issues':[] if allow[0] else ['Need substantive synthesis.'],'checks':{c:allow[0] for c in CHECKS}}
+            if required=='accepted':return {'accepted':allow[0],'issues':[] if allow[0] else ['Need substantive synthesis.'],'checks':{c:allow[0] for c in CHECKS},**keep(paragraph_options(payload['candidate']['latex']))}
             if required=='examined_passage_ids':return {'examined_passage_ids':[p['id'] for p in payload['passages']],'status':'pass','reason':'Consistent facts across sections.','conflicts':[]}
             return verdict(payload['passages'],fid)
         with tempfile.TemporaryDirectory() as d:

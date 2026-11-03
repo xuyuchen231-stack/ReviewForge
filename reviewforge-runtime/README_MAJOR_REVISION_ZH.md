@@ -20,3 +20,7 @@ cd "D:\拓展和skill\ReviewForge-repo\reviewforge-runtime"
 内部记录位于当前运行的 `study_registry.json`、`reports/study_evidence_matrix.json`、`reports/study_comparison_wide.csv`、`major_revision/<版本>/progress.json`、`status.json` 和 `delivery_report.json`。最终成功导出的中英PDF仍通过原来的保留机制发布到 `workspace/成果`。
 
 `PREPARED_ONLY` 仅表示计划已准备；`PROVISIONAL_MODEL_PASS` 仅表示本次模型审查通过；`NEEDS_REVISION` 表示还有问题。它们都不代表专家认可或达到投稿标准。当前已核实的三项核心案例不等于全部参考文献都核实完成。
+
+每节审稿还会逐段登记职责、主要意思、新增内容和去向。若某段应改写、合并或移至证据表/补充材料，该节会继续修订，不会仅凭高层检查通过就接受。后续章节会看到前文已确认的段落意思，以检查重复。移走请求的原文保存在内部 `paragraph_relocations.json`；它不是正式补充材料，不能据此在论文中声称已提供某个补充说明。
+
+正文生成后会先保存 `pending_review` 检查点。若审稿请求断网，下次从原候选稿继续审稿，不重新生成整节。审稿漏填段落映射时只补审稿；真正内容问题才交回写作修复。
