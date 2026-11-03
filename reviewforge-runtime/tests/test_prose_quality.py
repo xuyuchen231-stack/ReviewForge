@@ -3,6 +3,20 @@ from prose_quality import prose_diagnostics
 
 
 class ProseQualityTests(unittest.TestCase):
+    def test_scoped_context_does_not_call_known_omitted_fields_unknown(self):
+        from study_registry import empty_registry,ingest_card,study_view,record_fact_review,facts_for_prose
+        from test_study_registry import packet
+        r=empty_registry();ingest_card(r,packet(),{'fields':{'domain':{'status':'reported','value':'microbial_fermentation','evidence_ids':['s0']},'sample_size':{'status':'reported','value':230,'evidence_ids':['s0']},'hardware':{'status':'reported','value':'workstation','evidence_ids':['s0']}}})
+        cells=study_view(r,'A')['facts'];record_fact_review(r,'A',{'facts':[{'fact_id':c['id'],'status':'pass','reason':'Test source-bound context.'} for c in cells.values()]})
+        view=facts_for_prose(r,{'A'},{cells['sample_size']['id']})[0]
+        self.assertIn('domain',view['facts']);self.assertNotIn('hardware',view['unknown_fields'])
+        self.assertIn('hardware',view['unselected_known_fields']);self.assertNotIn('hardware',view['facts'])
+
+    def test_conclusion_evidence_comes_from_the_whole_new_argument_not_old_local_pair(self):
+        from major_revision import writing_evidence_scope
+        keys,ids=writing_evidence_scope(7,r'Old local comparison \cite{B,C}.',[{'findings':[{'citekeys':['A','D'],'fact_ids':['factA','factD']}]}])
+        self.assertEqual(keys,{'A','D'});self.assertEqual(ids,{'factA','factD'})
+
     def test_writing_context_excludes_unknown_fact_ids_and_reviewer_boilerplate(self):
         from study_registry import empty_registry,ingest_card,study_view,record_fact_review,facts_for_prose
         from test_study_registry import packet

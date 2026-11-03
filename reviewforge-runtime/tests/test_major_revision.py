@@ -18,6 +18,8 @@ class MajorRevisionTests(unittest.TestCase):
             run=Path(d);source=run/'source.tex';source.write_text('\n'.join('\\section{Old '+str(i)+'} original source evidence \\cite{A}.' for i in range(13)))
             atomic_json(run/'study_registry.json',r)
             with self.assertRaisesRegex(ValueError,'Section 1 needs'):build(source,run,ask)
+            root=prepare(source,run)
+            self.assertEqual(json.loads((root/'progress.json').read_text())['stage'],'reconstruction')
 
     def test_validation_failure_preserves_safe_reason_and_location(self):
         from major_revision import failure_record

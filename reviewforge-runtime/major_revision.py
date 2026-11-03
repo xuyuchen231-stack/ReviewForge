@@ -25,6 +25,7 @@ WRITE='''Reconstruct ONE full LaTeX section of a scientific narrative review fro
 Write developed comparative scientific prose, with specific reported methods, experimental designs and quantitative results where supported. Explain differences and implications, not a chain of access disclaimers. Missing access belongs in the matrix, not repetitive main-text boilerplate; retain qualifications that change a conclusion. Do not invent results/curves, sources, mechanisms or novelty. Canonical facts override older manuscript allegations. Preserve useful analytical examples and exact mathematics unless the technical contract explicitly requests a correction; document corrections. Use only known citation keys. No document wrapper, bibliography or new figures. Use the given section heading. The word budget is a soft editing target, never a reason to cut essential evidence or truncate a sentence. Adjacent-domain examples cannot substitute for direct microbial conclusions. Include a substantive explanation for each synthesis finding, not just a citation list.'''
 REVIEW='''Independently evaluate this proposed major-revision section against the original material, canonical study facts and section contract. Return JSON {"accepted":bool,"issues":[str],"checks":{"facts_consistent":bool,"analytical_examples_preserved_or_corrected":bool,"substantive_synthesis":bool,"scope_separated":bool,"no_repeated_access_boilerplate":bool,"technical_contract_met":bool}}. Verify exact data roles, results, prediction-time information, timing scope and full-text versus selective access. Reject a prose summary that removes scientific substance or keeps conflicting legacy allegations. Review is provisional, not expert approval.'''
 CHECKS=('facts_consistent','analytical_examples_preserved_or_corrected','substantive_synthesis','scope_separated','no_repeated_access_boilerplate','technical_contract_met')
+CONSTRAINT_ROLE_GUARD=' A physical formation, degradation or outflow term in a material balance is not a training-loss penalty. An estimated degradation coefficient does not turn that physical rate into a soft constraint. Also distinguish a rate law\'s limiting behaviour from convergence of a parameter estimator.'
 WRITE=WRITE.replace('The word budget is a soft editing target, never a reason to cut essential evidence or truncate a sentence.', 'The word budget is a soft upper guide, not a quota. Finish earlier when the argument is complete; retain essential evidence without truncating a sentence.')+'\n'+PROSE_CONTRACT
 WRITE+=' In evidence_synthesis list only facts actually needed to support each finding; do not copy a study\'s entire inventory. Unknown fields are missingness metadata and provide no supporting fact IDs.'
 REVIEW=REVIEW.replace('"technical_contract_met":bool','"technical_contract_met":bool,"nonredundant_argument":bool,"concrete_language":bool,"each_paragraph_adds_information":bool')+'\n'+PROSE_REVIEW
@@ -42,9 +43,16 @@ def sections(text):
 
 def section_technical_contract(number):
     marker='Structural stoichiometric constraints'
-    if number==2:return marker+TECHNICAL.split(marker,1)[1]
+    if number==2:return marker+TECHNICAL.split(marker,1)[1]+CONSTRAINT_ROLE_GUARD
     if number==4:return TECHNICAL.split(marker,1)[0]+'Keep symbols scoped and use symbolic equation references.'
     return 'Use consistent notation and symbolic equation references. Apply a technical distinction when it materially affects this section; do not recap or rederive the other sections.'
+
+
+def writing_evidence_scope(number,material,manifest):
+    if number==7:
+        findings=[finding for section in manifest for finding in section['findings']]
+        return {key for f in findings for key in f.get('citekeys',[])},{i for f in findings for i in f.get('fact_ids',[])}
+    return citekeys(material),None
 
 
 def prepare(source,run):
@@ -71,11 +79,13 @@ def build(source,run,ask,global_repairs=1):
     outputs=[];manifest=[];section_records=[]
     eligible=eligible_facts(registry)
     for number,(title,indices,budget,contract) in enumerate(SECTIONS,1):
-        material='\n'.join(old.get(i,'') for i in indices);relevant=citekeys(material)
+        atomic_json(root/'progress.json',{'stage':'reconstruction','sections_completed':number-1,'sections_total':7,'section':title,'expert_verified':False})
+        material='\n'.join(old.get(i,'') for i in indices);relevant,established_fact_ids=writing_evidence_scope(number,material,manifest)
         payload={'title':title,'section_contract':contract,'technical_contract':section_technical_contract(number),'word_budget':budget,'original_material':material,
                  'section_ownership':'Definitions and physical guarantees: section 2. Empirical comparisons: section 3. Identifiability/history: section 4. Revision decisions: section 5. Validation protocol: section 6. Conclusions: section 7. Retain necessary local qualifications, but develop only the new evidence or inference here; refer back briefly instead of repeating another section.',
-                 'canonical_studies':facts_for_prose(registry,relevant),'known_citekeys':sorted(keys),
+                 'canonical_studies':facts_for_prose(registry,relevant,established_fact_ids),'known_citekeys':sorted(keys),
                  'previous_section_summaries':[{'title':m['title'],'findings':m['findings']} for m in manifest]}
+        if number==7:payload['conclusion_scope']='Synthesize the evidence established across the preceding sections; original local source pairings do not define the whole field. Do not introduce a new case or re-explain the framework.'
         binding=signature([POLICY,WRITE,REVIEW,payload]);cache=root/(str(number)+'_'+binding+'.json')
         if cache.exists():
             record=json.loads(cache.read_text(encoding='utf-8'))

@@ -24,3 +24,24 @@ and paragraph information gain; no extra stylistic model loop is needed. Similar
 identify exact repeated propositions, similar prose with unchanged numerical context and repeated
 meta-commentary. They are advisory: a reviewer must examine their actual context before editing.
 No diagnostics automatically delete source content, equations, or different quantitative results.
+
+## Findings from the manuscript audit
+
+Borrow the main-text discipline and reverse-outline checks from `nature-writing`, and the
+fact-preserving editing constraints from `humanizer-zh`. Use rhythm-refinement advice only after
+argument structure is sound; do not impose random sentence lengths or a word blacklist.
+
+Before accepting a section, write its paragraph messages internally and inspect their sequence.
+For a repeated claim, identify whether each appearance introduces, demonstrates, interprets or
+synthesizes it. A changed example without a changed inference may still be redundant. Every
+new technical qualification requires a placement decision and a deletion check elsewhere.
+
+Keep central evidence and conclusion-changing limitations in the main text. Move traceability
+detail, repeated access bookkeeping and extended reconciliation to the matrix or supplement.
+Do not explain an explanation unless that reasoning is itself necessary to the central argument.
+
+Write the conclusion from the established findings of the whole new manuscript, not from the
+old conclusion's locally supplied pair of papers. For each takeaway retain the minimum decisive
+evidence and its material boundary. A mathematical example earns its place by changing a modeling
+judgment, not by making the prose look rigorous. Keep physical balance terms, training objectives,
+constraints and numerical procedures conceptually distinct when editing terminology.
