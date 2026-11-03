@@ -148,6 +148,7 @@ def write_units(ask, payload, root, write_contract, review, checks, eligible, re
         if not repair_ids or repair_ids-{u['id'] for u in units}:
             raise ValueError('Invalid cached scoped unit repair decision')
     completed = []
+    deferred = []
     for unit in units:
         unit_id = unit['id']
         path = folder/(unit_id+'.json')
@@ -168,6 +169,11 @@ def write_units(ask, payload, root, write_contract, review, checks, eligible, re
                  'argument_outline': [{'id': u['id'], 'heading': u['heading']} for u in units],
                  'completed_unit_findings': [c['candidate']['evidence_synthesis'] for c in completed]}
         context_hash = signature(local['completed_unit_findings'])
+        budget_file=folder/(unit_id+'.budget.json')
+        budget_epoch=signature([context_hash,feedback_hash])
+        budget=json.loads(budget_file.read_text(encoding='utf-8')) if budget_file.exists() else {}
+        if budget.get('epoch')!=budget_epoch:
+            budget={'epoch':budget_epoch,'full_writes':0,'paragraph_patches':0}
         if record and record.get('context_sha256') != context_hash:
             # A saved pending report is also stale after an upstream repair.
             # Preserve the draft, never accept an old-context report, and keep
@@ -182,7 +188,8 @@ def write_units(ask, payload, root, write_contract, review, checks, eligible, re
         print('[major-revision] unit='+unit_id+'; completed='+str(len(completed))+'/'+str(len(units)), flush=True)
         if not record.get('accepted'):
             metadata_attempted = False
-            for attempt in range(2):
+            full_writes = 0
+            for attempt in range(4):
                 if attempt == 0 and record.get('stage') == 'invalid':
                     errors = candidate_errors(record['candidate'],refs,eligible,unit.get('kind','empirical'))
                     if errors and all(isinstance(e,str) and e.startswith('Invalid unit synthesis fact binding:') for e in errors):
@@ -194,13 +201,34 @@ def write_units(ask, payload, root, write_contract, review, checks, eligible, re
                         atomic_json(path,record)
                 pending = record.get('stage') == 'pending_review'
                 if not pending:
+                    candidate = None
+                    if record.get('candidate') and isinstance(record.get('review'),dict):
+                        from local_paragraph_repair import repair_paragraphs,LocalPatchRejected
+                        def patch_ask(*args):
+                            if budget['paragraph_patches']>=6:
+                                raise LocalPatchRejected('Cumulative paragraph patch budget exhausted')
+                            budget['paragraph_patches']+=1
+                            atomic_json(budget_file,budget)
+                            return ask(*args)
+                        try:
+                            candidate = repair_paragraphs(patch_ask,record['candidate'],record['review'],local)
+                        except LocalPatchRejected:
+                            # Invalid/overbroad patches do not bypass review;
+                            # use the bounded full-unit rewrite instead.
+                            pass
+                    if candidate is None and (full_writes >= 2 or budget['full_writes']>=4):
+                        break
                     contract = write_contract.replace('Reconstruct ONE full LaTeX section', 'Reconstruct ONE complete argument unit')
                     contract = contract.replace('Use the given section heading.', '')
                     contract += '\nReturn body prose ONLY: no section/subsection headings. Follow unit_heading and develop only this unit; other outline units cover their own topics. No minimum length. Keep complete mathematics. Findings use only supplied fact IDs.'
                     if unit.get('kind') == 'analytical':
                         contract += ' This is a pure analytical unit: evidence_synthesis may be empty. Identify retained reasoning in retained_analytical_examples; do not add unrelated empirical citations. Independent review must verify original mathematics and necessary qualifications.'
-                    candidate = ask(contract, {**local, 'repair_feedback': feedback if feedback_hash else record.get('review', {}),
-                                               'previous_candidate': record.get('candidate', {}).get('latex')}, 'latex', 'writer')
+                    if candidate is None:
+                        full_writes += 1
+                        budget['full_writes']+=1
+                        atomic_json(budget_file,budget)
+                        candidate = ask(contract, {**local, 'repair_feedback': feedback if feedback_hash else record.get('review', {}),
+                                                   'previous_candidate': record.get('candidate', {}).get('latex')}, 'latex', 'writer')
                     errors = candidate_errors(candidate, refs, eligible, unit.get('kind', 'empirical'))
                     record = {'candidate': candidate, 'candidate_sha256': signature(candidate), 'accepted': False,
                               'stage': 'invalid' if errors else 'pending_review', 'repair_binding': feedback_hash,
@@ -233,8 +261,14 @@ def write_units(ask, payload, root, write_contract, review, checks, eligible, re
                 if record['accepted']:
                     break
             if not record.get('accepted'):
-                raise ValueError('Argument unit '+unit_id+' requires revision; completed units remain cached')
+                deferred.append(unit_id)
+                print('[major-revision] deferred unit='+unit_id+'; continue other units; scientific approval still required',flush=True)
+                continue
         completed.append(record)
+    if deferred:
+        from pipeline_recovery import UnitRevisionsPending
+        atomic_json(folder/'progress.json',{'stage':'units_need_revision','completed':len(completed),'total':len(units),'unresolved_units':deferred})
+        raise UnitRevisionsPending('Argument units '+','.join(deferred)+' require revision; other units saved, no section approval claimed')
     result = {'latex': '\\section{'+payload['title']+'}\n'+ '\n\n'.join(
         '\\subsection{'+unit['heading']+'}\n'+record['candidate']['latex'] for unit, record in zip(units, completed)),
         '_argument_units': units}

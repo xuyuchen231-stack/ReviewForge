@@ -142,4 +142,68 @@ class UnitWritingTests(unittest.TestCase):
    for invocation in range(2):
     before=len(patches)
     with self.assertRaises(ValueError):write_units(invalid,self.payload(),Path(d),'writer',review,{'facts'},{'f1':('A',{})})
-    self.assertEqual(len(patches)-before,1)
+    self.assertEqual(len(patches)-before,2)  # one repair for each of the two deferred units
+
+ def test_failed_unit_defers_without_blocking_other_unit(self):
+  from pipeline_recovery import UnitRevisionsPending
+  import json
+  ask,review,calls=self.service()
+  def reject_first(ask,payload,candidate,save,pending=None):
+   if payload['unit_id']=='u1':
+    report={'accepted':False,'checks':{'facts':False},'issues':['Needs evidence'],'paragraph_review':[]};save(report);return report,[]
+   return review(ask,payload,candidate,save,pending)
+  with tempfile.TemporaryDirectory() as d:
+   with self.assertRaises(UnitRevisionsPending):write_units(ask,self.payload(),Path(d),'writer',reject_first,{'facts'},{'f1':('A',{})})
+   folder=next((Path(d)/'argument_units').iterdir())
+   self.assertTrue(json.loads((folder/'u2.json').read_text())['accepted'])
+   self.assertFalse(json.loads((folder/'u1.json').read_text())['accepted'])
+   write_units(ask,self.payload(),Path(d),'writer',review,{'facts'},{'f1':('A',{})})
+   self.assertEqual(calls.count(('latex','u2')),1)
+
+ def test_small_review_fix_uses_patch_not_whole_unit_writer(self):
+  ask,review,calls=self.service();patches=[];reviewed=[]
+  def patching(system,payload,required,role):
+   if required=='replacements':
+    patches.append(1);row=payload['paragraphs'][0]
+    return {'replacements':[{'paragraph_id':row['paragraph_id'],'latex':row['original'].replace(' Repeated text.','')}]}
+   result=ask(system,payload,required,role)
+   if required=='latex':result['latex']+= ' Repeated text.'
+   return result
+  def checking(ask,payload,candidate,save,pending=None):
+   reviewed.append(payload['unit_id'])
+   result={'accepted':True,'checks':{'facts':True},'issues':[],**keep(paragraph_options(candidate['latex']))}
+   if payload['unit_id']=='u1' and 'Repeated text.' in candidate['latex']:
+    result['accepted']=False;result['paragraph_review'][0].update(decision='revise',reason='Remove Repeated text.')
+    changes=[result['paragraph_review'][0]]
+   else:changes=[]
+   save(result);return result,changes
+  with tempfile.TemporaryDirectory() as d:
+   write_units(patching,self.payload(),Path(d),'writer',checking,{'facts'},{'f1':('A',{})})
+   self.assertEqual(calls.count(('latex','u1')),1);self.assertEqual(len(patches),1);self.assertEqual(reviewed.count('u1'),2)
+
+ def test_patch_api_failure_does_not_trigger_full_unit_rewrite(self):
+  import json
+  for failure in [ValueError('Editorial response truncated'),json.JSONDecodeError('bad JSON','x',0)]:
+   ask,review,calls=self.service()
+   def broken(system,payload,required,role):
+    if required=='replacements':raise failure
+    return ask(system,payload,required,role)
+   def needs_edit(ask,payload,candidate,save,pending=None):
+    result={'accepted':False,'checks':{'facts':True},'issues':['Trim'],**keep(paragraph_options(candidate['latex']))}
+    result['paragraph_review'][0].update(decision='revise',reason='Trim');save(result)
+    return result,[result['paragraph_review'][0]]
+   with tempfile.TemporaryDirectory() as d:
+    with self.assertRaises(type(failure)):write_units(broken,self.payload(),Path(d),'writer',needs_edit,{'facts'},{'f1':('A',{})})
+    self.assertEqual(calls.count(('latex','u1')),1)
+ def test_full_write_budget_survives_process_recovery(self):
+  from pipeline_recovery import UnitRevisionsPending
+  ask,review,calls=self.service()
+  def reject_first(ask,payload,candidate,save,pending=None):
+   if payload['unit_id']=='u1':
+    report={'accepted':False,'checks':{'facts':False},'issues':['Needs evidence'],'paragraph_review':[]};save(report);return report,[]
+   return review(ask,payload,candidate,save,pending)
+  with tempfile.TemporaryDirectory() as d:
+   for invocation in range(3):
+    with self.assertRaises(UnitRevisionsPending):write_units(ask,self.payload(),Path(d),'writer',reject_first,{'facts'},{'f1':('A',{})})
+   self.assertEqual(calls.count(('latex','u1')),4)
+   self.assertEqual(calls.count(('latex','u2')),1)

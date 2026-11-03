@@ -263,8 +263,11 @@ def failure_record(exc,root,progress=None):
     if site:
         filename=Path(site.filename).name
         report['error_site']={'file':filename,'line':site.lineno,'function':site.name}
-        if type(exc) is ValueError and filename in {'canonical_extraction.py','study_registry.py','scientific_quality.py','major_revision.py'}:
+        if type(exc) is ValueError and filename in {'canonical_extraction.py','study_registry.py','scientific_quality.py','major_revision.py','bounded_writing.py','pipeline_recovery.py'}:
             report['reason']=str(exc)[:500];report['request_failure']['category']='validation_failure'
+    from pipeline_recovery import UnitRevisionsPending
+    if isinstance(exc,UnitRevisionsPending):
+        report['reason']=str(exc)[:500];report['request_failure']['category']='scientific_revision_required'
     return report
 
 
@@ -307,7 +310,15 @@ def main():
             packet=source_packet(ws,run,entries[key],QUERY,max_chars=100000,complete=True)
             ensure_card(run,packet,ask,indexed_source)
         export_matrix(run,load_registry(run))
-        result={'status':'FACTS_RECORDED','expert_verified':False} if args.command=='facts' else export_candidate(build(args.source,run,ask),args.source,run,ask)
+        if args.command=='facts':
+            result={'status':'FACTS_RECORDED','expert_verified':False}
+        else:
+            from pipeline_recovery import run_with_recovery
+            from editorial_refinement import request_failure
+            def resumed_stages():return export_candidate(build(args.source,run,ask),args.source,run,ask)
+            def recovery_note(exc,attempt):
+                atomic_json(root/'recovery.json',{'status':'RECOVERING','attempt':attempt,'error_type':type(exc).__name__,'stage':'reconstruction_or_export','expert_verified':False})
+            result=run_with_recovery(resumed_stages,request_failure,recovery_note)
         print(json.dumps(result,ensure_ascii=True))
     except Exception as exc:
         progress=json.loads((root/'progress.json').read_text(encoding='utf-8')) if (root/'progress.json').exists() else {}

@@ -236,3 +236,16 @@ upstream findings invalidate pending reports as well as accepted reviews. Scoped
 repairs keep unaffected units. Never append truncated JSON/TeX or treat a nonstream
 wait heartbeat as evidence of continuous output. Do not restart an active run merely
 to deploy this change. Existing completion-mail-shutdown authorization remains intact.
+
+
+### Local repair and bounded recovery
+Prefer source-ID paragraph patches for up to three in-place revisions, preserving
+unaffected text, exact mathematics, numbers and existing citations. Independently
+review the entire patched unit. API/JSON errors propagate to checkpoint recovery;
+only deterministic LocalPatchRejected triggers full-unit fallback. Defer failed
+units while processing others; never assemble before all pass. Persist cumulative
+per-context limits (four full drafts, six paragraph patches) across restarts.
+Use bounded same-process recovery for transient failures/deferred unit passes,
+without rerunning fact extraction or bypassing scientific rejection. Respect long
+quota cooldowns. Completion-email-shutdown remains conditional on verified new
+bilingual delivery and confirmed send.
