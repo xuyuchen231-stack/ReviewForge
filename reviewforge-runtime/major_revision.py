@@ -7,8 +7,9 @@ import threading
 from pathlib import Path
 from manuscript_integrity import citekeys,tex_integrity
 from reviewforge import atomic_json
-from study_registry import load_registry,signature,compact_facts,facts_for_studies,export_matrix,eligible_facts
+from study_registry import load_registry,signature,compact_facts,facts_for_studies,export_matrix,eligible_facts,facts_for_prose
 from scientific_quality import audit,review_manuscript
+from prose_quality import PROSE_CONTRACT,PROSE_REVIEW,prose_diagnostics
 
 POLICY='evidence-first-major-revision-v1'
 SECTIONS=[
@@ -24,6 +25,10 @@ WRITE='''Reconstruct ONE full LaTeX section of a scientific narrative review fro
 Write developed comparative scientific prose, with specific reported methods, experimental designs and quantitative results where supported. Explain differences and implications, not a chain of access disclaimers. Missing access belongs in the matrix, not repetitive main-text boilerplate; retain qualifications that change a conclusion. Do not invent results/curves, sources, mechanisms or novelty. Canonical facts override older manuscript allegations. Preserve useful analytical examples and exact mathematics unless the technical contract explicitly requests a correction; document corrections. Use only known citation keys. No document wrapper, bibliography or new figures. Use the given section heading. The word budget is a soft editing target, never a reason to cut essential evidence or truncate a sentence. Adjacent-domain examples cannot substitute for direct microbial conclusions. Include a substantive explanation for each synthesis finding, not just a citation list.'''
 REVIEW='''Independently evaluate this proposed major-revision section against the original material, canonical study facts and section contract. Return JSON {"accepted":bool,"issues":[str],"checks":{"facts_consistent":bool,"analytical_examples_preserved_or_corrected":bool,"substantive_synthesis":bool,"scope_separated":bool,"no_repeated_access_boilerplate":bool,"technical_contract_met":bool}}. Verify exact data roles, results, prediction-time information, timing scope and full-text versus selective access. Reject a prose summary that removes scientific substance or keeps conflicting legacy allegations. Review is provisional, not expert approval.'''
 CHECKS=('facts_consistent','analytical_examples_preserved_or_corrected','substantive_synthesis','scope_separated','no_repeated_access_boilerplate','technical_contract_met')
+WRITE=WRITE.replace('The word budget is a soft editing target, never a reason to cut essential evidence or truncate a sentence.', 'The word budget is a soft upper guide, not a quota. Finish earlier when the argument is complete; retain essential evidence without truncating a sentence.')+'\n'+PROSE_CONTRACT
+WRITE+=' In evidence_synthesis list only facts actually needed to support each finding; do not copy a study\'s entire inventory. Unknown fields are missingness metadata and provide no supporting fact IDs.'
+REVIEW=REVIEW.replace('"technical_contract_met":bool','"technical_contract_met":bool,"nonredundant_argument":bool,"concrete_language":bool,"each_paragraph_adds_information":bool')+'\n'+PROSE_REVIEW
+CHECKS+=('nonredundant_argument','concrete_language','each_paragraph_adds_information')
 
 
 def sections(text):
@@ -33,6 +38,13 @@ def sections(text):
         end=hits[n].start() if n<len(hits) else hit.start()+tail.start() if tail else len(text)
         result[n]=text[hit.start():end]
     return result
+
+
+def section_technical_contract(number):
+    marker='Structural stoichiometric constraints'
+    if number==2:return marker+TECHNICAL.split(marker,1)[1]
+    if number==4:return TECHNICAL.split(marker,1)[0]+'Keep symbols scoped and use symbolic equation references.'
+    return 'Use consistent notation and symbolic equation references. Apply a technical distinction when it materially affects this section; do not recap or rederive the other sections.'
 
 
 def prepare(source,run):
@@ -60,8 +72,9 @@ def build(source,run,ask,global_repairs=1):
     eligible=eligible_facts(registry)
     for number,(title,indices,budget,contract) in enumerate(SECTIONS,1):
         material='\n'.join(old.get(i,'') for i in indices);relevant=citekeys(material)
-        payload={'title':title,'section_contract':contract,'technical_contract':TECHNICAL,'word_budget':budget,'original_material':material,
-                 'canonical_studies':facts_for_studies(registry,relevant),'known_citekeys':sorted(keys),
+        payload={'title':title,'section_contract':contract,'technical_contract':section_technical_contract(number),'word_budget':budget,'original_material':material,
+                 'section_ownership':'Definitions and physical guarantees: section 2. Empirical comparisons: section 3. Identifiability/history: section 4. Revision decisions: section 5. Validation protocol: section 6. Conclusions: section 7. Retain necessary local qualifications, but develop only the new evidence or inference here; refer back briefly instead of repeating another section.',
+                 'canonical_studies':facts_for_prose(registry,relevant),'known_citekeys':sorted(keys),
                  'previous_section_summaries':[{'title':m['title'],'findings':m['findings']} for m in manifest]}
         binding=signature([POLICY,WRITE,REVIEW,payload]);cache=root/(str(number)+'_'+binding+'.json')
         if cache.exists():
@@ -75,12 +88,11 @@ def build(source,run,ask,global_repairs=1):
                 body=candidate['latex'];errors=[e for e in tex_integrity(body) if e.get('kind')!='unresolved_references']
                 if citekeys(body)-keys:errors.append('Unknown citation keys')
                 if len(sections(body))!=1:errors.append('Expected one complete section')
-                if len(re.findall(r'\b[A-Za-z]+\b',body))<min(350,int(budget*.25)):errors.append('Section is a scaffold or thin summary rather than developed synthesis')
                 if not candidate.get('evidence_synthesis'):errors.append('Missing concrete evidence synthesis')
                 for finding in candidate.get('evidence_synthesis',[]):
                     ids=finding.get('fact_ids',[]);refs=finding.get('citekeys',[])
                     if not finding.get('finding') or not ids or not refs or not set(refs)<=keys or any(i not in eligible or eligible[i][0] not in refs for i in ids):errors.append('Synthesis finding lacks matching reviewed study facts')
-                review=ask(REVIEW,{**payload,'candidate':candidate},'accepted','reviewer') if not errors else {'accepted':False,'issues':errors,'checks':{}}
+                review=ask(REVIEW,{**payload,'candidate':candidate,'prose_diagnostics':prose_diagnostics(body)},'accepted','reviewer') if not errors else {'accepted':False,'issues':errors,'checks':{}}
                 accepted=review.get('accepted') is True and all(review.get('checks',{}).get(c) is True for c in CHECKS)
                 record={'binding':binding,'candidate':candidate,'review':review,'accepted':accepted,'attempt':previous_attempts+attempt+1,'expert_verified':False}
                 atomic_json(cache,record)

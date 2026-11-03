@@ -150,6 +150,9 @@ negative evidence, changed numerical context, and removal of caveats needed to i
 Repeated retrieval bookkeeping may disappear; its relevant scientific consequence may not.
 For clean stage preserve coverage; for condense stage remove redundancy, not scientific substance.
 An unchanged dense passage may pass. This is provisional model review, not expert validation.'''
+from prose_quality import PROSE_CONTRACT,PROSE_REVIEW
+WRITERS={stage:prompt+'\n'+PROSE_CONTRACT for stage,prompt in WRITERS.items()}
+REVIEW+='\n'+PROSE_REVIEW
 
 
 def sha(text):

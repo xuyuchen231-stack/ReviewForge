@@ -93,6 +93,20 @@ def eligible_facts(registry):
             if cell['status']=='reported' and cell.get('semantic_status') in ('pass','qualified')}
 
 
+def facts_for_prose(registry,keys):
+    """Only current reviewed facts carry IDs in writing input; missingness stays metadata."""
+    result=[];eligible=eligible_facts(registry)
+    for view in facts_for_studies(registry,keys):
+        facts={}
+        for field,cell in view['facts'].items():
+            if cell.get('id') not in eligible:continue
+            facts[field]={k:cell[k] for k in ('id','field','value','anchors','context','semantic_status') if k in cell}
+            if cell.get('semantic_status')=='qualified':facts[field]['qualification']=cell.get('semantic_review',{}).get('reason','')
+        result.append({'citekey':view['citekey'],'facts':facts,'unknown_fields':[f for f in FIELDS if f not in facts],
+                       'conflicts':view['conflicts'],'source_access':[{'source_id':s.get('source_id'),'document_access':s['document_access'],'inspection_coverage':s['inspection_coverage']} for s in view['sources']]})
+    return result
+
+
 def resolve_conflict(registry,key,field,selected_id,reason):
     """Explicit, logged adjudication; retains rejected observations and their quotations."""
     row=registry['studies'][key];observations=row['observations'][field]

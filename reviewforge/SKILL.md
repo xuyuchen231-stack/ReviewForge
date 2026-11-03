@@ -37,6 +37,11 @@ Consult `references/editorial-synthesis.md` for paragraph argument checks, fair 
 8. For overnight execution, use the separate ReviewForge Runtime application. A ChatGPT Skill alone does not run for nine hours unattended.
 
 ## Deliverables
+For repetitive or empty prose, apply `references/concise-prose.md`: remove padding and repeated
+propositions, give paragraphs distinct argumentative work and use concrete scientific subjects.
+Preserve necessary qualifications and standard terminology. Do not substitute word bans, minimum
+lengths or identical paragraph templates for substantive review.
+
 For factual contradictions, repetitive structure or insufficient comparative synthesis, follow
 `references/scientific-major-revision.md` before language polishing. The runtime major-revision
 route uses one canonical study registry, a complete provenance matrix, seven mapped sections and

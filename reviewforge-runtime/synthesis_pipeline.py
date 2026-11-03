@@ -12,6 +12,7 @@ from pathlib import Path
 from reviewforge import atomic_json, CompatibleAPI, load_env, extract_json, encode_model_payload
 from manuscript_integrity import citekeys,unique_label_targets
 from evidence_context import load_context
+from prose_quality import PROSE_CONTRACT,PROSE_REVIEW
 
 CRITERIA=('question_answered','comparative_synthesis','explains_differences','evidence_scope','bounded_conclusion')
 DETAIL_FIELDS={'validation_split','sample_size','quantitative_results','prospective_control','identifiability_test','baseline_tuning'}
@@ -58,6 +59,9 @@ WRITER+=''' Use a silent reverse outline: each paragraph should advance a distin
 REVIEWER+=''' Within the existing criteria, reverse-outline the paragraph contributions. Flag repeated claims, descriptive study lists and unexplained citation bundles as specific issues when they replace analysis. Check whether relevant supplied counterevidence changes the synthesis, whether comparison conditions permit the stated ranking, and whether the final judgment follows from the evidence. Distinguish an observed mechanism from a plausible explanation. Do not demand fabricated disagreement or uniform paragraph architecture. Resolve these checks in this review call; no separate cosmetic review pass is required.'''
 WRITER+=''' Evidence appraisal is a silent reasoning check, not a repeated prose template. Keep access status and extraction limits in the evidence ledger. In the manuscript state a shared evidence limitation once at the appropriate section scope; repeat it only when a different scientific conclusion depends on it. Prefer a concrete supported finding, comparison and implication over a sentence about what the accessible abstract cannot establish. Preserve necessary uncertainty and counterevidence. Do not fill paragraphs with synonyms for fitting is not control, architectural illustration is not transfer, or absence of evidence; explain the actual discriminating validation instead. Do not erase scientifically relevant limitations to sound confident. Numerical experiments may be discussed as results only when actual executed data and a reproducible protocol are supplied.'''
 REVIEWER+=''' Do not require a per-paper disclaimer or repeated evidence-boundary sentence as proof of rigor. A correctly scoped claim and a shared limitation may satisfy evidence_scope. Flag repetitive audit/access commentary when it displaces substantive synthesis, while retaining qualifications that materially affect interpretation. Prose style cannot establish human or AI authorship.'''
+
+WRITER+='\n'+PROSE_CONTRACT
+REVIEWER+='\n'+PROSE_REVIEW
 
 def digest(text):return hashlib.sha256(text.encode('utf-8')).hexdigest()
 def read(path):return json.loads(Path(path).read_text(encoding='utf-8'))
@@ -112,7 +116,7 @@ def contract_digest(plan,matrix,evidence,unit_id=None):
         scientific_plan=argument
         matrix={'studies':[r for r in matrix['studies'] if r['citekey'] in keys]}
         evidence={k:v for k,v in evidence.items() if k not in ('ledger_sha256','ledger_digest')}
-    return digest(json.dumps({'plan':scientific_plan,'matrix':matrix,'evidence':evidence,'depth_policy':DEPTH_POLICY},sort_keys=True))
+    return digest(json.dumps({'plan':scientific_plan,'matrix':matrix,'evidence':evidence,'depth_policy':DEPTH_POLICY,'prose_policy':digest(PROSE_CONTRACT+PROSE_REVIEW)},sort_keys=True))
 
 def unit_evidence(ws,unit,argument):
     keys=set(argument.get('study_keys',[]))|citekeys(unit['body'])

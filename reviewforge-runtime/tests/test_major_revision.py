@@ -8,6 +8,17 @@ from test_scientific_quality import registry,verdict
 
 
 class MajorRevisionTests(unittest.TestCase):
+    def test_filler_review_failure_blocks_even_when_other_checks_pass(self):
+        r,fid=registry()
+        def ask(system,payload,required,role):
+            if required=='latex':return {'latex':r'\section{Argument} '+('This abstract principle merits careful consideration in the broader methodological landscape. '*35)+r'\cite{A}', 'evidence_synthesis':[{'finding':'Cohort count reported.','citekeys':['A'],'fact_ids':[fid]}]}
+            checks={c:True for c in CHECKS};checks['nonredundant_argument']=False
+            return {'accepted':True,'checks':checks,'issues':['Repeated sentences add no comparison or result.']}
+        with tempfile.TemporaryDirectory() as d:
+            run=Path(d);source=run/'source.tex';source.write_text('\n'.join('\\section{Old '+str(i)+'} original source evidence \\cite{A}.' for i in range(13)))
+            atomic_json(run/'study_registry.json',r)
+            with self.assertRaisesRegex(ValueError,'Section 1 needs'):build(source,run,ask)
+
     def test_validation_failure_preserves_safe_reason_and_location(self):
         from major_revision import failure_record
         from study_registry import ingest_card,empty_registry

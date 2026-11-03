@@ -6,6 +6,7 @@ from pathlib import Path
 from manuscript_integrity import citekeys
 from study_registry import signature, registry_digest, facts_for_studies, study_view,eligible_facts
 from reviewforge import atomic_json
+from prose_quality import prose_diagnostics
 
 POLICY='whole-manuscript-source-review-v1'
 GLOBAL_REVIEW='''Compare all supplied manuscript passages about ONE study across sections, against its canonical facts. Return JSON {"examined_passage_ids":[IDs],"status":"pass|fail|uncertain","reason":str,"conflicts":[{"passage_ids":[ID,ID],"reason":str}]}. Cover every supplied passage. Check positive versus unknown/negative descriptions of the same split, timing, hardware, domain and operating-change result; distinguish different task scopes. Passage IDs must be supplied IDs. Do not infer absent information from selective sources. Provisional review only.'''
@@ -45,7 +46,7 @@ def audit(text,registry):
     return {'policy':POLICY,'manuscript_sha256':signature(text),'registry_digest':registry_digest(registry,keys),
             'passages':len(items),'cited_studies':len(keys),'missing_studies':missing,'conflicts':conflicts,
             'word_count':len(re.findall(r'\b[A-Za-z]+(?:[-\u2013][A-Za-z]+)*\b',text)),
-            'repeated_access_phrases':counts,'duplicate_passages':duplicates,
+            'repeated_access_phrases':counts,'duplicate_passages':duplicates,'prose_diagnostics':prose_diagnostics(text),
             'expert_verified':False,'author_approved':False,'submission_ready':False}
 
 
