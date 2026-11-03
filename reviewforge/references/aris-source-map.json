@@ -1,0 +1,227 @@
+{
+  "repository": "https://github.com/wanshuiyin/Auto-claude-code-research-in-sleep",
+  "upstream_commit": "2927b40b2ea37774de53763338c5e8f91a7601e6",
+  "reviewed_date": "2026-11-04",
+  "timezone": "Pacific/Auckland",
+  "license": "MIT",
+  "copyright": "Copyright (c) 2026 wanshuiyin",
+  "repository_created_at_utc": "2026-03-10T07:31:45Z",
+  "earliest_commit": {
+    "sha": "7db48e0f1c943f231023e7e27118ccbc2e010be8",
+    "date": "2026-03-10T07:31:41Z",
+    "message": "Initial release: research-review and auto-review-loop skills\n\nTwo Claude Code skills for autonomous ML research workflows:\n- /research-review: single-round deep review via Codex MCP\n- /auto-review-loop: autonomous review→fix→re-review loop (max 4 rou"
+  },
+  "first_cli_release": {
+    "tag": "v0.1.0",
+    "published_at": "2026-04-02T05:12:45Z"
+  },
+  "historical_limit": "Repository creation and earliest commit do not prove the exact first-public visibility time.",
+  "scope": "24 relevant skill specifications plus 4 shared references; catalogue inspected for routing, not all 87 skills adopted",
+  "sources": [
+    {
+      "path": "skills/analyze-results/SKILL.md",
+      "url": "https://github.com/wanshuiyin/Auto-claude-code-research-in-sleep/blob/2927b40b2ea37774de53763338c5e8f91a7601e6/skills/analyze-results/SKILL.md",
+      "sha256": "2b97b8ae1a279ac8a7db14e7d7bea67934c88352d55c95e20fcfb681a8640930",
+      "bytes": 1660,
+      "integration": "ReviewForge-specific principles in autonomous-research-adaptation.md; upstream runtime not installed"
+    },
+    {
+      "path": "skills/auto-paper-improvement-loop/SKILL.md",
+      "url": "https://github.com/wanshuiyin/Auto-claude-code-research-in-sleep/blob/2927b40b2ea37774de53763338c5e8f91a7601e6/skills/auto-paper-improvement-loop/SKILL.md",
+      "sha256": "feaaeb8b5c7dff0f095bf50dcbf1a291d24bd223e69ec20327cf9dd63835ae86",
+      "bytes": 42949,
+      "integration": "ReviewForge-specific principles in autonomous-research-adaptation.md; upstream runtime not installed"
+    },
+    {
+      "path": "skills/auto-review-loop/SKILL.md",
+      "url": "https://github.com/wanshuiyin/Auto-claude-code-research-in-sleep/blob/2927b40b2ea37774de53763338c5e8f91a7601e6/skills/auto-review-loop/SKILL.md",
+      "sha256": "2a553de8f498aa8224b0bc941a3c4c4dba351d5c61ebf48beaecb6a24aaa4a60",
+      "bytes": 75537,
+      "integration": "ReviewForge-specific principles in autonomous-research-adaptation.md; upstream runtime not installed"
+    },
+    {
+      "path": "skills/citation-audit/SKILL.md",
+      "url": "https://github.com/wanshuiyin/Auto-claude-code-research-in-sleep/blob/2927b40b2ea37774de53763338c5e8f91a7601e6/skills/citation-audit/SKILL.md",
+      "sha256": "8b6264f06c8b5d5889651bd059301bb4e8e5efd29565d8dd1740e3d5e21c6159",
+      "bytes": 32168,
+      "integration": "ReviewForge-specific principles in autonomous-research-adaptation.md; upstream runtime not installed"
+    },
+    {
+      "path": "skills/citation-crosscheck/SKILL.md",
+      "url": "https://github.com/wanshuiyin/Auto-claude-code-research-in-sleep/blob/2927b40b2ea37774de53763338c5e8f91a7601e6/skills/citation-crosscheck/SKILL.md",
+      "sha256": "8556f29c677b93d465df6b7309914e0b1c387213f73d132b5182fa4d0af42758",
+      "bytes": 36593,
+      "integration": "ReviewForge-specific principles in autonomous-research-adaptation.md; upstream runtime not installed"
+    },
+    {
+      "path": "skills/experiment-plan/SKILL.md",
+      "url": "https://github.com/wanshuiyin/Auto-claude-code-research-in-sleep/blob/2927b40b2ea37774de53763338c5e8f91a7601e6/skills/experiment-plan/SKILL.md",
+      "sha256": "c5b53692ff95b0b55e80702e33afc79d9fe8d4f55a69e2a39714013f97ac595e",
+      "bytes": 9728,
+      "integration": "ReviewForge-specific principles in autonomous-research-adaptation.md; upstream runtime not installed"
+    },
+    {
+      "path": "skills/figure-spec/SKILL.md",
+      "url": "https://github.com/wanshuiyin/Auto-claude-code-research-in-sleep/blob/2927b40b2ea37774de53763338c5e8f91a7601e6/skills/figure-spec/SKILL.md",
+      "sha256": "f5b4b8e806a0131b3aef787a7bbfbb395cdfb814a56d3acf2f454bfa4289ee49",
+      "bytes": 12080,
+      "integration": "ReviewForge-specific principles in autonomous-research-adaptation.md; upstream runtime not installed"
+    },
+    {
+      "path": "skills/formula-derivation/SKILL.md",
+      "url": "https://github.com/wanshuiyin/Auto-claude-code-research-in-sleep/blob/2927b40b2ea37774de53763338c5e8f91a7601e6/skills/formula-derivation/SKILL.md",
+      "sha256": "c428e321dd2df66aff35475ed7b56e0924db596b3ec94e6819abe72c7c9a4e4c",
+      "bytes": 9550,
+      "integration": "ReviewForge-specific principles in autonomous-research-adaptation.md; upstream runtime not installed"
+    },
+    {
+      "path": "skills/kill-argument/SKILL.md",
+      "url": "https://github.com/wanshuiyin/Auto-claude-code-research-in-sleep/blob/2927b40b2ea37774de53763338c5e8f91a7601e6/skills/kill-argument/SKILL.md",
+      "sha256": "96a106531c294c17b5b136009b04ecf96f85633e6e1339c5c2868ee1c40486ff",
+      "bytes": 26120,
+      "integration": "ReviewForge-specific principles in autonomous-research-adaptation.md; upstream runtime not installed"
+    },
+    {
+      "path": "skills/meta-apply/SKILL.md",
+      "url": "https://github.com/wanshuiyin/Auto-claude-code-research-in-sleep/blob/2927b40b2ea37774de53763338c5e8f91a7601e6/skills/meta-apply/SKILL.md",
+      "sha256": "725cef0195f0b5eebee5161e80c8aff68102a294d3c2a9fcbb327eac803eba15",
+      "bytes": 8983,
+      "integration": "ReviewForge-specific principles in autonomous-research-adaptation.md; upstream runtime not installed"
+    },
+    {
+      "path": "skills/meta-optimize/SKILL.md",
+      "url": "https://github.com/wanshuiyin/Auto-claude-code-research-in-sleep/blob/2927b40b2ea37774de53763338c5e8f91a7601e6/skills/meta-optimize/SKILL.md",
+      "sha256": "fb9df9d814e14bb81eccc4824759e79bef1621379993ab99e7bc2bcd3f721596",
+      "bytes": 24917,
+      "integration": "ReviewForge-specific principles in autonomous-research-adaptation.md; upstream runtime not installed"
+    },
+    {
+      "path": "skills/novelty-check/SKILL.md",
+      "url": "https://github.com/wanshuiyin/Auto-claude-code-research-in-sleep/blob/2927b40b2ea37774de53763338c5e8f91a7601e6/skills/novelty-check/SKILL.md",
+      "sha256": "a1f257297405c9948f570d51672f50b0176177001e74118c926b149c9ccb9af4",
+      "bytes": 8331,
+      "integration": "ReviewForge-specific principles in autonomous-research-adaptation.md; upstream runtime not installed"
+    },
+    {
+      "path": "skills/paper-claim-audit/SKILL.md",
+      "url": "https://github.com/wanshuiyin/Auto-claude-code-research-in-sleep/blob/2927b40b2ea37774de53763338c5e8f91a7601e6/skills/paper-claim-audit/SKILL.md",
+      "sha256": "3cf3ecdf14899aa011c7f5baf5efcba7a67e940a65e7938170426f4af2b032ea",
+      "bytes": 15356,
+      "integration": "ReviewForge-specific principles in autonomous-research-adaptation.md; upstream runtime not installed"
+    },
+    {
+      "path": "skills/paper-compile/SKILL.md",
+      "url": "https://github.com/wanshuiyin/Auto-claude-code-research-in-sleep/blob/2927b40b2ea37774de53763338c5e8f91a7601e6/skills/paper-compile/SKILL.md",
+      "sha256": "ca064e9b7dffe80d9c3bcabb060f81c651e4926eb1c069a04c6416a8e58fed93",
+      "bytes": 10070,
+      "integration": "ReviewForge-specific principles in autonomous-research-adaptation.md; upstream runtime not installed"
+    },
+    {
+      "path": "skills/paper-figure/SKILL.md",
+      "url": "https://github.com/wanshuiyin/Auto-claude-code-research-in-sleep/blob/2927b40b2ea37774de53763338c5e8f91a7601e6/skills/paper-figure/SKILL.md",
+      "sha256": "7d115c37bc7de777a12ccc0211d44305d513a017d6a07e8ac8dd7d2e99dab21f",
+      "bytes": 14778,
+      "integration": "ReviewForge-specific principles in autonomous-research-adaptation.md; upstream runtime not installed"
+    },
+    {
+      "path": "skills/paper-plan/SKILL.md",
+      "url": "https://github.com/wanshuiyin/Auto-claude-code-research-in-sleep/blob/2927b40b2ea37774de53763338c5e8f91a7601e6/skills/paper-plan/SKILL.md",
+      "sha256": "536e720d0570fe9124f5320ac061df3fbf890c8e13161e485bac0c20cbab9c4f",
+      "bytes": 22041,
+      "integration": "ReviewForge-specific principles in autonomous-research-adaptation.md; upstream runtime not installed"
+    },
+    {
+      "path": "skills/paper-write/SKILL.md",
+      "url": "https://github.com/wanshuiyin/Auto-claude-code-research-in-sleep/blob/2927b40b2ea37774de53763338c5e8f91a7601e6/skills/paper-write/SKILL.md",
+      "sha256": "752887e18d48e87a3156384d95abb2a6bb987d2eae1c72631d8f00a9bfcad6f2",
+      "bytes": 39957,
+      "integration": "ReviewForge-specific principles in autonomous-research-adaptation.md; upstream runtime not installed"
+    },
+    {
+      "path": "skills/paper-writing/SKILL.md",
+      "url": "https://github.com/wanshuiyin/Auto-claude-code-research-in-sleep/blob/2927b40b2ea37774de53763338c5e8f91a7601e6/skills/paper-writing/SKILL.md",
+      "sha256": "295bd0b3852635258a60c1917dcca29256c690bb6dde5c6ac49732b905ff8743",
+      "bytes": 52667,
+      "integration": "ReviewForge-specific principles in autonomous-research-adaptation.md; upstream runtime not installed"
+    },
+    {
+      "path": "skills/research-lit/SKILL.md",
+      "url": "https://github.com/wanshuiyin/Auto-claude-code-research-in-sleep/blob/2927b40b2ea37774de53763338c5e8f91a7601e6/skills/research-lit/SKILL.md",
+      "sha256": "3800da1ad62b7d04f9e2b9e2868a3670bff1e47c0542d80b98a8fa9445ec7f79",
+      "bytes": 45319,
+      "integration": "ReviewForge-specific principles in autonomous-research-adaptation.md; upstream runtime not installed"
+    },
+    {
+      "path": "skills/research-pipeline/SKILL.md",
+      "url": "https://github.com/wanshuiyin/Auto-claude-code-research-in-sleep/blob/2927b40b2ea37774de53763338c5e8f91a7601e6/skills/research-pipeline/SKILL.md",
+      "sha256": "0c9bd1676c8c2b0af0e36abda0669395fac41ab5eea49cd2aa60226585683125",
+      "bytes": 24299,
+      "integration": "ReviewForge-specific principles in autonomous-research-adaptation.md; upstream runtime not installed"
+    },
+    {
+      "path": "skills/research-review/SKILL.md",
+      "url": "https://github.com/wanshuiyin/Auto-claude-code-research-in-sleep/blob/2927b40b2ea37774de53763338c5e8f91a7601e6/skills/research-review/SKILL.md",
+      "sha256": "71982b92a7790229076204d7b7264bf5d31e9053169ec140ca0c6cca849ab7ab",
+      "bytes": 13815,
+      "integration": "ReviewForge-specific principles in autonomous-research-adaptation.md; upstream runtime not installed"
+    },
+    {
+      "path": "skills/research-wiki/SKILL.md",
+      "url": "https://github.com/wanshuiyin/Auto-claude-code-research-in-sleep/blob/2927b40b2ea37774de53763338c5e8f91a7601e6/skills/research-wiki/SKILL.md",
+      "sha256": "564eea3ad9e8763ba2120605e61b18260b201976e9d6035643d8f65982052c06",
+      "bytes": 20553,
+      "integration": "ReviewForge-specific principles in autonomous-research-adaptation.md; upstream runtime not installed"
+    },
+    {
+      "path": "skills/result-to-claim/SKILL.md",
+      "url": "https://github.com/wanshuiyin/Auto-claude-code-research-in-sleep/blob/2927b40b2ea37774de53763338c5e8f91a7601e6/skills/result-to-claim/SKILL.md",
+      "sha256": "b12d10bdb51440f65e4112e6643712f172a7e37c1e15066e15d81eaee5838a8f",
+      "bytes": 17854,
+      "integration": "ReviewForge-specific principles in autonomous-research-adaptation.md; upstream runtime not installed"
+    },
+    {
+      "path": "skills/shared-references/assurance-contract.md",
+      "url": "https://github.com/wanshuiyin/Auto-claude-code-research-in-sleep/blob/2927b40b2ea37774de53763338c5e8f91a7601e6/skills/shared-references/assurance-contract.md",
+      "sha256": "4320cc8f8614f95914a1b8594759a8e0264f9e8ba02b7dca8305acab0c43b282",
+      "bytes": 13572,
+      "integration": "ReviewForge-specific principles in autonomous-research-adaptation.md; upstream runtime not installed"
+    },
+    {
+      "path": "skills/shared-references/integration-contract.md",
+      "url": "https://github.com/wanshuiyin/Auto-claude-code-research-in-sleep/blob/2927b40b2ea37774de53763338c5e8f91a7601e6/skills/shared-references/integration-contract.md",
+      "sha256": "2a182e6ab3cd8e035b92874bcd8173b421ed6d403b280b3df3a49fa5d488e0f3",
+      "bytes": 26858,
+      "integration": "ReviewForge-specific principles in autonomous-research-adaptation.md; upstream runtime not installed"
+    },
+    {
+      "path": "skills/shared-references/review-tracing.md",
+      "url": "https://github.com/wanshuiyin/Auto-claude-code-research-in-sleep/blob/2927b40b2ea37774de53763338c5e8f91a7601e6/skills/shared-references/review-tracing.md",
+      "sha256": "fcf521283ee275708ca6f1a34ad836ca7e9c913f69e49fdd735a13d6f3ad964d",
+      "bytes": 23757,
+      "integration": "ReviewForge-specific principles in autonomous-research-adaptation.md; upstream runtime not installed"
+    },
+    {
+      "path": "skills/shared-references/writing-principles.md",
+      "url": "https://github.com/wanshuiyin/Auto-claude-code-research-in-sleep/blob/2927b40b2ea37774de53763338c5e8f91a7601e6/skills/shared-references/writing-principles.md",
+      "sha256": "23142c901d034ab0b640a7f2c1ee3899f273020d9bf911134ef06ebfad61e5d8",
+      "bytes": 17539,
+      "integration": "ReviewForge-specific principles in autonomous-research-adaptation.md; upstream runtime not installed"
+    },
+    {
+      "path": "skills/system-profile/SKILL.md",
+      "url": "https://github.com/wanshuiyin/Auto-claude-code-research-in-sleep/blob/2927b40b2ea37774de53763338c5e8f91a7601e6/skills/system-profile/SKILL.md",
+      "sha256": "9d31e32d2a63cf2f27a843e171c652327596c3f9e911c265660618d4ba27c48e",
+      "bytes": 4473,
+      "integration": "ReviewForge-specific principles in autonomous-research-adaptation.md; upstream runtime not installed"
+    }
+  ],
+  "not_adopted": [
+    "Fixed model/effort presets or premium-provider requirements",
+    "GPU-rental/remote experiment infrastructure and invented experiments for a narrative review",
+    "Fixed score thresholds and publication-readiness claims",
+    "Minimum page/citation/word quotas and fixed paragraph templates",
+    "Bash installers or automatic upstream updates",
+    "Extra mandatory multi-agent audits for every settled citation or every paragraph"
+  ],
+  "runtime_boundary": "Guide and offline advisor installed; current fixed runtime prompts/cache keys unchanged. Advisor is not a new publication gate."
+}
