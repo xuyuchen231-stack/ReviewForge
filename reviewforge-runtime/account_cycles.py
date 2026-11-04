@@ -13,7 +13,8 @@ def is_weekly_quota(status,data):
     if status==402:return True
     error=data.get('error',{}) if isinstance(data,dict) else {}
     text=' '.join(str(error.get(key,'')) for key in ('code','type','message')).lower() if isinstance(error,dict) else str(error).lower()
-    return status in (403,429) and ('free' in text or 'weekly' in text) and any(word in text for word in ('quota','allowance','period')) and any(word in text for word in ('exhaust','exceed','used up','deplet'))
+    used_period="used this period's free allowance" in text or 'used this period’s free allowance' in text
+    return status in (403,429) and (used_period or (('free' in text or 'weekly' in text) and any(word in text for word in ('quota','allowance','period')) and any(word in text for word in ('exhaust','used up','deplet','quota_exceeded','allowance exceeded'))))
 
 def fingerprint(base,key):return hashlib.sha256((base.rstrip('/')+'\0'+key).encode()).hexdigest()
 

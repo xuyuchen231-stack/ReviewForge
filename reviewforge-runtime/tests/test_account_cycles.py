@@ -2,6 +2,10 @@ import tempfile,unittest
 from pathlib import Path
 
 class AccountCycleTests(unittest.TestCase):
+ def test_used_period_allowance_message_is_weekly_exhaustion(self):
+  from account_cycles import is_weekly_quota
+  self.assertTrue(is_weekly_quota(429,{'error':{'message':"You've used this period's free allowance. Your next rolling 7-day period starts on 7 Nov 2026 at 03:15 UTC."}}))
+  self.assertFalse(is_weekly_quota(429,{'error':{'message':'Free allowance remaining; request rate exceeded'}}))
  def test_user_dashboard_reset_keeps_an_extra_safety_hour_without_inventing_first_use(self):
   from account_cycles import WeeklyAccounts
   with tempfile.TemporaryDirectory() as t:
