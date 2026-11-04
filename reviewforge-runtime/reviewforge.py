@@ -152,7 +152,7 @@ class CompatibleAPI:
                 self.providers=[CompatibleAPI(profile) for profile in profiles['providers'] if profile.get('enabled',True)]
                 self.preferred_provider=profiles.get('preferred_provider')
 
-    def prime_free_accounts(self,deadline=None):
+    def prime_free_accounts(self,deadline=None,only_indices=None):
         """Activate only unobserved free accounts; never call a paid route."""
         if self.weekly_accounts is None:return []
         from account_cycles import is_tokenharbor_free,is_weekly_quota
@@ -160,6 +160,7 @@ class CompatibleAPI:
         if not is_tokenharbor_free(self.base,model):raise ValueError('Account activation requires a TokenHarbor :free model')
         until=min(deadline if deadline is not None else float('inf'),time.time()+60);result=[]
         for index,key in enumerate(self.keys):
+            if only_indices is not None and index not in only_indices:continue
             row=self.weekly_accounts.entry(self.base,key)
             if row.get('first_success_observed_at') is not None:continue
             if self.key_cooldowns.get(index,0)>time.time() or self.weekly_accounts.blocked(self.base,key):
@@ -175,7 +176,7 @@ class CompatibleAPI:
             except urllib.error.HTTPError as exc:
                 try:detail=json.loads(exc.read(4096))
                 except (ValueError,OSError):detail={}
-                if is_weekly_quota(exc.code,detail):self.weekly_accounts.exhausted(self.base,key,started)
+                if is_weekly_quota(exc.code,detail):self.weekly_accounts.exhausted(self.base,key,started,provider_data=detail)
                 result.append({'slot':index+1,'status':'HTTP '+str(exc.code)})
             except (OSError,ValueError,TimeoutError):result.append({'slot':index+1,'status':'not_confirmed; retry_on_next_start'})
         return result
@@ -231,7 +232,7 @@ class CompatibleAPI:
         if weekly is not None and is_tokenharbor_free(self.base,preferred):
             # Never turn an exhausted free allowance into paid usage.
             if os.environ.get('RF_TOKENHARBOR_ALLOW_PAID_FALLBACK')!='1':models=[model for model in models if model.endswith(':free')]
-            eligible=[index for index,key in enumerate(self.keys) if self.key_cooldowns.get(index,0)<=time.time() and not weekly.blocked(self.base,key)]
+            eligible=weekly.ordered_eligible(self.base,self.keys,self.key_cooldowns)
             if eligible:self.key_index=eligible[0]
         failures = []
         call_deadline=min(getattr(self,'deadline',float('inf')),time.time()+max(1,min(1800,getattr(self,'call_timeout',180))))
@@ -253,6 +254,7 @@ class CompatibleAPI:
             # Explicit user opt-in to independently authorized accounts.
             allow_rate_failover = os.environ.get('RF_ALLOW_RATE_LIMIT_FAILOVER') == '1'
             key_order = list(range(self.key_index, len(self.keys))) + list(range(0, self.key_index))
+            if weekly is not None and is_tokenharbor_free(self.base,model):key_order=weekly.ordered_eligible(self.base,self.keys,self.key_cooldowns)
             for key_index in key_order:
                 if time.time()>=model_deadline:break
                 if self.key_cooldowns.get(key_index, 0) > time.time():
@@ -309,7 +311,7 @@ class CompatibleAPI:
                         try:quota_detail=json.loads(exc.read(4096))
                         except (ValueError,OSError):quota_detail={}
                         if is_weekly_quota(exc.code,quota_detail):
-                            self.key_cooldowns[key_index]=weekly.exhausted(self.base,key);self.key_statuses[key_index]='weekly_free_quota_exhausted'
+                            self.key_cooldowns[key_index]=weekly.exhausted(self.base,key,provider_data=quota_detail);self.key_statuses[key_index]='weekly_free_quota_exhausted'
                             print('TokenHarbor account slot '+str(key_index+1)+' free weekly allowance exhausted; trying the next configured account.',flush=True)
                             failures.append('Weekly free allowance exhausted (key slot '+str(key_index+1)+')');continue
                     if exc.code == 429:
@@ -362,6 +364,10 @@ class CompatibleAPI:
         if weekly is not None and all(weekly.blocked(self.base,key) for key in self.keys):
             retry=max(1,int(min(weekly.entry(self.base,key)['exhausted_until'] for key in self.keys)-time.time())+1)
             raise RuntimeError('Provider weekly free allowance exhausted (429); respect Retry-After: '+str(retry))
+        if weekly is not None and not weekly.ordered_eligible(self.base,self.keys,self.key_cooldowns):
+            now=time.time()
+            available_at=[max(self.key_cooldowns.get(i,0),weekly.entry(self.base,key).get('exhausted_until',0)) for i,key in enumerate(self.keys)]
+            raise RuntimeError('Provider rate limit (429); respect Retry-After: '+str(max(1,int(min(available_at)-now)+1)))
         if self.keys and all(self.key_cooldowns.get(i,0)>time.time() and self.key_statuses.get(i)=='quota_unavailable' for i in range(len(self.keys))):
             raise RuntimeError('API attempts failed: all configured account quotas unavailable (402); checkpoint retained.')
         if (failures and all('HTTP 429' in f for f in failures)) or (not failures and self.key_cooldowns and all(self.key_cooldowns.get(i,0)>time.time() for i in range(len(self.keys)))):

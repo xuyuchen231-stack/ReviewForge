@@ -33,6 +33,7 @@ def apply_priority(path,key,keys,base,ledger,hours,now=None):
         if Path(name).exists():Path(name).unlink()
     def change(row):
         blocked=row.get('exhausted_until',0)>now
+        row.pop('server_reset_at',None)
         row.update(window_started_at=reset-WEEK,user_reported_reset_at=reset,reset_safety_seconds=3600,
                    start_basis='user_reported_remaining_hours; not proven first-ever use',server_window_confirmed=False,priority_set_at=now)
         if blocked:row['exhausted_until']=reset+3600

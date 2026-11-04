@@ -1,5 +1,5 @@
 """Local TokenHarbor free-period observations, keyed by credential fingerprints."""
-import argparse,contextlib,datetime,hashlib,json,math,os,time,uuid
+import argparse,contextlib,datetime,hashlib,json,math,os,time,uuid,re
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -17,6 +17,18 @@ def is_weekly_quota(status,data):
     return status in (403,429) and (used_period or (('free' in text or 'weekly' in text) and any(word in text for word in ('quota','allowance','period')) and any(word in text for word in ('exhaust','used up','deplet','quota_exceeded','allowance exceeded'))))
 
 def fingerprint(base,key):return hashlib.sha256((base.rstrip('/')+'\0'+key).encode()).hexdigest()
+
+def provider_reset_epoch(data):
+    """Only explicit provider error reset dates; Retry-After is not a week reset."""
+    error=data.get('error',{}) if isinstance(data,dict) else {}
+    message=error.get('message','') if isinstance(error,dict) else ''
+    if not isinstance(message,str):return None
+    hit=re.search(r'(?:next rolling 7-day period starts on|comes back on) (\d{1,2}) ([A-Za-z]{3}) (\d{4}) at (\d{2}):(\d{2}) UTC',message,re.I)
+    if not hit:return None
+    months={name:i for i,name in enumerate(('jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'),1)}
+    day,month,year,hour,minute=hit.groups()
+    try:return datetime.datetime(int(year),months[month.lower()],int(day),int(hour),int(minute),tzinfo=datetime.timezone.utc).timestamp()
+    except (ValueError,KeyError):return None
 
 class WeeklyAccounts:
     def __init__(self,path=None):self.path=Path(path or os.environ.get('RF_TOKENHARBOR_CYCLES_FILE',str(Path.home()/'.reviewforge/tokenharbor_cycles.json')))
@@ -50,10 +62,34 @@ class WeeklyAccounts:
             temporary.write_text(json.dumps(data,ensure_ascii=False,indent=2),encoding='utf-8');temporary.replace(self.path)
             return result
     def entry(self,base,key):return self._load()['accounts'].get(fingerprint(base,key),{}).copy()
+    @staticmethod
+    def next_reset(row,at=None):
+        now=time.time() if at is None else at
+        stamp=row.get('server_reset_at') or row.get('user_reported_reset_at')
+        if stamp is None and row.get('window_started_at') is not None:stamp=row['window_started_at']+WEEK
+        if stamp is None:return None
+        if stamp<=now:stamp+=(math.floor((now-stamp)/WEEK)+1)*WEEK
+        return stamp
+    def ordered_eligible(self,base,keys,cooldowns,at=None):
+        now=time.time() if at is None else at;accounts=self._load()['accounts'];eligible=[]
+        for index,key in enumerate(keys):
+            row=accounts.get(fingerprint(base,key),{})
+            if cooldowns.get(index,0)>now or row.get('exhausted_until',0)>now:continue
+            stamp=self.next_reset(row,now)
+            eligible.append((float('inf') if stamp is None else stamp,index))
+        return [index for _,index in sorted(eligible)]
+    def record_provider_reset(self,base,key,reset_at,safety_seconds=3600):
+        reset=float(reset_at)
+        if not math.isfinite(reset) or reset<=0 or safety_seconds<0:raise ValueError('Invalid provider reset time')
+        def change(row):
+            row.update(server_reset_at=reset,window_started_at=reset-WEEK,reset_safety_seconds=safety_seconds,
+                       server_window_confirmed=True,start_basis='explicit_provider_reset_timestamp; cycle start inferred, not first-ever use')
+        self._update(base,key,change)
     def set_reset_deadline(self,base,key,reset_at,safety_seconds=3600):
         reset=float(reset_at)
         if not math.isfinite(reset) or safety_seconds<0:raise ValueError('Invalid reset time or safety interval')
         def change(row):
+            row.pop('server_reset_at',None)
             row.update(window_started_at=reset-WEEK,start_basis='user_dashboard_reset_countdown; cycle start inferred, not first-ever use',user_reported_reset_at=reset,reset_safety_seconds=safety_seconds,exhausted_until=reset+safety_seconds,status='weekly_free_quota_exhausted',server_window_confirmed=False)
         self._update(base,key,change)
     def success(self,base,key,started_at,basis='first_local_success',source=None):
@@ -62,19 +98,25 @@ class WeeklyAccounts:
         def change(row):
             previous=row.get('first_success_observed_at');row['first_success_observed_at']=min(previous,timestamp) if previous is not None else timestamp
             window=row.get('window_started_at')
-            if window is None or timestamp>=window+WEEK:
+            confirmed=row.get('server_window_confirmed',False)
+            if confirmed and window is not None and timestamp>=window+WEEK:
+                row.update(window_started_at=window+math.floor((timestamp-window)/WEEK)*WEEK,exhausted_until=0,status='observed_active_window')
+            elif window is None or timestamp>=window+WEEK:
                 row.update(window_started_at=timestamp,start_basis=basis,exhausted_until=0,status='observed_active_window')
-            elif timestamp<window and previous==window and timestamp+WEEK>max(window,row.get('exhausted_at',0)):
+            elif not confirmed and timestamp<window and previous==window and timestamp+WEEK>max(window,row.get('exhausted_at',0)):
                 row.update(window_started_at=timestamp,start_basis=basis)
                 if row.get('exhausted_until',0)>0:row['exhausted_until']=max(timestamp+WEEK,row.get('exhausted_at',0))
             row['last_success_observed_at']=max(timestamp,row.get('last_success_observed_at',0))
-            row['server_window_confirmed']=False
+            row['server_window_confirmed']=confirmed
             if source:row['historical_source']=str(source)
         self._update(base,key,change)
-    def exhausted(self,base,key,at=None):
+    def exhausted(self,base,key,at=None,provider_data=None):
         now=time.time() if at is None else float(at)
+        explicit=provider_reset_epoch(provider_data)
+        if explicit is not None and explicit>now:self.record_provider_reset(base,key,explicit)
         def change(row):
-            window=row.get('window_started_at');until=(window+WEEK if window is not None and window+WEEK>now else now+WEEK)+row.get('reset_safety_seconds',0)
+            window=row.get('window_started_at');known=self.next_reset(row,now)
+            until=(known if known is not None else now+WEEK)+row.get('reset_safety_seconds',0)
             row.update(exhausted_at=now,exhausted_until=until,status='weekly_free_quota_exhausted')
             if window is None:row['start_basis']='unknown; conservative retry upper bound'
             return until
@@ -85,7 +127,7 @@ class WeeklyAccounts:
         def stamp(value):return datetime.datetime.fromtimestamp(value,datetime.timezone.utc).isoformat() if value is not None else None
         for index,key in enumerate(keys,1):
             row=self.entry(base,key);blocked=row.get('exhausted_until',0)>now;start=row.get('window_started_at')
-            result.append({'account_slot':index,'first_success_observed_utc':stamp(row.get('first_success_observed_at')),'window_start_observed_utc':stamp(start),'next_window_check_utc':stamp(start+WEEK if start is not None else None),'quota_retry_utc':stamp(row.get('exhausted_until')) if row.get('exhausted_until') else None,'status':'weekly_exhausted' if blocked else ('eligible_to_retry' if row.get('exhausted_until') else ('observed_used' if start is not None else 'first_use_unknown')),'start_basis':row.get('start_basis'),'server_window_confirmed':False})
+            result.append({'account_slot':index,'first_success_observed_utc':stamp(row.get('first_success_observed_at')),'window_start_observed_utc':stamp(start),'next_window_check_utc':stamp(self.next_reset(row,now)),'quota_retry_utc':stamp(row.get('exhausted_until')) if row.get('exhausted_until') else None,'status':'weekly_exhausted' if blocked else ('eligible_to_retry' if row.get('exhausted_until') else ('observed_used' if start is not None else 'first_use_unknown')),'start_basis':row.get('start_basis'),'server_window_confirmed':row.get('server_window_confirmed',False)})
         return result
 
 def backfill(workspace,ledger,base,keys):

@@ -49,7 +49,18 @@ def main():
     order = save_account(target, key, api.keys, args.suffix)
     os.environ['RF_API_KEYS'] = ','.join(order)
     print('Saved account ending ' + args.suffix + '; account count: ' + str(len(order)))
-    print('Existing order and weekly quota history retained; no refresh date invented.')
+    if key not in api.keys:
+        api.keys=order
+        result=api.prime_free_accounts(only_indices={order.index(key)})
+        print('New-account free probe: '+str(result))
+    from datetime import datetime,timezone
+    row=api.weekly_accounts.entry(api.base,key)
+    reset=api.weekly_accounts.next_reset(row)
+    if reset is not None:
+        label='provider-confirmed' if row.get('server_window_confirmed') else 'estimated from observed cycle; not provider-confirmed'
+        print('Next refresh: '+datetime.fromtimestamp(reset,timezone.utc).isoformat()+' ('+label+').')
+    else:print('Refresh time unknown; no successful observation or explicit provider timestamp yet.')
+    print('Quota history retained. Eligible accounts use earliest next-refresh order; unknown times last. No paid routes.')
     if args.restart:
         print('Resumed from caches; process ID ' + str(restart_runner(runtime)))
 
