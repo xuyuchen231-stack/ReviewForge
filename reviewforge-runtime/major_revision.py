@@ -233,7 +233,12 @@ def provider_request(api,system,payload,required,role,retry=None):
     elif role=='writer' and required=='latex' and payload.get('word_budget',0)>=5000:
         api.max_tokens=36000
     def request():
-        response=api.chat(system,encode_model_payload(payload),role=role)
+        from evidence_transport import compact_evidence
+        wire=compact_evidence(payload)
+        encoded=encode_model_payload(wire)
+        print('[major-revision/input] role='+role+' input_chars='+str(len(system)+len(encoded))+' payload_chars_before='+str(len(encode_model_payload(payload)))+' payload_chars_after='+str(len(encoded)),flush=True)
+        response=api.chat(system,encoded,role=role)
+        print('[major-revision/usage] '+json.dumps({'role':role,'account_slot':getattr(api,'last_key_slot',None),'model':getattr(api,'last_model',None),'usage':getattr(api,'last_usage',{})},ensure_ascii=True),flush=True)
         if getattr(api,'last_finish_reason',None)=='length':
             # The evidence-comparison section can exhaust 24k tokens including
             # LaTeX/structured findings. Grow only after proven truncation; do
