@@ -1,5 +1,6 @@
 """Read-only progress viewer for scientific revision and legacy editorial export."""
 import json,time,sys
+from datetime import datetime,timezone
 from pathlib import Path
 
 def read_json(path,default=None):
@@ -36,7 +37,20 @@ def major_progress(run):
  reason=''
  if final:
   status=final.get('status')
-  if status=='PAUSED':state='已暂停';reason=final.get('reason') or final.get('error_type','未知原因')
+  if status=='PAUSED':
+   state='已暂停';reason=final.get('reason') or final.get('error_type','未知原因')
+   category=final.get('request_failure',{}).get('category')
+   if category in ('rate_limit','weekly_allowance_exhausted'):
+    reason='接口限流，等待账号冷却' if category=='rate_limit' else '账号周额度耗尽，等待刷新'
+    deadline=read_json(root/'monitor_wait.json',{}).get('retry_not_before_epoch',0)
+    if deadline>time.time():
+     try:
+      from zoneinfo import ZoneInfo
+      zone=ZoneInfo('Pacific/Auckland')
+     except Exception:
+      zone=timezone.utc
+     stamp=datetime.fromtimestamp(deadline,zone)
+     reason+='；最早重试时间 '+stamp.strftime('%Y-%m-%d %H:%M %Z')+' (Pacific/Auckland)' if str(zone)!='UTC' else '；最早重试时间 '+stamp.strftime('%Y-%m-%d %H:%M UTC')+' (Pacific/Auckland 时区数据不可用)'
   elif status=='NEEDS_REVISION':state='等待修复科学审查问题'
   elif status=='FACTS_RECORDED':state='文献事实整理已结束，尚未重构正文'
   elif status=='PROVISIONAL_MODEL_PASS':

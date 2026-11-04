@@ -6,6 +6,16 @@ from review_progress import progress
 
 
 class ReviewProgressTests(unittest.TestCase):
+    def test_rate_limit_reports_cause_and_saved_deadline(self):
+        with tempfile.TemporaryDirectory() as d:
+            runtime,run,root=self.fixture(d)
+            (run/'major_revision/running.log').write_text(json.dumps({'status':'PAUSED','details':str(root),'error_type':'RuntimeError','request_failure':{'category':'rate_limit'}}))
+            (root/'monitor_wait.json').write_text(json.dumps({'retry_not_before_epoch':1893456000}))
+            data=progress(runtime)
+            self.assertIn('接口限流',data['reason'])
+            self.assertIn('Pacific/Auckland',data['reason'])
+            self.assertNotIn('RuntimeError',data['reason'])
+
     def fixture(self,d):
         runtime=Path(d);ws=runtime/'workspace';run=ws/'autonomous_runs/test';root=run/'major_revision/version';root.mkdir(parents=True)
         (ws/'autonomous_active.json').write_text(json.dumps({'run_directory':'autonomous_runs/test'}))
