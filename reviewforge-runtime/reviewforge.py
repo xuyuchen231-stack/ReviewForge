@@ -129,6 +129,11 @@ class CompatibleAPI:
         self.model = env.get('RF_WRITER_MODEL',env.get('RF_MODEL','mimo-v2.6-flash:free'))
         self.reviewer_model = env.get('RF_REVIEWER_MODEL','deepseek-v4.1-flash:free')
         self.fallback_model = env.get('RF_FALLBACK_MODEL','deepseek-v4.1-flash:free')
+        self.freeai_self_hosted_only=env.get('RF_FREEAI_SELF_HOSTED_ONLY')=='1'
+        self.freeai_max_input_chars=min(60000,max(1000,int(env.get('RF_FREEAI_MAX_INPUT_CHARS','60000'))))
+        from freeai_provider import is_freeai,allowed_freeai
+        self.chat_path='/v1/chat/' if is_freeai(self.base) else None
+        if is_freeai(self.base) and not allowed_freeai(self):raise ValueError('Free.ai requires explicitly enabled self-hosted-only qwen7b routing')
         if not self.key or self.key == 'replace_me' or not self.base.startswith('https://') or not self.model:
             raise ValueError('Configure RF_API_KEY, HTTPS RF_BASE_URL, RF_MODEL in .env')
         from account_cycles import WeeklyAccounts,is_tokenharbor_free
@@ -176,7 +181,8 @@ class CompatibleAPI:
             result=self._chat(system,user,role);self.last_provider=self.provider_name;return result
         timeout=getattr(self,'call_timeout',180);deadline=getattr(self,'deadline',None)
         until=min(deadline if deadline is not None else float('inf'),time.time()+timeout)
-        failures=[];clients=[self]+self.providers
+        from freeai_provider import available_for_input
+        failures=[];clients=[client for client in [self]+self.providers if available_for_input(client,system,user)]
         requested=getattr(self,'request_provider',None) or ('primary' if getattr(self,'request_stage',None) in ('preparation','coherence') else self.preferred_provider)
         if requested:clients.sort(key=lambda client:client.provider_name!=requested)
         try:
@@ -206,6 +212,9 @@ class CompatibleAPI:
         raise RuntimeError('API attempts failed: '+'; '.join(failures or ['provider time budget reached']))
 
     def _chat(self, system, user, role='writer'):
+        from freeai_provider import is_freeai,available_for_input
+        freeai=is_freeai(self.base)
+        if not available_for_input(self,system,user):raise RuntimeError('Free.ai request exceeds configured input budget; input was not truncated or sent')
         preferred = getattr(self,'request_model',None) or (self.reviewer_model if role == 'reviewer' else self.model)
         models = [preferred] + ([self.fallback_model] if self.fallback_model != preferred else [])
         if role=='reviewer' and self.model not in models:models.append(self.model)
@@ -242,7 +251,8 @@ class CompatibleAPI:
                     continue
                 key = self.keys[key_index]
                 if weekly is not None and is_tokenharbor_free(self.base,model) and weekly.blocked(self.base,key):continue
-                req = urllib.request.Request(self.base + '/chat/completions', data=body, headers={'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json'}, method='POST')
+                endpoint='https://api.free.ai/v1/chat/' if freeai else self.base+'/chat/completions'
+                req = urllib.request.Request(endpoint, data=body, headers={'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json'}, method='POST')
                 try:
                     attempt_started=time.time()
                     attempt_deadline=min(model_deadline,time.time()+getattr(self,'request_timeout',150)) if getattr(self,'call_timeout',180)>180 else model_deadline
@@ -263,9 +273,22 @@ class CompatibleAPI:
                     self.last_reasoning_chars=len(data['choices'][0]['message'].get('reasoning_content') or data['choices'][0]['message'].get('reasoning') or '')
                     self.last_thinking_requested=request_body.get('thinking',{}).get('type')
                     usage=data.get('usage',{})
+                    self.last_free_ai_usage={k:v for k,v in data.get('free_ai_usage',{}).items() if k in ('tokens_used','tokens_charged','source','model')} if isinstance(data.get('free_ai_usage'),dict) else {}
                     self.last_usage={key:usage[key] for key in ('prompt_tokens','completion_tokens','total_tokens') if isinstance(usage,dict) and type(usage.get(key)) is int and usage[key]>=0}
                     return result
                 except urllib.error.HTTPError as exc:
+                    if freeai and exc.code in (402,429):
+                        try:delay=max(60,int(exc.headers.get('Retry-After','3600')))
+                        except (ValueError,TypeError):delay=3600
+                        self.key_cooldowns[key_index]=time.time()+delay
+                        self.key_statuses[key_index]='freeai_quota_or_rate_limit'
+                        try:health=json.loads(self.health_path.read_text(encoding='utf-8'))
+                        except FileNotFoundError:health={}
+                        slot=hashlib.sha256((self.base+'\0'+key).encode()).hexdigest()
+                        health[slot]={'status':'freeai_quota_or_rate_limit','retry_after_epoch':self.key_cooldowns[key_index]}
+                        atomic_json(self.health_path,health)
+                        failures.append('HTTP '+str(exc.code)+' (freeai key slot '+str(key_index+1)+')')
+                        continue
                     if weekly is not None and is_tokenharbor_free(self.base,model):
                         try:quota_detail=json.loads(exc.read(4096))
                         except (ValueError,OSError):quota_detail={}
