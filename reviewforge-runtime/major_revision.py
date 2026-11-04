@@ -298,7 +298,8 @@ def main():
     load_env(Path(__file__).parent/'.env');api=CompatibleAPI()
     if not all(is_tokenharbor_free(api.base,m) for m in (api.model,api.reviewer_model)):raise ValueError('This workflow is restricted to configured TokenHarbor free models')
     from freeai_provider import allowed_freeai
-    api.providers=[p for p in api.providers if all(is_tokenharbor_free(p.base,m) for m in (p.model,p.reviewer_model,p.fallback_model)) or allowed_freeai(p)]
+    from beatapi_provider import allowed_beatapi
+    api.providers=[p for p in api.providers if all(is_tokenharbor_free(p.base,m) for m in (p.model,p.reviewer_model,p.fallback_model)) or allowed_freeai(p) or allowed_beatapi(p)]
     if not is_tokenharbor_free(api.base,api.fallback_model):raise ValueError('Fallback model must also be TokenHarbor free')
     api.request_provider='primary';api.request_stage='manuscript';api.thinking_mode='disabled'
     def ask(system,payload,required,role):
