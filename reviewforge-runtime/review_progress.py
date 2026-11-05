@@ -6,6 +6,13 @@ from pathlib import Path
 def read_json(path,default=None):
  return json.loads(path.read_text(encoding='utf-8')) if path.exists() else default
 
+def local_stamp(epoch):
+ try:
+  from zoneinfo import ZoneInfo
+  zone=ZoneInfo('Pacific/Auckland')
+ except Exception:zone=timezone.utc
+ return datetime.fromtimestamp(epoch,zone).strftime('%Y-%m-%d %H:%M:%S %Z')
+
 def major_progress(run):
  folder=run/'major_revision';log=folder/'running.log'
  roots=[p.parent for p in folder.glob('*/plan.json')]
@@ -40,6 +47,7 @@ def major_progress(run):
   if status=='PAUSED':
    state='已暂停';reason=final.get('reason') or final.get('error_type','未知原因')
    category=final.get('request_failure',{}).get('category')
+   if category=='scientific_revision_required':reason='科学审查仍需修订；已通过内容保留。'+str(final.get('reason',''))
    if category in ('rate_limit','weekly_allowance_exhausted'):
     reason='接口限流，等待账号冷却' if category=='rate_limit' else '账号周额度耗尽，等待刷新'
     deadline=read_json(root/'monitor_wait.json',{}).get('retry_not_before_epoch',0)
@@ -62,7 +70,11 @@ def major_progress(run):
  out=root/'delivery/output';translation=read_json(out/'reports/translation_progress.json',[])
  if isinstance(translation,dict):translation=translation.get('units',[])
  activity=next((line for line in reversed(lines) if line.startswith('[major-revision]') or line.startswith('[canonical]')),'')
+ unit_files=list((root/'argument_units').glob('*/progress.json'))
+ unit_progress=read_json(max(unit_files,key=lambda p:p.stat().st_mtime),{}) if unit_files else {}
+ log_updated=local_stamp(log.stat().st_mtime) if log.exists() else ''
  return {'kind':'major_revision','state':state,'stage':phase,'completed':completed,'total':total,'study':(final or {}).get('study') or info.get('study',''),
+         'argument_units':unit_progress,'log_updated_at':log_updated,
          'passed':sum(u.get('status')=='PASS' for u in translation),'recorded':len(translation),'reason':reason,'activity':activity,
          'english':(out/'output/review_en.pdf').is_file(),'chinese':(out/'output/review_zh.pdf').is_file(),'output':str(out/'output')}
 
@@ -104,6 +116,9 @@ def main():
      phases={'facts':'文献事实整理与复核','reconstruction':'七章正文重构','prepared':'大修准备','export':'审查与双语导出'}
      label='文献' if d['stage']=='facts' else '章节'
      print('状态：'+d['state']+'\n当前阶段：'+phases.get(d['stage'],d['stage'])+'\n本阶段进度：'+str(d['completed'])+'/'+str(d['total'])+' '+label+'（不是全流程百分比）'+('\n当前文献：'+d['study'] if d['study'] else '')+'\n最近活动：'+d['activity']+'\n本轮英文PDF：'+('已生成' if d['english'] else '未生成')+'；本轮中文PDF：'+('已生成' if d['chinese'] else '未生成')+'\n'+('暂停原因：'+d['reason']+'\n' if d['reason'] else '')+'文件位置：'+d['output'],flush=True)
+     if d.get('log_updated_at'):print('日志更新时间：'+d['log_updated_at'],flush=True)
+     units=d.get('argument_units',{})
+     if units:print('最近章节单元记录：'+str(units.get('completed',0))+'/'+str(units.get('total',0))+'；待修订：'+(', '.join(units.get('unresolved_units',[])) or '按当前审查结果继续'),flush=True)
     else:
      print('状态：'+d['state']+'\n中文翻译：已通过 '+str(d['passed'])+' 个单元（总数尚未统计，不显示百分比）\n英文PDF：'+('已生成' if d['english'] else '未生成')+'；中文PDF：'+('已生成' if d['chinese'] else '未生成')+'\n'+('暂停原因：'+d['reason']+'\n' if d['reason'] else '')+'文件位置：'+d['output'],flush=True)
     last=d

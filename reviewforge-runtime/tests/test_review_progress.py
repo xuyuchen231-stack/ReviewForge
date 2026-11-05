@@ -6,6 +6,17 @@ from review_progress import progress
 
 
 class ReviewProgressTests(unittest.TestCase):
+    def test_scientific_pause_shows_unit_progress_and_log_time(self):
+        with tempfile.TemporaryDirectory() as d:
+            runtime,run,root=self.fixture(d)
+            folder=root/'argument_units/current';folder.mkdir(parents=True)
+            (folder/'progress.json').write_text(json.dumps({'stage':'units_need_revision','completed':7,'total':8,'unresolved_units':['u8']}))
+            (run/'major_revision/running.log').write_text(json.dumps({'status':'PAUSED','details':str(root),'request_failure':{'category':'scientific_revision_required'},'reason':'Argument units u8 require revision'}))
+            data=progress(runtime)
+            self.assertEqual(data['argument_units']['completed'],7)
+            self.assertEqual(data['argument_units']['unresolved_units'],['u8'])
+            self.assertTrue(data['log_updated_at'])
+            self.assertIn('审查',data['reason'])
     def test_rate_limit_reports_cause_and_saved_deadline(self):
         with tempfile.TemporaryDirectory() as d:
             runtime,run,root=self.fixture(d)
