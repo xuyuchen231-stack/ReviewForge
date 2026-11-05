@@ -112,6 +112,7 @@ def main():
  while True:
   try:
    d=progress(Path(__file__).resolve().parent)
+   print('检查时间：'+local_stamp(time.time())+('（每10秒自动检查）' if '--watch' in sys.argv else ''),flush=True)
    if d!=last:
     if d.get('kind')=='major_revision':
      phases={'facts':'文献事实整理与复核','reconstruction':'七章正文重构','prepared':'大修准备','export':'审查与双语导出'}
