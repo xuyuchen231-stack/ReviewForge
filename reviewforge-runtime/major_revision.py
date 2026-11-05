@@ -87,7 +87,7 @@ def review_section(ask,payload,candidate,save,pending=None,root=None):
             return pending,validate_paragraph_review(body,pending)
         except ValueError:pass
     limit=max(10000,min(120000,int(os.environ.get('RF_MAX_REQUEST_INPUT_CHARS','90000'))))
-    packets=review_batches(REVIEW,payload,candidate,limit);reports=[]
+    packets=review_batches(REVIEW,payload,candidate,limit,followup_reserve=12000);reports=[]
     all_studies=payload.get('canonical_studies',[])
     for packet in packets:
         feedback=None

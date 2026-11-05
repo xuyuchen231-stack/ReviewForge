@@ -4,6 +4,12 @@ from efficient_payload import project_payload,encoded_size
 from paragraph_review import paragraph_options
 
 class BoundedReviewTests(unittest.TestCase):
+ def test_review_batches_leave_space_for_evidence_followup(self):
+  body='\n\n'.join('Evidence '+str(i)+' '+('specific '*35)+'.' for i in range(20))
+  batches=review_batches('review',{'canonical_studies':[]},{'latex':body},10000,followup_reserve=2000)
+  self.assertGreater(len(batches),1)
+  self.assertTrue(all(encoded_size(project_payload(b))+len('review')<=8000 for b in batches))
+  self.assertEqual([p['id'] for b in batches for p in b['paragraph_options']],[p['id'] for p in paragraph_options(body)])
  def test_unresolved_primary_requests_cannot_pass_after_resume(self):
   from major_revision import review_section,CHECKS
   body='The source reports 230 batches.';candidate={'latex':body};pid=paragraph_options(body)[0]['id'];saved=[]

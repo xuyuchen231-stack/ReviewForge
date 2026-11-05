@@ -17,7 +17,7 @@ CLARIFICATIONS=('Evaluate material scientific and editorial defects, not an idea
  'Mark reviewer uncertainty rather than inventing a requirement. Verify the supplied revision response independently; it cannot approve its own text. '
  'Return concise issues and one short sentence per paragraph message/adds/reason. For disputed primary wording return evidence_requests: [{citekey,fields:[field names]}] or [fact IDs]; do not pass a claim with unresolved evidence requests.')
 
-def review_batches(system,payload,candidate,limit=90000,max_paragraphs=10):
+def review_batches(system,payload,candidate,limit=90000,max_paragraphs=10,followup_reserve=0):
     body=candidate['latex'];records=paragraph_records(body)
     if not records:return [{**payload,'candidate':candidate,'paragraph_options':paragraph_options(body),'review_criteria':CLARIFICATIONS}]
     pieces=[];cursor=0
@@ -51,10 +51,13 @@ def review_batches(system,payload,candidate,limit=90000,max_paragraphs=10):
         # This is bounded by the unit; large chapters use compact paragraph anchors instead.
         local['whole_unit_context']=[{'id':r['id'],'opening':r['start_anchor']} for r in records]
         return local
+    # Leave room for requested primary quotes and schema diagnostics. One
+    # indivisible paragraph may still use the hard limit; it is never truncated.
+    group_limit=limit-min(max(0,followup_reserve),limit//4)
     groups=[];group=[]
     for piece in pieces:
         trial=group+[piece]
-        if group and (len(trial)>max_paragraphs or len(system)+encoded_size(project_payload(packet(trial)))>limit):
+        if group and (len(trial)>max_paragraphs or len(system)+encoded_size(project_payload(packet(trial)))>group_limit):
             groups.append(group);group=[piece]
         else:group=trial
         if len(system)+encoded_size(project_payload(packet(group)))>limit:
