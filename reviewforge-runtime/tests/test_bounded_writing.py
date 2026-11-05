@@ -5,6 +5,19 @@ from paragraph_review import paragraph_options
 from test_paragraph_review import keep
 
 class UnitWritingTests(unittest.TestCase):
+ def test_upstream_context_change_preserves_unresolved_repair_feedback(self):
+  import json
+  from reviewforge import atomic_json
+  from pipeline_recovery import UnitRevisionsPending
+  ask,review,calls=self.service()
+  with tempfile.TemporaryDirectory() as d:
+   write_units(ask,self.payload(),Path(d),'writer',review,{'facts'},{'f1':('A',{})})
+   folder=next((Path(d)/'argument_units').iterdir());path=folder/'u2.json';row=json.loads(path.read_text())
+   row.update(accepted=False,stage='needs_repair',context_sha256='old-context',review={'issues':['Specific unresolved evidence']})
+   atomic_json(path,row);atomic_json(folder/'u2.budget.json',{'epoch':'old','full_writes':4,'paragraph_patches':6})
+   with self.assertRaises(UnitRevisionsPending):write_units(ask,self.payload(),Path(d),'writer',review,{'facts'},{'f1':('A',{})})
+   saved=json.loads(path.read_text());self.assertEqual(saved['review']['issues'],['Specific unresolved evidence'])
+   self.assertFalse(saved['accepted'])
  def test_repair_edits_current_unit_while_original_review_sources_stay_unchanged(self):
   from bounded_writing import repair_writer_payload
   local={'original_material':'Long legacy survey','canonical_studies':[{'citekey':'A'},{'citekey':'B'}]}

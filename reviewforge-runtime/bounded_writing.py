@@ -231,7 +231,8 @@ def write_units(ask, payload, root, write_contract, review, checks, eligible, re
             stage = record.get('stage')
             if stage not in ('needs_repair', 'invalid'):
                 stage = 'pending_review' if not candidate_errors(record['candidate'], refs, eligible, unit.get('kind', 'empirical')) else 'invalid'
-            record.update(accepted=False, stage=stage, review=None, context_sha256=context_hash)
+            unresolved_review=record.get('review') if stage in ('needs_repair','invalid') else None
+            record.update(accepted=False, stage=stage, review=unresolved_review, context_sha256=context_hash)
             atomic_json(path, record)
         atomic_json(folder/'progress.json', {'stage': 'argument_writing', 'unit': unit_id,
                                            'completed': len(completed), 'total': len(units)})
