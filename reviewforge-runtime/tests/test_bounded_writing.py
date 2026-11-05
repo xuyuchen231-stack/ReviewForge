@@ -5,6 +5,17 @@ from paragraph_review import paragraph_options
 from test_paragraph_review import keep
 
 class UnitWritingTests(unittest.TestCase):
+ def test_repair_selection_retains_all_objections_without_passed_audit_bulk(self):
+  from bounded_writing import repair_selection_payload
+  issue={'paragraph_id':'p2','decision':'revise','destination':'main','reason':'Missing qualification'}
+  feedback={'issues':['All objections remain'],'checks':{'facts':False},'scientific_conflicts':[{'paragraph_ids':['p2'],'reason':'Conflict'}],
+            'paragraph_review':[{'paragraph_id':'p1','decision':'keep','destination':'main'},issue],
+            'paragraph_changes_required':[issue],'source_checks_inherited':[{'huge':'x'*100000}]}
+  result=repair_selection_payload(feedback,[{'id':'u1'}],'Exact complete section')
+  self.assertEqual(result['candidate'],'Exact complete section')
+  self.assertEqual(result['review']['issues'],feedback['issues']);self.assertEqual(result['review']['scientific_conflicts'],feedback['scientific_conflicts'])
+  self.assertEqual(result['review']['paragraph_review'],[issue]);self.assertNotIn('source_checks_inherited',result['review'])
+  self.assertEqual(len(feedback['paragraph_review']),2)
  def test_context_epoch_change_does_not_reset_spent_write_budget(self):
   import json
   from pipeline_recovery import UnitRevisionsPending
