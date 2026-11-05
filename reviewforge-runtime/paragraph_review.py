@@ -42,7 +42,10 @@ def preserve_relocations(directory,text,changes):
 
 
 def validate_paragraph_review(text,review):
-    options=paragraph_options(text);rows=review.get('paragraph_review')
+    return validate_options_review(paragraph_options(text),review)
+
+def validate_options_review(options,review):
+    rows=review.get('paragraph_review')
     if not options or not isinstance(rows,list) or any(not isinstance(r,dict) for r in rows):raise ValueError('Paragraph review mapping required')
     if any(not isinstance(r.get('paragraph_id'),str) for r in rows) or Counter(r['paragraph_id'] for r in rows)!=Counter(p['id'] for p in options):raise ValueError('Paragraph review must cover each current paragraph exactly once')
     issues=[]
@@ -50,5 +53,10 @@ def validate_paragraph_review(text,review):
         if row.get('function') not in ('context','definition','evidence','comparison','analysis','implication','qualification','proposal') or row.get('decision') not in ('keep','revise','merge','move','delete') or row.get('destination') not in ('main','evidence_matrix','supplement'):
             raise ValueError('Invalid paragraph function or placement decision')
         if any(not isinstance(row.get(k),str) or not row[k].strip() for k in ('message','adds','reason')):raise ValueError('Paragraph review needs actual message, contribution and rationale')
-        if row['decision']!='keep' or row['destination']!='main':issues.append(row)
+        severity=row.get('severity','major')
+        if severity not in ('critical','major','minor','observation'):raise ValueError('Invalid paragraph issue severity')
+        category=row.get('category','scientific_reasoning')
+        if category not in ('factual','mathematical','evidence_scope','scientific_reasoning','style','placement'):raise ValueError('Invalid paragraph issue category')
+        optional=severity in ('minor','observation') and category=='style'
+        if (row['decision']!='keep' or row['destination']!='main') and not optional:issues.append(row)
     return issues

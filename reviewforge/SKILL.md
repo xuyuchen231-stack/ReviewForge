@@ -44,6 +44,20 @@ alone neither grants email permission nor provides background execution.
 
 ## Runtime repair verification
 
+For large major revisions, follow the runtime's bounded request path rather than
+embedding the full registry in every writing/review call. Later calls reuse exact
+verified fact values **with their qualifications**; complete primary quotations stay
+local and must be retrieved when specifically disputed. A qualified record does
+not approve all details in its value. Unresolved requests for evidence block acceptance.
+Review intact paragraph batches with complete coverage, then check all unit claims
+together for distant conflicts. Inherit source checks only from hash-bound accepted
+units whose assembled text is unchanged; retain the final manuscript scientific audit.
+Optional minor wording preferences cannot trigger endless scientific repair loops.
+Never clear cumulative budgets on restart or upstream context changes. Consult the
+append-only physical-send usage journal; failed requests may have unknown charges,
+and historical unrecorded usage is not zero. See
+`references/bounded-execution.md` for runtime limits and verification.
+
 When repairing an overnight runtime, do not hand the user another rerun command after only a short API ping or isolated extraction. Verify the complete affected route in a separate manuscript snapshot: planning, evidence, whole-unit writing, reviewer judgment, repair/resume and assembly. Run fault-injection tests for malformed/truncated responses, account cooldown, interrupted drafts, cache validity, issue resolution and stale bilingual outputs. Report exactly which live stages passed and any external blocker; never fabricate a passing scientific review to complete a software test.
 
 Evidence extraction should select immutable, located source-span IDs; code copies exact quotations. Per-unit study snapshots prevent unrelated later evidence extraction from changing an already reviewed contract. Missing evidence remains unresolved. Originals and private source material stay local.

@@ -173,7 +173,16 @@ def write_units(ask, payload, root, write_contract, review, checks, eligible, re
         budget_epoch=signature([context_hash,feedback_hash])
         budget=json.loads(budget_file.read_text(encoding='utf-8')) if budget_file.exists() else {}
         if budget.get('epoch')!=budget_epoch:
-            budget={'epoch':budget_epoch,'full_writes':0,'paragraph_patches':0}
+            budget={**budget,'epoch':budget_epoch,'full_writes':budget.get('full_writes',0),'paragraph_patches':budget.get('paragraph_patches',0)}
+        # Changing transport/review implementation does not discard accepted work.
+        # A legacy rejection gets one independent bounded re-evaluation under
+        # explicit criteria, not automatic approval or a reset edit budget.
+        from bounded_review import POLICY as CURRENT_REVIEW_POLICY
+        if (not record.get('accepted') and record.get('stage')=='reviewed'
+            and isinstance(record.get('review'),dict) and record['review'].get('review_policy')!=CURRENT_REVIEW_POLICY
+            and review_contract and not candidate_errors(record['candidate'],refs,eligible,unit.get('kind','empirical'))):
+            record.update(stage='pending_review',review=None,review_revalidation_policy=CURRENT_REVIEW_POLICY)
+            atomic_json(path,record)
         if record and record.get('context_sha256') != context_hash:
             # A saved pending report is also stale after an upstream repair.
             # Preserve the draft, never accept an old-context report, and keep
@@ -271,7 +280,7 @@ def write_units(ask, payload, root, write_contract, review, checks, eligible, re
         raise UnitRevisionsPending('Argument units '+','.join(deferred)+' require revision; other units saved, no section approval claimed')
     result = {'latex': '\\section{'+payload['title']+'}\n'+ '\n\n'.join(
         '\\subsection{'+unit['heading']+'}\n'+record['candidate']['latex'] for unit, record in zip(units, completed)),
-        '_argument_units': units}
+        '_argument_units': units,'_argument_units_binding':binding}
     for field in ('evidence_synthesis', 'retained_analytical_examples', 'removed_redundancy'):
         result[field] = [entry for record in completed for entry in record['candidate'].get(field, [])]
     atomic_json(folder/'progress.json', {'stage': 'awaiting_whole_section_review', 'completed': len(units), 'total': len(units)})

@@ -12,7 +12,7 @@ def run_with_recovery(operation,classify,on_retry,sleep=time.sleep,max_retries=3
         try:return operation()
         except Exception as exc:
             failure=classify(exc)
-            recoverable=isinstance(exc,UnitRevisionsPending) or failure.get('category') in transient
+            recoverable=not isinstance(exc,UnitRevisionsPending) and failure.get('category') in transient
             if not recoverable or attempt==max_retries:raise
             # Long quota cooldowns stay explicit blockers; don't restart-spam.
             delay=max(10*(2**attempt),int(failure.get('retry_after_seconds',0) or 0))

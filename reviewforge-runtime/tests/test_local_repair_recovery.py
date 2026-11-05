@@ -4,6 +4,12 @@ from local_paragraph_repair import repair_paragraphs
 from paragraph_review import paragraph_records
 from pipeline_recovery import run_with_recovery
 class RepairRecoveryTests(unittest.TestCase):
+ def test_unresolved_scientific_units_do_not_restart_the_workflow(self):
+  from pipeline_recovery import UnitRevisionsPending
+  calls=[]
+  def operation():calls.append(1);raise UnitRevisionsPending('u8 requires repair')
+  with self.assertRaises(UnitRevisionsPending):run_with_recovery(operation,lambda e:{'category':'scientific_revision_required'},lambda *a:None,sleep=lambda _:None)
+  self.assertEqual(len(calls),1)
  def test_patch_preserves_other_paragraphs_and_math(self):
   original=r'The estimate is $x=1$ for 23 batches. Needless closing words.'+'\n\n'+r'Another finding \cite{A}.'
   rows=paragraph_records(original);candidate={'latex':original,'evidence_synthesis':[{'finding':'23','citekeys':['A'],'fact_ids':['f1']}]}

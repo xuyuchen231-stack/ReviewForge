@@ -5,6 +5,24 @@ from paragraph_review import paragraph_options
 from test_paragraph_review import keep
 
 class UnitWritingTests(unittest.TestCase):
+ def test_context_epoch_change_does_not_reset_spent_write_budget(self):
+  import json
+  from pipeline_recovery import UnitRevisionsPending
+  ask,review,calls=self.service()
+  def rejected(ask,payload,candidate,save,pending=None):
+   if payload['unit_id']=='u1':
+    r={'accepted':False,'checks':{'facts':False},'issues':['Unresolved fact'],'paragraph_review':[]};save(r);return r,[]
+   return review(ask,payload,candidate,save,pending)
+  def scoped(system,payload,required,role):
+   if required=='unit_ids':return {'unit_ids':['u1']}
+   return ask(system,payload,required,role)
+  with tempfile.TemporaryDirectory() as d:
+   for _ in range(2):
+    with self.assertRaises(UnitRevisionsPending):write_units(scoped,self.payload(),Path(d),'writer',rejected,{'facts'},{'f1':('A',{})})
+   before=calls.count(('latex','u1'))
+   payload={**self.payload(),'repair_feedback':{'issues':['Same fact remains wrong']},'previous_candidate':'previous chapter','_repair_generation':4}
+   with self.assertRaises(UnitRevisionsPending):write_units(scoped,payload,Path(d),'writer',rejected,{'facts'},{'f1':('A',{})})
+   self.assertEqual(calls.count(('latex','u1')),before)
  def payload(self):
   return {'title':'Evidence','word_budget':5500,'original_material':r'\section{Old} First evidence \cite{A}.'+'\n\n'+r'Another comparison \cite{A}.','known_citekeys':['A'],'canonical_studies':[{'citekey':'A','facts':{'count':{'id':'f1','value':230}}}],'previous_paragraph_messages':[]}
  def service(self,fail=None):

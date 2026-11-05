@@ -73,8 +73,9 @@ def major_progress(run):
  unit_files=list((root/'argument_units').glob('*/progress.json'))
  unit_progress=read_json(max(unit_files,key=lambda p:p.stat().st_mtime),{}) if unit_files else {}
  log_updated=local_stamp(log.stat().st_mtime) if log.exists() else ''
+ from request_accounting import usage_summary
  return {'kind':'major_revision','state':state,'stage':phase,'completed':completed,'total':total,'study':(final or {}).get('study') or info.get('study',''),
-         'argument_units':unit_progress,'log_updated_at':log_updated,
+         'argument_units':unit_progress,'log_updated_at':log_updated,'usage':usage_summary(root/'model_requests/requests.jsonl'),
          'passed':sum(u.get('status')=='PASS' for u in translation),'recorded':len(translation),'reason':reason,'activity':activity,
          'english':(out/'output/review_en.pdf').is_file(),'chinese':(out/'output/review_zh.pdf').is_file(),'output':str(out/'output')}
 
@@ -119,6 +120,8 @@ def main():
      if d.get('log_updated_at'):print('日志更新时间：'+d['log_updated_at'],flush=True)
      units=d.get('argument_units',{})
      if units:print('最近章节单元记录：'+str(units.get('completed',0))+'/'+str(units.get('total',0))+'；待修订：'+(', '.join(units.get('unresolved_units',[])) or '按当前审查结果继续'),flush=True)
+     usage=d.get('usage',{})
+     if usage:print('新日志已记录Token：输入 '+str(usage.get('prompt_tokens',0))+'；输出 '+str(usage.get('completion_tokens',0))+'；缓存复用 '+str(usage.get('cache_hits',0))+' 次；用量未确认请求 '+str(usage.get('unknown_charge_attempts',0))+' 次（不含历史未记录用量）',flush=True)
     else:
      print('状态：'+d['state']+'\n中文翻译：已通过 '+str(d['passed'])+' 个单元（总数尚未统计，不显示百分比）\n英文PDF：'+('已生成' if d['english'] else '未生成')+'；中文PDF：'+('已生成' if d['chinese'] else '未生成')+'\n'+('暂停原因：'+d['reason']+'\n' if d['reason'] else '')+'文件位置：'+d['output'],flush=True)
     last=d

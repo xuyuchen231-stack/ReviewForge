@@ -51,6 +51,7 @@ def audit(text,registry):
 
 
 def validate_review(items,report,registry):
+    if report.get('evidence_requests'):raise ValueError('Scientific review has unresolved primary evidence requests')
     verdicts=report.get('passages',[])
     if Counter(v.get('id') for v in verdicts)!=Counter(p['id'] for p in items):raise ValueError('Scientific review must cover every passage exactly once')
     byid={p['id']:p for p in items};failures=[]
@@ -76,10 +77,18 @@ def validate_review(items,report,registry):
 
 
 def review_manuscript(text,registry,ask,directory,batch_chars=14000):
+    import os
+    from efficient_payload import project_payload,encoded_size,InputBudgetExceeded
+    from review_evidence import ask_with_evidence
+    request_limit=max(10000,min(120000,int(os.environ.get('RF_MAX_REQUEST_INPUT_CHARS','90000'))))
+    def request_size(group):
+        keys={k for p in group for k in p['citekeys']}
+        return len(REVIEW)+encoded_size(project_payload({'passages':group,'canonical_studies':facts_for_studies(registry,keys)}))
     root=Path(directory);root.mkdir(parents=True,exist_ok=True)
     result=audit(text,registry);items=passages(text);batches=[];batch=[];size=0
     for item in items:
-        if batch and size+len(item['text'])>batch_chars:batches.append(batch);batch=[];size=0
+        if batch and (size+len(item['text'])>batch_chars or request_size(batch+[item])>request_limit):batches.append(batch);batch=[];size=0
+        if request_size([item])>request_limit:raise InputBudgetExceeded('One scientific passage and its verified facts exceed input budget; full source retained, no model call made')
         batch.append(item);size+=len(item['text'])
     if batch:batches.append(batch)
     result.update(status='INCOMPLETE',reviewed_passages=0,unresolved=[])
@@ -93,7 +102,7 @@ def review_manuscript(text,registry,ask,directory,batch_chars=14000):
             if saved.get('binding')!=binding:raise ValueError('Stale scientific review cache')
             report=saved['review']
         else:
-            report=ask(REVIEW,payload,'passages','reviewer')
+            report=ask_with_evidence(ask,REVIEW,payload,'passages')
         failures=validate_review(batch,report,registry)
         atomic_json(cache,{'binding':binding,'review':report,'expert_verified':False})
         result['reviewed_passages']+=len(batch);result['unresolved']+=failures
@@ -110,7 +119,8 @@ def review_manuscript(text,registry,ask,directory,batch_chars=14000):
             saved=json.loads(cache.read_text(encoding='utf-8'))
             if saved.get('binding')!=binding:raise ValueError('Stale global scientific review')
             report=saved['review']
-        else:report=ask(GLOBAL_REVIEW,payload,'examined_passage_ids','reviewer')
+        else:report=ask_with_evidence(ask,GLOBAL_REVIEW,payload,'examined_passage_ids')
+        if report.get('evidence_requests'):raise ValueError('Global scientific review has unresolved evidence requests')
         ids={p['id'] for p in related}
         if Counter(report.get('examined_passage_ids',[]))!=Counter(ids) or report.get('status') not in ('pass','fail','uncertain') or not report.get('reason') or not isinstance(report.get('conflicts'),list):raise ValueError('Incomplete cross-section review')
         for issue in report['conflicts']:

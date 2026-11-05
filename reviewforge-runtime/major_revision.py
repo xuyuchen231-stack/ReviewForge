@@ -4,6 +4,7 @@ import json
 import re
 import time
 import threading
+import os
 from pathlib import Path
 from manuscript_integrity import citekeys,tex_integrity
 from reviewforge import atomic_json
@@ -71,18 +72,47 @@ def prepare(source,run):
     return root
 
 
-def review_section(ask,payload,candidate,save,pending=None):
-    body=candidate['latex'];feedback=None
-    for attempt in range(2):
-        report=pending if attempt==0 and pending is not None else ask(REVIEW,{**payload,'candidate':candidate,'paragraph_options':paragraph_options(body),'prose_diagnostics':prose_diagnostics(body),'schema_feedback':feedback},'accepted','reviewer')
-        save(report)
+def review_section(ask,payload,candidate,save,pending=None,root=None):
+    if root is not None and candidate.get('_argument_units_binding'):
+        from assembly_review import review_assembly
+        return review_assembly(ask,payload,candidate,root,CHECKS,save,pending)
+    from bounded_review import review_batches,combine_reviews,POLICY as REVIEW_POLICY
+    from paragraph_review import validate_options_review
+    body=candidate['latex']
+    # Valid pending current-policy reports survive interruption. Legacy rejected
+    # reports get one new bounded review, never automatic acceptance.
+    if pending is not None and not pending.get('review_incomplete') and not pending.get('evidence_requests') and (pending.get('review_policy')==REVIEW_POLICY or pending.get('accepted') is True):
         try:
-            if not isinstance(report,dict) or type(report.get('accepted')) is not bool or not isinstance(report.get('issues'),list) or not isinstance(report.get('checks'),dict) or any(type(report['checks'].get(c)) is not bool for c in CHECKS):raise ValueError('Section review must include all declared checks and issue inventory')
-            changes=validate_paragraph_review(body,report)
-            return report,changes
-        except ValueError as exc:
-            feedback=str(exc)
-            if attempt==1:raise ValueError('Section reviewer schema incomplete after bounded repair: '+feedback) from exc
+            if any(type(pending.get('checks',{}).get(c)) is not bool for c in CHECKS):raise ValueError('Incomplete pending checks')
+            return pending,validate_paragraph_review(body,pending)
+        except ValueError:pass
+    limit=max(10000,min(120000,int(os.environ.get('RF_MAX_REQUEST_INPUT_CHARS','90000'))))
+    packets=review_batches(REVIEW,payload,candidate,limit);reports=[]
+    all_studies=payload.get('canonical_studies',[])
+    for packet in packets:
+        feedback=None
+        for attempt in range(2):
+            request={**packet,'prose_diagnostics':prose_diagnostics(packet['candidate']['latex']),'schema_feedback':feedback}
+            report=ask(REVIEW,request,'accepted','reviewer')
+            try:
+                if not isinstance(report,dict) or type(report.get('accepted')) is not bool or not isinstance(report.get('issues'),list) or not isinstance(report.get('checks'),dict) or any(type(report['checks'].get(c)) is not bool for c in CHECKS):raise ValueError('Section review must include all declared checks and issue inventory')
+                validate_options_review(packet['paragraph_options'],report)
+                evidence=report.get('evidence_requests',[])
+                if evidence:
+                    if attempt:raise ValueError('Requested primary evidence remains unresolved after bounded review')
+                    from review_evidence import add_requested_evidence
+                    packet=add_requested_evidence(packet,evidence,all_studies)
+                    feedback='Check the explicitly requested primary evidence. Unresolved claims cannot pass.'
+                    continue
+                reports.append(report);break
+            except ValueError as exc:
+                if len(packets)==1:save({**report,'accepted':False,'review_incomplete':True})
+                feedback=str(exc)
+                if attempt==1:raise ValueError('Section reviewer schema/evidence incomplete after bounded repair: '+feedback) from exc
+    combined=combine_reviews(reports,CHECKS)
+    changes=validate_paragraph_review(body,combined)
+    save(combined)
+    return combined,changes
 
 
 def needs_argument_units(payload):
@@ -142,7 +172,7 @@ def build(source,run,ask,global_repairs=1):
                     atomic_json(cache,record)
                     def save_review(report):
                         record['review']=report;atomic_json(cache,record)
-                    review,paragraph_changes=review_section(ask,payload,candidate,save_review,pending)
+                    review,paragraph_changes=review_section(ask,payload,candidate,save_review,pending,root=root)
                 else:review={'accepted':False,'issues':errors,'checks':{}}
                 if paragraph_changes:
                     preserve_relocations(root,body,paragraph_changes)
@@ -225,6 +255,44 @@ def delivery_chat(ask,system,payload,role):
 def provider_request(api,system,payload,required,role,retry=None):
     from editorial_refinement import resilient_request
     from reviewforge import encode_model_payload,extract_json
+    from efficient_payload import project_payload,encoded_size,partition_writing,partition_fact_review,InputBudgetExceeded,POLICY as WIRE_POLICY
+    from request_accounting import RequestJournal,TransportTracker
+    limit=max(10000,min(120000,int(os.environ.get('RF_MAX_REQUEST_INPUT_CHARS','90000'))))
+    if required=='fields' and isinstance(payload.get('source'),dict) and 'evidence_spans' in payload['source']:
+        # Source extraction happens once per immutable document version and must
+        # inspect the complete supplied packet. It has its own explicit bound.
+        limit=180000
+    wire=project_payload(payload);encoded=encode_model_payload(wire)
+    input_size=len(system)+len(encoded)
+    if input_size>limit:
+        if required=='facts' and isinstance(payload.get('facts'),list):
+            parts=partition_fact_review(system,payload,limit)
+            if len(parts)<2:raise InputBudgetExceeded('Primary fact review cannot be safely divided')
+            results=[provider_request(api,system,p,'facts',role,retry) for p in parts]
+            return {'facts':[row for result in results for row in result['facts']]}
+        if required=='latex' and role=='writer':
+            partition_system=system.replace('Use the given section heading.','')+'\nSYSTEM: This is one portion of a partitioned writing task. Return body prose only, without section/subsection/document wrappers. Develop only the supplied source material; other portions will be assembled and independently reviewed. Do not repeat a generic introduction or conclusion.'
+            parts=partition_writing(partition_system,payload,limit)
+            if len(parts)<2:raise InputBudgetExceeded('Writing input exceeds budget and cannot be divided safely')
+            results=[provider_request(api,partition_system,p,'latex',role,retry) for p in parts]
+            bodies=[r['latex'] for r in results]
+            if any(re.search(r'\\(?:section|subsection|subsubsection)\*?\{',b) for b in bodies):
+                raise ValueError('Partitioned writing returned forbidden section wrappers; saved parts retained')
+            prefix='' if payload.get('unit_id') else '\\section{'+payload['title']+'}\n'
+            merged={'latex':prefix+'\n\n'.join(bodies)}
+            for field in ('retained_analytical_examples','removed_redundancy','evidence_synthesis'):
+                merged[field]=[item for r in results for item in r.get(field,[])]
+            return merged
+        raise InputBudgetExceeded('Request input is '+str(input_size)+' characters, above '+str(limit)+'; no model call made and no evidence truncated')
+    execution=getattr(api,'execution_root',None)
+    identity=signature([WIRE_POLICY,system,payload,signature(encoded),required,role,getattr(api,'base',None),getattr(api,'model',None),getattr(api,'reviewer_model',None),getattr(api,'fallback_model',None)])
+    journal=RequestJournal(Path(execution)/'requests.jsonl') if execution else None
+    cache=Path(execution)/'responses'/(identity+'.json') if execution else None
+    if cache is not None and cache.exists():
+        saved=json.loads(cache.read_text(encoding='utf-8'))
+        if saved.get('binding')!=identity or saved.get('response_sha256')!=signature(saved.get('response')):raise ValueError('Model response checkpoint hash mismatch')
+        token=journal.start(identity,role,input_size,len(system)+encoded_size(payload));journal.finish(token,'CACHE_HIT',{})
+        return saved['response']
     retry=retry or resilient_request
     request_limit=420 if role=='reviewer' else 360
     api.deadline=time.time()+request_limit;api.call_timeout=request_limit;api.request_timeout=90;api.max_tokens=12000 if role=='reviewer' else 18000
@@ -233,11 +301,33 @@ def provider_request(api,system,payload,required,role,retry=None):
     elif role=='writer' and required=='latex' and payload.get('word_budget',0)>=5000:
         api.max_tokens=36000
     def request():
-        from evidence_transport import compact_evidence
-        wire=compact_evidence(payload)
-        encoded=encode_model_payload(wire)
+        physical=execution is not None and callable(getattr(api,'_chat',None))
+        attempts_file=Path(execution)/'attempts'/(identity+'.json') if execution else None
+        attempts=json.loads(attempts_file.read_text(encoding='utf-8')) if attempts_file is not None and attempts_file.exists() else {'attempts':0,'chargeable_attempts':0}
+        if not physical and attempts.get('chargeable_attempts',attempts['attempts'])>=3:raise InputBudgetExceeded('Saved request attempt budget exhausted; cached work retained, no model call made')
+        attempts['attempts']+=1
+        attempts['chargeable_attempts']=attempts.get('chargeable_attempts',attempts['attempts']-1)+1
+        if attempts_file is not None:atomic_json(attempts_file,attempts)
         print('[major-revision/input] role='+role+' input_chars='+str(len(system)+len(encoded))+' payload_chars_before='+str(len(encode_model_payload(payload)))+' payload_chars_after='+str(len(encoded)),flush=True)
-        response=api.chat(system,encoded,role=role)
+        token=journal.start(identity,role,input_size,len(system)+encoded_size(payload)) if journal else None
+        api.last_usage={}
+        clients=[api]+getattr(api,'providers',[])
+        previous_trackers=[(client,getattr(client,'transport_tracker',None)) for client in clients]
+        if physical:api.transport_tracker=TransportTracker(execution,identity,role,input_size)
+        try:response=api.chat(system,encoded,role=role)
+        except Exception as exc:
+            from editorial_refinement import request_failure
+            if request_failure(exc).get('category') in ('rate_limit','weekly_allowance_exhausted'):
+                attempts['chargeable_attempts']-=1
+                if attempts_file is not None:atomic_json(attempts_file,attempts)
+            if journal:journal.finish(token,'FAILED',getattr(api,'last_usage',{}),error_type=type(exc).__name__)
+            raise
+        finally:
+            if physical:
+                for client,previous in previous_trackers:
+                    if previous is None:client.__dict__.pop('transport_tracker',None)
+                    else:client.transport_tracker=previous
+        if journal:journal.finish(token,'RETURNED',getattr(api,'last_usage',{}),model=getattr(api,'last_model',None),slot=getattr(api,'last_key_slot',None),provider=getattr(api,'last_provider',None))
         print('[major-revision/usage] '+json.dumps({'role':role,'account_slot':getattr(api,'last_key_slot',None),'model':getattr(api,'last_model',None),'usage':getattr(api,'last_usage',{})},ensure_ascii=True),flush=True)
         if getattr(api,'last_finish_reason',None)=='length':
             # The evidence-comparison section can exhaust 24k tokens including
@@ -255,7 +345,10 @@ def provider_request(api,system,payload,required,role,retry=None):
     def heartbeat():
         while not finished.wait(20):print('[major-revision] waiting role='+role+' elapsed='+str(int(time.monotonic()-started))+'s request_limit='+str(request_limit)+'s phase=awaiting_response stream_progress=unavailable',flush=True)
     thread=threading.Thread(target=heartbeat,daemon=True);thread.start()
-    try:return retry(request,api.deadline)
+    try:
+        result=retry(request,api.deadline)
+        if cache is not None:atomic_json(cache,{'binding':identity,'response':result,'response_sha256':signature(result),'scientifically_accepted':False})
+        return result
     finally:finished.set();thread.join(timeout=1)
 
 
@@ -271,6 +364,9 @@ def failure_record(exc,root,progress=None):
         if type(exc) is ValueError and filename in {'canonical_extraction.py','study_registry.py','scientific_quality.py','major_revision.py','bounded_writing.py','pipeline_recovery.py'}:
             report['reason']=str(exc)[:500];report['request_failure']['category']='validation_failure'
     from pipeline_recovery import UnitRevisionsPending
+    from efficient_payload import InputBudgetExceeded
+    if isinstance(exc,InputBudgetExceeded):
+        report['reason']=str(exc)[:500];report['request_failure']['category']='input_or_attempt_budget'
     if isinstance(exc,UnitRevisionsPending):
         report['reason']=str(exc)[:500];report['request_failure']['category']='scientific_revision_required'
     return report
@@ -302,6 +398,7 @@ def main():
     api.providers=[p for p in api.providers if all(is_tokenharbor_free(p.base,m) for m in (p.model,p.reviewer_model,p.fallback_model)) or allowed_freeai(p) or allowed_beatapi(p)]
     if not is_tokenharbor_free(api.base,api.fallback_model):raise ValueError('Fallback model must also be TokenHarbor free')
     api.request_provider='primary';api.request_stage='manuscript';api.thinking_mode='disabled'
+    api.execution_root=root/'model_requests'
     def ask(system,payload,required,role):
         print('[major-revision] request role='+role+'; cached completed stages are reused',flush=True)
         return provider_request(api,system,payload,required,role)

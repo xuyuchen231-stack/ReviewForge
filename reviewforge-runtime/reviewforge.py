@@ -197,7 +197,7 @@ class CompatibleAPI:
                 if remaining<=1:break
                 client.call_timeout=max(1,remaining/(len(clients)-index));client.deadline=min(until,time.time()+client.call_timeout)
                 if client is not self:
-                    for attr in ('max_tokens','request_timeout','thinking_mode','reasoning_effort'):
+                    for attr in ('max_tokens','request_timeout','thinking_mode','reasoning_effort','transport_tracker'):
                         if hasattr(self,attr):setattr(client,attr,getattr(self,attr))
                 try:result=client._chat(system,user,role)
                 except (RuntimeError,TimeoutError) as exc:
@@ -263,6 +263,9 @@ class CompatibleAPI:
                 if weekly is not None and is_tokenharbor_free(self.base,model) and weekly.blocked(self.base,key):continue
                 endpoint='https://api.free.ai/v1/chat/' if freeai else self.base+'/chat/completions'
                 req = urllib.request.Request(endpoint, data=body, headers={'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json'}, method='POST')
+                tracker=getattr(self,'transport_tracker',None)
+                transport_token=tracker.reserve(model,key_index+1,self.provider_name) if tracker else None
+                transport_usage={}
                 try:
                     attempt_started=time.time()
                     attempt_deadline=min(model_deadline,time.time()+getattr(self,'request_timeout',150)) if getattr(self,'call_timeout',180)>180 else model_deadline
@@ -271,6 +274,7 @@ class CompatibleAPI:
                         if not raw.strip():raise ValueError('Empty upstream body; bytes='+str(len(raw)))
                         try:data=json.loads(raw)
                         except json.JSONDecodeError as error:raise ValueError('Invalid upstream JSON; bytes='+str(len(raw))+'; position='+str(error.pos)) from None
+                    if isinstance(data,dict) and isinstance(data.get('usage'),dict):transport_usage=data['usage']
                     result = data['choices'][0]['message']['content']
                     if weekly is not None and is_tokenharbor_free(self.base,model):weekly.success(self.base,key,attempt_started)
                     if not isinstance(result, str) or not result.strip():
@@ -293,8 +297,10 @@ class CompatibleAPI:
                         health[slot]={'status':'beatapi_free_minute_window','retry_after_epoch':self.key_cooldowns[key_index]}
                         atomic_json(self.health_path,health)
                     self.last_usage={key:usage[key] for key in ('prompt_tokens','completion_tokens','total_tokens') if isinstance(usage,dict) and type(usage.get(key)) is int and usage[key]>=0}
+                    if tracker:tracker.finish(transport_token,'RETURNED',transport_usage)
                     return result
                 except urllib.error.HTTPError as exc:
+                    if tracker:tracker.finish(transport_token,'REFUSED',transport_usage,http_status=exc.code)
                     if (freeai or beatapi) and exc.code in (402,429):
                         try:delay=max(60,int(exc.headers.get('Retry-After','3600')))
                         except (ValueError,TypeError):delay=3600
@@ -350,6 +356,7 @@ class CompatibleAPI:
                     failures.append(model + ': HTTP ' + str(exc.code))
                     break
                 except Exception as exc:
+                    if tracker:tracker.finish(transport_token,'FAILED',transport_usage,error_type=type(exc).__name__)
                     network_error=isinstance(exc,(TimeoutError,ConnectionError,urllib.error.URLError,http.client.HTTPException))
                     if network_error and len(self.keys)>1:
                         self.key_index=(key_index+1)%len(self.keys)
