@@ -4,6 +4,15 @@ from local_paragraph_repair import repair_paragraphs
 from paragraph_review import paragraph_records
 from pipeline_recovery import run_with_recovery
 class RepairRecoveryTests(unittest.TestCase):
+ def test_many_local_edits_use_small_batches_without_rewriting_unit(self):
+  original='\n\n'.join('Evidence '+str(i)+' is supported. Needless words.' for i in range(7));rows=paragraph_records(original);calls=[]
+  review={'paragraph_review':[{'paragraph_id':r['id'],'decision':'revise','destination':'main','reason':'Trim.'} for r in rows]}
+  def ask(system,payload,*args):
+   calls.append(payload)
+   return {'replacements':[{'paragraph_id':p['paragraph_id'],'latex':p['original'].replace(' Needless words.','')} for p in payload['paragraphs']]}
+  result=repair_paragraphs(ask,{'latex':original},review,{'known_citekeys':[]})
+  self.assertEqual(len(calls),3);self.assertTrue(all(len(p['paragraphs'])<=3 for p in calls))
+  self.assertNotIn('Needless words.',result['latex']);self.assertEqual(len(paragraph_records(result['latex'])),7)
  def test_unresolved_scientific_units_do_not_restart_the_workflow(self):
   from pipeline_recovery import UnitRevisionsPending
   calls=[]

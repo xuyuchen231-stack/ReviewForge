@@ -93,6 +93,14 @@ def scoped_payload(payload,material):
 def partition_writing(system,payload,limit):
     from bounded_writing import source_blocks
     blocks=source_blocks(payload.get('original_material',''));groups=[];group=[]
+    refined=[]
+    for block in blocks:
+        single=scoped_payload(payload,block['text'])
+        if len(system)+encoded_size(project_payload(single))+1000>limit:
+            parts=sentence_blocks(block['text'])
+            if len(parts)>1:refined.extend({'text':p} for p in parts);continue
+        refined.append(block)
+    blocks=refined
     for block in blocks:
         trial=group+[block['text']];local=scoped_payload(payload,'\n\n'.join(trial))
         if group and len(system)+encoded_size(project_payload(local))+1000>limit:
@@ -111,3 +119,24 @@ def partition_writing(system,payload,limit):
         if len(system)+encoded_size(project_payload(local))>limit:raise InputBudgetExceeded('Partition metadata exceeds input budget')
         result.append(local)
     return result
+
+def sentence_blocks(text):
+    """Exact sentence boundaries outside TeX braces, math and environments."""
+    import re
+    boundaries={m.start() for m in re.finditer(r'(?<=[.!?])\s+(?=[A-Z\\])',text)
+                if not re.search(r'(?:\bet al|\be\.g|\bi\.e|\bFig|\bEq|\bDr|\bvs)\.$',text[:m.start()])
+                and not re.match(r'\s*\\(?:cite|ref|eqref)\b',text[m.start():])}
+    token=re.compile(r'\\begin\{[^}]+\}|\\end\{[^}]+\}|\\\(|\\\)|\\\[|\\\]|(?<!\\)\$\$?|(?<!\\)[{}]')
+    events={m.start():m.group() for m in token.finditer(text)}
+    braces=depth=0;dollar=None;cuts=[]
+    for index in sorted(boundaries|events.keys()):
+        value=events.get(index)
+        if value is None:
+            if not braces and not depth and dollar is None:cuts.append(index)
+        elif value.startswith('\\begin') or value in ('\\(','\\['):depth+=1
+        elif value.startswith('\\end') or value in ('\\)','\\]'):depth=max(0,depth-1)
+        elif value.startswith('$'):dollar=None if dollar==value else value
+        elif value=='{':braces+=1
+        elif value=='}':braces=max(0,braces-1)
+    points=[0]+cuts+[len(text)]
+    return [text[a:b] for a,b in zip(points,points[1:])]

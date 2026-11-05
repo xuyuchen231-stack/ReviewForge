@@ -119,6 +119,25 @@ def repair_selection_payload(feedback,units,candidate):
     return {'review':compact,'units':units,'candidate':candidate,
             'selection_scope':'Choose unit ownership only, not scientific approval. All review issues, checks, scientific conflicts and requested paragraph changes are retained. Passed keep rows and inherited source-check audit hashes are omitted; original full review remains in the local checkpoint.'}
 
+def unit_repair_feedback(feedback,section_body,unit_body,unit_id):
+    """Keep all objections, but map only this unit's exact paragraph edits locally."""
+    import re
+    from paragraph_review import paragraph_records
+    def key(text):return re.sub(r'\\(?:section|subsection|subsubsection)\*?\{[^{}]*\}','',text).strip()
+    local={key(p['text']):p['id'] for p in paragraph_records(unit_body)}
+    mapping={p['id']:local[key(p['text'])] for p in paragraph_records(section_body) if key(p['text']) in local}
+    compact=repair_selection_payload(feedback,[],'')['review']
+    compact['paragraph_review']=[{**p,'paragraph_id':mapping[p['paragraph_id']]} for p in compact['paragraph_review'] if p.get('paragraph_id') in mapping]
+    compact['repair_scope']='Repair only '+unit_id+'. All section objections remain context; other units are separate. Paragraph IDs below map to this exact unit. Full original review stays saved locally. No approval is implied.'
+    return compact
+
+def repair_writer_payload(local,candidate,feedback):
+    """Edit the existing unit, not the larger legacy source survey it replaced."""
+    body=candidate.get('latex','');keys=citekeys(body)
+    return {**local,'original_material':body,'previous_candidate':None,'repair_feedback':feedback,
+            'canonical_studies':[s for s in local.get('canonical_studies',[]) if s.get('citekey') in keys],
+            'repair_source_scope':'The supplied original_material is the complete CURRENT unit to edit, not new source evidence. Its predecessor source blocks and complete primary facts remain in the saved plan/registry and are checked independently after revision. Address the current unit objections without re-expanding the older source survey. Do not invent replacement evidence.'}
+
 def write_units(ask, payload, root, write_contract, review, checks, eligible, review_contract=''):
     """Completed units survive writer/reviewer interruptions and chapter repairs."""
     root = Path(root)
@@ -178,7 +197,8 @@ def write_units(ask, payload, root, write_contract, review, checks, eligible, re
             raise ValueError('Argument unit checkpoint hash mismatch')
         feedback_hash = repair_binding if unit_id in repair_ids else None
         if feedback_hash and record.get('repair_binding') != feedback_hash:
-            record = {**record, 'accepted': False, 'stage': 'needs_repair', 'repair_binding': feedback_hash}
+            record = {**record, 'accepted': False, 'stage': 'needs_repair', 'repair_binding': feedback_hash,
+                      'review':unit_repair_feedback(feedback,payload['previous_candidate'],record.get('candidate',{}).get('latex',''),unit_id)}
         material = '\n\n'.join(block_map[i] for i in unit['source_blocks'])
         refs = set(unit['citekeys']) | citekeys(material)
         local = {**clean_payload, 'unit_id': unit_id, 'unit_heading': unit['heading'],
@@ -257,8 +277,10 @@ def write_units(ask, payload, root, write_contract, review, checks, eligible, re
                         full_writes += 1
                         budget['full_writes']+=1
                         atomic_json(budget_file,budget)
-                        candidate = ask(contract, {**local, 'repair_feedback': feedback if feedback_hash else record.get('review', {}),
-                                                   'previous_candidate': record.get('candidate', {}).get('latex')}, 'latex', 'writer')
+                        writer_feedback=unit_repair_feedback(feedback,payload['previous_candidate'],record.get('candidate',{}).get('latex',''),unit_id) if feedback_hash else record.get('review', {})
+                        writer_payload={**local,'repair_feedback':writer_feedback,'previous_candidate':record.get('candidate',{}).get('latex')}
+                        if record.get('candidate',{}).get('latex'):writer_payload=repair_writer_payload(local,record['candidate'],writer_feedback)
+                        candidate = ask(contract,writer_payload,'latex','writer')
                     errors = candidate_errors(candidate, refs, eligible, unit.get('kind', 'empirical'))
                     record = {'candidate': candidate, 'candidate_sha256': signature(candidate), 'accepted': False,
                               'stage': 'invalid' if errors else 'pending_review', 'repair_binding': feedback_hash,

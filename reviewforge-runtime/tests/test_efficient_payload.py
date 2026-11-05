@@ -2,6 +2,12 @@ import copy,json,unittest
 from efficient_payload import project_payload,encoded_size,partition_writing,InputBudgetExceeded
 
 class EfficientPayloadTests(unittest.TestCase):
+ def test_sentence_partition_preserves_exact_tex_and_math(self):
+  from efficient_payload import sentence_blocks
+  text=r'First claim \cite{A}. Second $a. B$ and \textit{S. cerevisiae} remain intact. Third \(x. Y\) claim.'
+  parts=sentence_blocks(text)
+  self.assertEqual(''.join(parts),text);self.assertEqual(len(parts),3)
+  self.assertIn('$a. B$',parts[1]);self.assertIn(r'\textit{S. cerevisiae}',parts[1])
  def test_primary_verification_still_receives_exact_quotes(self):
   anchor={'span_id':'s1','excerpt':'Exact primary text with a necessary qualification.','locator':'p2','source_sha256':'sha'}
   p={'facts':[{'id':'f1','anchors':[anchor]},{'id':'f2','anchors':[anchor]}]};wire=project_payload(p)

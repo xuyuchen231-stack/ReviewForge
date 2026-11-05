@@ -5,6 +5,21 @@ from paragraph_review import paragraph_options
 from test_paragraph_review import keep
 
 class UnitWritingTests(unittest.TestCase):
+ def test_repair_edits_current_unit_while_original_review_sources_stay_unchanged(self):
+  from bounded_writing import repair_writer_payload
+  local={'original_material':'Long legacy survey','canonical_studies':[{'citekey':'A'},{'citekey':'B'}]}
+  body=r'Current result \cite{A}.';result=repair_writer_payload(local,{'latex':body},{'issues':['Fix scope']})
+  self.assertEqual(result['original_material'],body);self.assertEqual(result['canonical_studies'],[{'citekey':'A'}])
+  self.assertIsNone(result['previous_candidate']);self.assertEqual(local['original_material'],'Long legacy survey')
+ def test_section_feedback_maps_exact_paragraphs_to_unit_without_audit_bulk(self):
+  from bounded_writing import unit_repair_feedback
+  unit='First evidence.\n\nSecond evidence.';whole='\\section{Evidence}\n\\subsection{First}\n'+unit+'\n\n\\subsection{Other}\nOther evidence.'
+  options=paragraph_options(whole);local=paragraph_options(unit)
+  feedback={'issues':['Important objection'],'checks':{'facts':False},'source_checks_inherited':['x'*100000],
+            'paragraph_review':[{'paragraph_id':p['id'],'decision':'revise','destination':'main','reason':'Fix.'} for p in options]}
+  result=unit_repair_feedback(feedback,whole,unit,'u1')
+  self.assertEqual([p['paragraph_id'] for p in result['paragraph_review']],[p['id'] for p in local])
+  self.assertEqual(result['issues'],feedback['issues']);self.assertNotIn('source_checks_inherited',result)
  def test_repair_checkpoint_fits_windows_path_and_keeps_full_binding(self):
   from bounded_writing import repair_checkpoint
   from reviewforge import atomic_json
