@@ -5,6 +5,18 @@ from paragraph_review import paragraph_options
 from test_paragraph_review import keep
 
 class UnitWritingTests(unittest.TestCase):
+ def test_repair_checkpoint_fits_windows_path_and_keeps_full_binding(self):
+  from bounded_writing import repair_checkpoint
+  from reviewforge import atomic_json
+  import json
+  with tempfile.TemporaryDirectory() as d:
+   folder=Path(d)/('a'*70)/('b'*70)
+   while len(str(folder.resolve()))<214:folder=folder/'more'
+   folder.mkdir(parents=True)
+   binding='a'*64;path=repair_checkpoint(folder,binding)
+   self.assertLess(len(str(path.resolve())),260)
+   atomic_json(path,{'repair_binding':binding,'unit_ids':['u1']})
+   self.assertEqual(json.loads(path.read_text())['repair_binding'],binding)
  def test_repair_selection_retains_all_objections_without_passed_audit_bulk(self):
   from bounded_writing import repair_selection_payload
   issue={'paragraph_id':'p2','decision':'revise','destination':'main','reason':'Missing qualification'}
