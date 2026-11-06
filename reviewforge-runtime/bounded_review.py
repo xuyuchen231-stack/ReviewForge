@@ -14,6 +14,7 @@ CLARIFICATIONS=('Evaluate material scientific and editorial defects, not an idea
  'Canonical current source_access overrides older claims about abstract-only access. Canonical checked facts may correct legacy prose. '
  'A source citation and an accurate checked fact are sufficient attribution: do not require fact IDs or quotations inside manuscript prose. A clearly identified analytical inference can follow checked premises without appearing verbatim in the source; verify the reasoning rather than rejecting it merely for being new. '
  'Retain material limitations; do not alternately demand and remove the same qualifier without explaining the factual or argumentative reason. '
+ 'Multiple study citations and combined evidence, comparison and inference in one paragraph are normal scientific synthesis; do not require homogeneous citekeys or one rhetorical function per paragraph. A sliced packet is not the complete unit: do not fail a local paragraph merely because another batch develops the remaining cases. Source-access policy does not make all studies full text: an abstract_only record remains abstract-only. '
  'Mark reviewer uncertainty rather than inventing a requirement. Verify the supplied revision response independently; it cannot approve its own text. '
  'Return concise issues and one short sentence per paragraph message/adds/reason. For disputed primary wording return evidence_requests: [{citekey,fields:[field names]}] or [fact IDs]; do not pass a claim with unresolved evidence requests.')
 

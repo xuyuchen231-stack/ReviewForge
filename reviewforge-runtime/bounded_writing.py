@@ -138,6 +138,21 @@ def repair_writer_payload(local,candidate,feedback):
             'canonical_studies':[s for s in local.get('canonical_studies',[]) if s.get('citekey') in keys],
             'repair_source_scope':'The supplied original_material is the complete CURRENT unit to edit, not new source evidence. Its predecessor source blocks and complete primary facts remain in the saved plan/registry and are checked independently after revision. Address the current unit objections without re-expanding the older source survey. Do not invent replacement evidence.'}
 
+def bound_repair_targets(feedback,body,units):
+    from paragraph_review import validate_paragraph_review,paragraph_unit_owners
+    if not feedback.get('paragraph_review'):return None # Legacy review: retain bounded model routing.
+    changes=validate_paragraph_review(body,feedback)
+    owners=paragraph_unit_owners(body,units)
+    result={owners[p['paragraph_id']] for p in changes}
+    for conflict in feedback.get('scientific_conflicts',[]):
+        if not conflict.get('paragraph_ids') or any(p not in owners for p in conflict['paragraph_ids']):raise ValueError('Unbound scientific repair conflict')
+        result.update(owners[p] for p in conflict['paragraph_ids'])
+    known={u['id'] for u in units}
+    for conflict in feedback.get('global_consistency_review',{}).get('conflicts',[]):
+        if not conflict.get('unit_ids') or not set(conflict['unit_ids'])<=known:raise ValueError('Unbound cross-unit repair conflict')
+        result.update(conflict['unit_ids'])
+    return result
+
 def write_units(ask, payload, root, write_contract, review, checks, eligible, review_contract=''):
     """Completed units survive writer/reviewer interruptions and chapter repairs."""
     root = Path(root)
@@ -169,11 +184,21 @@ def write_units(ask, payload, root, write_contract, review, checks, eligible, re
     feedback = payload.get('repair_feedback') or {}
     repair_binding = signature([feedback, payload.get('previous_candidate'), payload.get('_repair_generation', 0)])
     repair_ids = set()
+    bound_targets=None
     if feedback and payload.get('previous_candidate'):
         repair_file = repair_checkpoint(folder,repair_binding)
         legacy_file=folder/('repair_'+repair_binding+'.json')
         if not repair_file.exists() and legacy_file.exists():repair_file=legacy_file
-        if repair_file.exists():
+        bound_targets=bound_repair_targets(feedback,payload['previous_candidate'],units)
+        if bound_targets is not None:
+            if not bound_targets:
+                from pipeline_recovery import UnitRevisionsPending
+                raise UnitRevisionsPending('Failed section review has no bound blocking paragraph or cross-unit conflict; review clarification required, no unit rewritten')
+            repair_ids=bound_targets
+            prior=json.loads(repair_file.read_text(encoding='utf-8')) if repair_file.exists() else {}
+            if prior and repair_file!=legacy_file and prior.get('repair_binding')!=repair_binding:raise ValueError('Scoped repair checkpoint binding mismatch')
+            atomic_json(repair_file,{'repair_binding':repair_binding,'unit_ids':sorted(repair_ids),'routing_basis':'validated exact paragraph ownership and explicit scientific conflicts','previous_unit_ids':sorted(set(prior.get('previous_unit_ids',[])+prior.get('unit_ids',[])))})
+        elif repair_file.exists():
             saved_repair=json.loads(repair_file.read_text(encoding='utf-8'))
             if repair_file!=legacy_file and saved_repair.get('repair_binding')!=repair_binding:raise ValueError('Scoped repair checkpoint binding mismatch')
             repair_ids = set(saved_repair['unit_ids'])
@@ -211,6 +236,12 @@ def write_units(ask, payload, root, write_contract, review, checks, eligible, re
                  'argument_outline': [{'id': u['id'], 'heading': u['heading']} for u in units],
                  'completed_unit_findings': [c['candidate']['evidence_synthesis'] for c in completed]}
         context_hash = signature(local['completed_unit_findings'])
+        if (bound_targets is not None and unit_id not in bound_targets
+            and record.get('repair_binding')==repair_binding and record.get('stage')=='needs_repair'
+            and not candidate_errors(record.get('candidate',{}),refs,eligible,unit.get('kind','empirical'))):
+            record.update(accepted=False,stage='pending_review',review=None,
+                          routing_revalidation='Previous model routing selected this unit without a bound blocking paragraph; independently revalidate in the current context, do not force acceptance')
+            atomic_json(path,record)
         budget_file=folder/(unit_id+'.budget.json')
         budget_epoch=signature([context_hash,feedback_hash])
         budget=json.loads(budget_file.read_text(encoding='utf-8')) if budget_file.exists() else {}

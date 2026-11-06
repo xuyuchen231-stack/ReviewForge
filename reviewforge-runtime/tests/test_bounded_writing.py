@@ -5,6 +5,40 @@ from paragraph_review import paragraph_options
 from test_paragraph_review import keep
 
 class UnitWritingTests(unittest.TestCase):
+ def test_unbound_previous_selection_requires_real_review_and_cannot_force_pass(self):
+  import json
+  from reviewforge import atomic_json
+  from study_registry import signature
+  from pipeline_recovery import UnitRevisionsPending
+  ask,review,calls=self.service();reviewed=[]
+  with tempfile.TemporaryDirectory() as d:
+   candidate=write_units(ask,self.payload(),Path(d),'writer',review,{'facts'},{'f1':('A',{})})
+   folder=next((Path(d)/'argument_units').iterdir())
+   feedback={'accepted':False,'checks':{'facts':False},**keep(paragraph_options(candidate['latex']))}
+   feedback['paragraph_review'][-1].update(decision='revise',reason='Second-unit defect',category='factual',severity='major')
+   row=json.loads((folder/'u1.json').read_text());row.update(accepted=False,stage='needs_repair',repair_binding=signature([feedback,candidate['latex'],2]))
+   atomic_json(folder/'u1.json',row)
+   for u in ('u1','u2'):atomic_json(folder/(u+'.budget.json'),{'full_writes':4,'paragraph_patches':6})
+   def reject(ask,payload,candidate,save,pending=None):
+    reviewed.append(payload['unit_id']);r={'accepted':False,'checks':{'facts':False},'issues':['Actual unresolved fact'],**keep(paragraph_options(candidate['latex']))};save(r);return r,[]
+   payload={**self.payload(),'repair_feedback':feedback,'previous_candidate':candidate['latex'],'_repair_generation':2}
+   with self.assertRaises(UnitRevisionsPending):write_units(ask,payload,Path(d),'writer',reject,{'facts'},{'f1':('A',{})})
+   self.assertEqual(reviewed,['u1']);saved=json.loads((folder/'u1.json').read_text());self.assertFalse(saved['accepted']);self.assertFalse(saved['review']['checks']['facts'])
+ def test_complete_paragraph_map_routes_only_the_bound_unit_without_model_selection(self):
+  import json
+  from reviewforge import atomic_json
+  from pipeline_recovery import UnitRevisionsPending
+  ask,review,calls=self.service()
+  with tempfile.TemporaryDirectory() as d:
+   candidate=write_units(ask,self.payload(),Path(d),'writer',review,{'facts'},{'f1':('A',{})})
+   folder=next((Path(d)/'argument_units').iterdir());atomic_json(folder/'u2.budget.json',{'full_writes':4,'paragraph_patches':6})
+   feedback={'accepted':False,'checks':{'facts':False},**keep(paragraph_options(candidate['latex']))}
+   feedback['paragraph_review'][-1].update(decision='revise',reason='Specific second-unit defect',severity='major',category='factual')
+   payload={**self.payload(),'repair_feedback':feedback,'previous_candidate':candidate['latex'],'_repair_generation':2}
+   with self.assertRaises(UnitRevisionsPending):write_units(ask,payload,Path(d),'writer',review,{'facts'},{'f1':('A',{})})
+   self.assertTrue(json.loads((folder/'u1.json').read_text())['accepted'])
+   self.assertFalse(json.loads((folder/'u2.json').read_text())['accepted'])
+   self.assertNotIn(('unit_ids',None),calls)
  def test_scoped_repair_is_saved_as_unaccepted_even_when_budget_is_exhausted(self):
   import json
   from reviewforge import atomic_json

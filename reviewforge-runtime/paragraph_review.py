@@ -26,6 +26,21 @@ def paragraph_records(text):
 
 def paragraph_options(text):return [{k:v for k,v in row.items() if k!='text'} for row in paragraph_records(text)]
 
+def paragraph_unit_owners(text,units):
+    starts=[];cursor=0
+    for unit in units:
+        marker='\\subsection{'+unit['heading']+'}\n';start=text.find(marker,cursor)
+        if start<0:raise ValueError('Unit heading missing from assembled paragraph map')
+        starts.append((start,unit['id']));cursor=start+len(marker)
+    if not starts:raise ValueError('Unit ownership requires a nonempty outline')
+    result={};cursor=0
+    for paragraph in paragraph_records(text):
+        start=text.find(paragraph['text'],cursor)
+        if start<0:raise ValueError('Paragraph missing from exact assembled text')
+        cursor=start+len(paragraph['text'])
+        result[paragraph['id']]=next((uid for offset,uid in reversed(starts) if offset<=start),starts[0][1])
+    return result
+
 
 def preserve_relocations(directory,text,changes):
     import json
