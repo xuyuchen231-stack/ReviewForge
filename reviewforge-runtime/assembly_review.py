@@ -47,7 +47,7 @@ def cross_unit_review(ask,candidate,root,manifest,limit):
             {'id':p['id'],'message':messages.get(p['id'],{}).get('message',p['text']),
              'function':messages.get(p['id'],{}).get('function','unclassified')}
             for p in paragraphs]})
-    packet={'units':units,'source_approval_manifest':manifest}
+    packet={'units':units,'source_approval_manifest':[{k:v for k,v in r.items() if k!='findings'} for r in manifest]}
     ids=[u['unit_id'] for u in units]
     for attempt in range(2):
         if len(CROSS_UNIT)+encoded_size(packet)>limit:raise ValueError('Cross-unit consistency input exceeds bounded budget')

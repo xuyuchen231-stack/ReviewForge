@@ -5,6 +5,18 @@ from reviewforge import atomic_json
 from assembly_review import verified_units,cross_unit_review,review_assembly
 
 class AssemblyReviewTests(unittest.TestCase):
+ def test_global_findings_sent_once_without_mutating_approval_manifest(self):
+  with tempfile.TemporaryDirectory() as t:
+   root=Path(t);candidate,_=self.fixture(root)
+   manifest=verified_units(candidate,root,'Evidence',['facts_consistent'])
+   manifest[0]['findings']=['Exact qualified conclusion '*100]
+   def ask(system,packet,*args):
+    self.assertEqual(packet['units'][0]['findings'],manifest[0]['findings'])
+    self.assertNotIn('findings',packet['source_approval_manifest'][0])
+    self.assertEqual(packet['source_approval_manifest'][0]['review_sha256'],manifest[0]['review_sha256'])
+    return {'examined_unit_ids':['u1','u2'],'status':'pass','reason':'Checked.','conflicts':[],'paragraph_requests':[]}
+   cross_unit_review(ask,candidate,root,manifest,90000)
+   self.assertTrue(manifest[0]['findings'])
  def test_oversized_source_followup_selects_fields_but_never_forces_acceptance(self):
   for verdict in (True,False):
    with self.subTest(verdict=verdict),tempfile.TemporaryDirectory() as t:
