@@ -2,17 +2,42 @@ import json,tempfile,unittest
 from pathlib import Path
 from study_registry import signature
 from reviewforge import atomic_json
-from assembly_review import verified_units,cross_unit_review
+from assembly_review import verified_units,cross_unit_review,review_assembly
 
 class AssemblyReviewTests(unittest.TestCase):
  def fixture(self,path):
   units=[{'id':'u1','heading':'Evidence'},{'id':'u2','heading':'Implication'}];binding='a'*64;folder=path/'argument_units'/binding;folder.mkdir(parents=True)
   plan={'units':units};atomic_json(folder/'plan.json',{'plan':plan,'sha256':signature(plan)})
-  bodies=['Reported data.','Supported interpretation.']
+  bodies=[r'Reported data \cite{A}.','Supported interpretation.']
   for u,body in zip(units,bodies):
-   c={'latex':body,'evidence_synthesis':[]};atomic_json(folder/(u['id']+'.json'),{'candidate':c,'candidate_sha256':signature(c),'accepted':True,'review':{'checks':{'facts_consistent':True}}})
+   c={'latex':body,'evidence_synthesis':[]};atomic_json(folder/(u['id']+'.json'),{'candidate':c,'candidate_sha256':signature(c),'accepted':True,'review':{'checks':{'facts_consistent':True,'nonredundant_argument':True}}})
   c={'latex':'\\section{Evidence}\n'+'\n\n'.join('\\subsection{'+u['heading']+'}\n'+b for u,b in zip(units,bodies)),'_argument_units':units,'_argument_units_binding':binding}
   return c,folder
+ def test_assembly_evidence_objection_receives_exact_facts_before_rewrite(self):
+  from paragraph_review import paragraph_options
+  with tempfile.TemporaryDirectory() as t:
+   root=Path(t);candidate,_=self.fixture(root);calls=[];saved=[]
+   study={'citekey':'A','facts':{'n':{'id':'f1','value':0.45,'qualification':'calibration only'}}}
+   def ask(system,packet,required,role):
+    if required=='examined_unit_ids':return {'examined_unit_ids':['u1','u2'],'status':'pass','reason':'No cross-unit conflict.','conflicts':[],'paragraph_requests':[]}
+    calls.append(packet);provided=bool(packet.get('canonical_studies'))
+    rows=[{'paragraph_id':p['id'],'function':'evidence','message':'Reported result.','adds':'Evidence.','decision':'keep','destination':'main','reason':'Verified.'} for p in packet['paragraph_options']]
+    if not provided:rows[0].update(decision='revise',reason='The calibration number is not supplied.',severity='major',category='evidence_scope')
+    else:self.assertEqual(packet['canonical_studies'],[study])
+    return {'accepted':provided,'issues':[] if provided else ['Number not supplied.'],'checks':{'nonredundant_argument':provided},'scientific_conflicts':[],'paragraph_review':rows}
+   result,changes=review_assembly(ask,{'title':'Evidence','canonical_studies':[study]},candidate,root,{'facts_consistent','nonredundant_argument'},saved.append)
+   self.assertTrue(result['accepted']);self.assertEqual(changes,[]);self.assertEqual(len(calls),2)
+ def test_unresolved_assembly_quote_requests_cannot_pass(self):
+  with tempfile.TemporaryDirectory() as t:
+   root=Path(t);candidate,_=self.fixture(root);calls=[]
+   study={'citekey':'A','facts':{'n':{'id':'f1','value':0.45,'anchors':[{'excerpt':'m = 0.45'}]}}}
+   def ask(system,packet,required,role):
+    if required=='examined_unit_ids':return {'examined_unit_ids':['u1','u2'],'status':'pass','reason':'No conflict.','conflicts':[],'paragraph_requests':[]}
+    calls.append(packet)
+    return {'accepted':True,'issues':[],'checks':{'nonredundant_argument':True},'scientific_conflicts':[],
+            'evidence_requests':['f1'],'paragraph_review':[{'paragraph_id':p['id'],'function':'evidence','message':'Claim.','adds':'Evidence.','decision':'keep','destination':'main','reason':'Still needs quote.'} for p in packet['paragraph_options']]}
+   with self.assertRaisesRegex(ValueError,'unresolved'):review_assembly(ask,{'title':'Evidence','canonical_studies':[study]},candidate,root,{'facts_consistent','nonredundant_argument'},lambda r:None)
+   self.assertEqual(len(calls),2);self.assertEqual(calls[1]['requested_primary_evidence'][0]['fact']['anchors'][0]['excerpt'],'m = 0.45')
  def test_exact_accepted_units_can_be_reused(self):
   with tempfile.TemporaryDirectory() as t:
    c,_=self.fixture(Path(t));self.assertEqual(len(verified_units(c,Path(t),'Evidence',['facts_consistent'])),2)
