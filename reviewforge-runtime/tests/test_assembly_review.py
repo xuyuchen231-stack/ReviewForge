@@ -5,6 +5,15 @@ from reviewforge import atomic_json
 from assembly_review import verified_units,cross_unit_review,review_assembly
 
 class AssemblyReviewTests(unittest.TestCase):
+ def test_source_followup_keeps_local_findings_and_hashes_other_unit_context(self):
+  from assembly_review import source_followup_context
+  packet={'canonical_studies':[{'citekey':'A','facts':{'n':{'value':0.45}}}],
+          'section_findings':[{'unit':'u1','findings':['Current claim']},{'unit':'u2','findings':['Large context '*5000]}]}
+  result=source_followup_context(packet,{'u1'},{'status':'pass','reason':'All units checked.','examined_unit_ids':['u1','u2']})
+  self.assertEqual(result['canonical_studies'],packet['canonical_studies'])
+  self.assertEqual(result['section_findings'],[packet['section_findings'][0]])
+  self.assertEqual(result['other_unit_finding_refs'][0]['unit'],'u2')
+  self.assertEqual(len(packet['section_findings']),2)
  def fixture(self,path):
   units=[{'id':'u1','heading':'Evidence'},{'id':'u2','heading':'Implication'}];binding='a'*64;folder=path/'argument_units'/binding;folder.mkdir(parents=True)
   plan={'units':units};atomic_json(folder/'plan.json',{'plan':plan,'sha256':signature(plan)})
