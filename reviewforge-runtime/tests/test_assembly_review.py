@@ -5,6 +5,24 @@ from reviewforge import atomic_json
 from assembly_review import verified_units,cross_unit_review,review_assembly
 
 class AssemblyReviewTests(unittest.TestCase):
+ def test_oversized_source_followup_selects_fields_but_never_forces_acceptance(self):
+  for verdict in (True,False):
+   with self.subTest(verdict=verdict),tempfile.TemporaryDirectory() as t:
+    root=Path(t);candidate,_=self.fixture(root);lookups=[]
+    fact={'id':'f1','value':0.45,'qualification':'single calibration'}
+    study={'citekey':'A','facts':{'n':fact,'unrelated':{'id':'f2','value':'x'*100000}}}
+    def ask(system,packet,required,role):
+     if required=='examined_unit_ids':return {'examined_unit_ids':['u1','u2'],'status':'pass','reason':'No conflict.','conflicts':[],'paragraph_requests':[]}
+     if required=='fields_by_study':
+      lookups.append(packet);return {'fields_by_study':[{'citekey':'A','paragraph_ids':[packet['concerns'][0]['paragraph_id']],'fields':['n']}]}
+     provided=bool(packet.get('canonical_studies'))
+     rows=[{'paragraph_id':p['id'],'function':'evidence','message':'Result.','adds':'Evidence.','decision':'keep','destination':'main','reason':'Checked.'} for p in packet['paragraph_options']]
+     if provided:self.assertEqual(packet['canonical_studies'][0]['facts'],{'n':fact})
+     accepted=provided and verdict
+     if not accepted:rows[0].update(decision='revise',reason='Unresolved result.',severity='major',category='evidence_scope')
+     return {'accepted':accepted,'issues':[] if accepted else ['Unresolved result.'],'checks':{'nonredundant_argument':accepted},'scientific_conflicts':[],'paragraph_review':rows}
+    report,_=review_assembly(ask,{'title':'Evidence','canonical_studies':[study]},candidate,root,{'facts_consistent','nonredundant_argument'},lambda r:None)
+    self.assertEqual(report['accepted'],verdict);self.assertEqual(len(lookups),1)
  def test_source_followup_keeps_local_findings_and_hashes_other_unit_context(self):
   from assembly_review import source_followup_context
   packet={'canonical_studies':[{'citekey':'A','facts':{'n':{'value':0.45}}}],
