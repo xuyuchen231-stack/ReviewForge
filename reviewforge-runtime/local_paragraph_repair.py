@@ -1,7 +1,7 @@
 """Small, source-bound edits; unchanged paragraphs and scientific gates survive."""
 import re
 from collections import Counter
-from paragraph_review import paragraph_records
+from paragraph_review import paragraph_records,blocking_change
 from manuscript_integrity import citekeys,tex_integrity
 from editorial_refinement import protected_spans
 
@@ -14,7 +14,7 @@ def repair_paragraphs(ask,candidate,review,payload):
     body=candidate['latex']
     rows=paragraph_records(body)
     lookup={row['id']:row for row in rows}
-    changes=[row for row in review.get('paragraph_review',[]) if row.get('decision')!='keep' or row.get('destination')!='main']
+    changes=[row for row in review.get('paragraph_review',[]) if blocking_change(row)]
     if not changes or len({r.get('paragraph_id') for r in changes})!=len(changes) or any(row.get('decision')!='revise' or row.get('destination')!='main' or row.get('paragraph_id') not in lookup for row in changes):
         raise LocalPatchRejected('Not a small in-place paragraph revision')
     requested={row['paragraph_id'] for row in changes}
@@ -65,6 +65,7 @@ def repair_paragraphs(ask,candidate,review,payload):
             raise LocalPatchRejected('Local edit removed a citation or introduced an unknown source')
         positions.append((start,cursor,replacement))
     for start,end,replacement in reversed(positions):body=body[:start]+replacement+body[end:]
+    if body==candidate['latex']:raise LocalPatchRejected('Paragraph repair made no change; original rejection remains unresolved')
     if any(e.get('kind')!='unresolved_references' for e in tex_integrity(body)):
         raise LocalPatchRejected('Local patch breaks manuscript integrity')
     return {**candidate,'latex':body}

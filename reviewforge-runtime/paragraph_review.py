@@ -59,6 +59,11 @@ def preserve_relocations(directory,text,changes):
 def validate_paragraph_review(text,review):
     return validate_options_review(paragraph_options(text),review)
 
+def blocking_change(row):
+    optional=row.get('severity','major') in ('minor','observation') and row.get('category','scientific_reasoning')=='style'
+    return (row.get('decision')!='keep' or row.get('destination')!='main') and not optional
+
+
 def validate_options_review(options,review):
     rows=review.get('paragraph_review')
     if not options or not isinstance(rows,list) or any(not isinstance(r,dict) for r in rows):raise ValueError('Paragraph review mapping required')
@@ -72,6 +77,5 @@ def validate_options_review(options,review):
         if severity not in ('critical','major','minor','observation'):raise ValueError('Invalid paragraph issue severity')
         category=row.get('category','scientific_reasoning')
         if category not in ('factual','mathematical','evidence_scope','scientific_reasoning','style','placement'):raise ValueError('Invalid paragraph issue category')
-        optional=severity in ('minor','observation') and category=='style'
-        if (row['decision']!='keep' or row['destination']!='main') and not optional:issues.append(row)
+        if blocking_change(row):issues.append(row)
     return issues

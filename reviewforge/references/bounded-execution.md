@@ -33,3 +33,36 @@ malformed/truncated responses, evidence requests, complete paragraph coverage,
 cross-unit conflicts, fallback accounting and restart limits. A simulated pass tests
 software control flow only; report real model rejection honestly and repair its
 specific evidence issues rather than promoting a fixture or disabling the gate.
+# Review convergence and reuse
+
+The unit folder binds source facts and writing/review contracts. If only earlier
+units' discourse findings change, an exact, complete, accepted local unit review
+may be reused. The checkpoint retains its original review-context hash and marks
+`assembly_context_recheck_required`. This is local approval only: the assembled
+chapter still requires exact unit verification and all-unit consistency review.
+Source/qualification or contract changes continue to invalidate the folder binding.
+
+Each unit's existing `.budget.json` now records `review_convergence`: exact reviewer
+requirements, paragraph anchors and citations, stable IDs, failed checks and review
+rounds. Exact duplicate requirements are coalesced; semantic equivalence is not
+guessed. Historical issues are not automatically called resolved when absent from
+a later report. Contradictory or newly changed requirements need diagnosis against
+the source; an old reviewer verdict does not override new primary evidence.
+
+Three equivalent blocking reports create a `convergence_block`. An identical
+writer candidate also blocks immediately, before another independent review.
+Restart alone cannot clear either block. Other units can still finish.
+
+To resume after inspecting the actual source/paragraph, save a genuinely corrected
+candidate as unaccepted/pending review with a valid candidate hash, or attach a
+`repair_diagnosis` to the unit checkpoint with `block_sha256` (the signature of the
+current budget's convergence_block), a concrete `reason`, and a specific `action`.
+The runtime saves a one-use diagnosis receipt and the old block. It clears only
+the stall streak; all issue history, full-write and paragraph-patch budgets remain.
+An exhausted edit budget remains exhausted. Never manufacture approval or attach
+an empty/repeated diagnosis merely to retry.
+
+Optional minor/observation style suggestions use the same predicate in review
+validation and paragraph repair, so they cannot enlarge a necessary repair batch.
+Provider calls remain serial until shared account cooldown/reservation state is
+made concurrency-safe; local deterministic checks require no model call.

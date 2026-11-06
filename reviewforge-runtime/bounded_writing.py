@@ -257,6 +257,22 @@ def write_units(ask, payload, root, write_contract, review, checks, eligible, re
             record.update(stage='pending_review',review=None,review_revalidation_policy=CURRENT_REVIEW_POLICY)
             atomic_json(path,record)
         if record and record.get('context_sha256') != context_hash:
+            reusable=(record.get('accepted') is True
+                      and record.get('review',{}).get('accepted') is True
+                      and all(record.get('review',{}).get('checks',{}).get(c) is True for c in checks)
+                      and not record.get('review',{}).get('evidence_requests')
+                      and not record.get('review',{}).get('scientific_conflicts')
+                      and not candidate_errors(record['candidate'],refs,eligible,unit.get('kind','empirical')))
+            if reusable:
+                from paragraph_review import validate_paragraph_review
+                reusable=not validate_paragraph_review(record['candidate']['latex'],record['review'])
+            if reusable:
+                # Source/contract identity is bound by this folder. Discourse
+                # drift belongs to the mandatory all-unit assembly review.
+                record.setdefault('review_context_sha256',record.get('context_sha256'))
+                record.update(context_sha256=context_hash,assembly_context_recheck_required=True)
+                atomic_json(path,record)
+        if record and record.get('context_sha256') != context_hash:
             # A saved pending report is also stale after an upstream repair.
             # Preserve the draft, never accept an old-context report, and keep
             # explicit rewrite/invalid states from being promoted to review.
@@ -270,6 +286,13 @@ def write_units(ask, payload, root, write_contract, review, checks, eligible, re
                                            'completed': len(completed), 'total': len(units)})
         print('[major-revision] unit='+unit_id+'; completed='+str(len(completed))+'/'+str(len(units)), flush=True)
         if not record.get('accepted'):
+            from review_convergence import repair_blocked,block_repair
+            blocked=repair_blocked(budget,record.get('candidate'),record.get('repair_diagnosis'))
+            atomic_json(budget_file,budget)
+            if blocked:
+                deferred.append(unit_id)
+                print('[major-revision] stalled unit='+unit_id+'; repeated unresolved issues require diagnosis; no API request',flush=True)
+                continue
             metadata_attempted = False
             full_writes = 0
             for attempt in range(4):
@@ -314,6 +337,12 @@ def write_units(ask, payload, root, write_contract, review, checks, eligible, re
                         writer_payload={**local,'repair_feedback':writer_feedback,'previous_candidate':record.get('candidate',{}).get('latex')}
                         if record.get('candidate',{}).get('latex'):writer_payload=repair_writer_payload(local,record['candidate'],writer_feedback)
                         candidate = ask(contract,writer_payload,'latex','writer')
+                    if candidate==record.get('candidate'):
+                        block_repair(budget,candidate,'Writer returned the identical rejected candidate; no independent re-review purchased')
+                        atomic_json(budget_file,budget)
+                        record['pause_reason']='Unchanged repair output; concrete diagnosis or a corrected candidate required'
+                        atomic_json(path,record)
+                        break
                     errors = candidate_errors(candidate, refs, eligible, unit.get('kind', 'empirical'))
                     record = {'candidate': candidate, 'candidate_sha256': signature(candidate), 'accepted': False,
                               'stage': 'invalid' if errors else 'pending_review', 'repair_binding': feedback_hash,
@@ -344,6 +373,15 @@ def write_units(ask, payload, root, write_contract, review, checks, eligible, re
                               stage='reviewed', review=report, context_sha256=context_hash)
                 atomic_json(path, record)
                 if record['accepted']:
+                    break
+                from review_convergence import track_review
+                stalled=track_review(budget,report,record['candidate']['latex'])
+                atomic_json(budget_file,budget)
+                if stalled:
+                    block_repair(budget,record['candidate'],'Three equivalent blocking reviews require a concrete diagnosis')
+                    atomic_json(budget_file,budget)
+                    record['pause_reason']='Three equivalent blocking reviews; inspect persisted review_convergence issues before further edits'
+                    atomic_json(path,record)
                     break
             if not record.get('accepted'):
                 deferred.append(unit_id)

@@ -5,6 +5,44 @@ from paragraph_review import paragraph_options
 from test_paragraph_review import keep
 
 class UnitWritingTests(unittest.TestCase):
+ def test_identical_full_repair_stops_before_review_and_survives_restart(self):
+  import json
+  from reviewforge import atomic_json
+  from pipeline_recovery import UnitRevisionsPending
+  ask,review,calls=self.service()
+  with tempfile.TemporaryDirectory() as d:
+   write_units(ask,self.payload(),Path(d),'writer',review,{'facts'},{'f1':('A',{})})
+   folder=next((Path(d)/'argument_units').iterdir());path=folder/'u2.json'
+   row=json.loads(path.read_text());r={'accepted':False,'checks':{'facts':False},'issues':['Move misplaced evidence'],**keep(paragraph_options(row['candidate']['latex']))}
+   r['paragraph_review'][0].update(decision='move',destination='supplement',reason='Move misplaced evidence')
+   row.update(accepted=False,stage='reviewed',review=r);atomic_json(path,row)
+   def unexpected(*args):raise AssertionError('Identical rejected draft must not be reviewed again')
+   with self.assertRaises(UnitRevisionsPending):write_units(ask,self.payload(),Path(d),'writer',unexpected,{'facts'},{'f1':('A',{})})
+   sent=len(calls)
+   with self.assertRaises(UnitRevisionsPending):write_units(ask,self.payload(),Path(d),'writer',unexpected,{'facts'},{'f1':('A',{})})
+   self.assertEqual(len(calls),sent);self.assertFalse(json.loads(path.read_text())['accepted'])
+ def test_discourse_only_change_reuses_exact_local_approval_and_requires_assembly(self):
+  import json
+  from reviewforge import atomic_json
+  ask,review,calls=self.service()
+  with tempfile.TemporaryDirectory() as d:
+   write_units(ask,self.payload(),Path(d),'writer',review,{'facts'},{'f1':('A',{})})
+   folder=next((Path(d)/'argument_units').iterdir());path=folder/'u2.json'
+   row=json.loads(path.read_text());row['context_sha256']='previous-discourse';atomic_json(path,row)
+   def unexpected(*args):raise AssertionError('Unchanged accepted unit was re-reviewed')
+   result=write_units(ask,self.payload(),Path(d),'writer',unexpected,{'facts'},{'f1':('A',{})})
+   saved=json.loads(path.read_text());self.assertTrue(saved['accepted'])
+   self.assertTrue(saved['assembly_context_recheck_required'])
+   self.assertEqual(saved['review_context_sha256'],'previous-discourse')
+   self.assertIn('_argument_units_binding',result)
+ def test_source_change_still_invalidates_local_approval(self):
+  import copy
+  ask,review,calls=self.service()
+  with tempfile.TemporaryDirectory() as d:
+   write_units(ask,self.payload(),Path(d),'writer',review,{'facts'},{'f1':('A',{})})
+   payload=copy.deepcopy(self.payload());payload['canonical_studies'][0]['facts']['count']['qualification']='Only the training cohort'
+   write_units(ask,payload,Path(d),'writer',review,{'facts'},{'f1':('A',{})})
+   self.assertEqual(calls.count(('units',None)),2)
  def test_unbound_previous_selection_requires_real_review_and_cannot_force_pass(self):
   import json
   from reviewforge import atomic_json
@@ -178,7 +216,10 @@ class UnitWritingTests(unittest.TestCase):
   ask,review,calls=self.service()
   def scoped(system,payload,required,role):
    if required=='unit_ids':return {'unit_ids':['u1']}
-   return ask(system,payload,required,role)
+   result=ask(system,payload,required,role)
+   if required=='latex' and payload.get('repair_feedback'):
+    result['latex']+=' New supported comparison.'*calls.count(('latex','u1'))
+   return result
   with tempfile.TemporaryDirectory() as d:
    result=write_units(scoped,self.payload(),Path(d),'writer',review,{'facts'},{'f1':('A',{})})
    for generation in [1,2]:
@@ -275,6 +316,12 @@ class UnitWritingTests(unittest.TestCase):
    folder=next((Path(d)/'argument_units').iterdir())
    self.assertTrue(json.loads((folder/'u2.json').read_text())['accepted'])
    self.assertFalse(json.loads((folder/'u1.json').read_text())['accepted'])
+   from study_registry import signature
+   from reviewforge import atomic_json
+   path=folder/'u1.json';row=json.loads(path.read_text())
+   row['candidate']['latex']+=' Corrected qualification.'
+   row.update(candidate_sha256=signature(row['candidate']),stage='pending_review',review=None)
+   atomic_json(path,row)
    write_units(ask,self.payload(),Path(d),'writer',review,{'facts'},{'f1':('A',{})})
    self.assertEqual(calls.count(('latex','u2')),1)
 
@@ -323,5 +370,5 @@ class UnitWritingTests(unittest.TestCase):
   with tempfile.TemporaryDirectory() as d:
    for invocation in range(3):
     with self.assertRaises(UnitRevisionsPending):write_units(ask,self.payload(),Path(d),'writer',reject_first,{'facts'},{'f1':('A',{})})
-   self.assertEqual(calls.count(('latex','u1')),4)
+   self.assertEqual(calls.count(('latex','u1')),2) # identical rejected output stops before the old four-write cap
    self.assertEqual(calls.count(('latex','u2')),1)
