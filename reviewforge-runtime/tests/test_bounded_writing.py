@@ -5,6 +5,21 @@ from paragraph_review import paragraph_options
 from test_paragraph_review import keep
 
 class UnitWritingTests(unittest.TestCase):
+ def test_scoped_repair_is_saved_as_unaccepted_even_when_budget_is_exhausted(self):
+  import json
+  from reviewforge import atomic_json
+  from pipeline_recovery import UnitRevisionsPending
+  ask,review,calls=self.service()
+  with tempfile.TemporaryDirectory() as d:
+   write_units(ask,self.payload(),Path(d),'writer',review,{'facts'},{'f1':('A',{})})
+   folder=next((Path(d)/'argument_units').iterdir());path=folder/'u2.json'
+   atomic_json(folder/'u2.budget.json',{'full_writes':4,'paragraph_patches':6})
+   def scoped(system,payload,required,role):
+    if required=='unit_ids':return {'unit_ids':['u2']}
+    return ask(system,payload,required,role)
+   payload={**self.payload(),'repair_feedback':{'issues':['Specific chapter defect']},'previous_candidate':'Complete old section','_repair_generation':2}
+   with self.assertRaises(UnitRevisionsPending):write_units(scoped,payload,Path(d),'writer',review,{'facts'},{'f1':('A',{})})
+   self.assertFalse(json.loads(path.read_text())['accepted'])
  def test_upstream_context_change_preserves_unresolved_repair_feedback(self):
   import json
   from reviewforge import atomic_json

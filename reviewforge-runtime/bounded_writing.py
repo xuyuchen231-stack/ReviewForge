@@ -199,6 +199,7 @@ def write_units(ask, payload, root, write_contract, review, checks, eligible, re
         if feedback_hash and record.get('repair_binding') != feedback_hash:
             record = {**record, 'accepted': False, 'stage': 'needs_repair', 'repair_binding': feedback_hash,
                       'review':unit_repair_feedback(feedback,payload['previous_candidate'],record.get('candidate',{}).get('latex',''),unit_id)}
+            atomic_json(path,record)
         material = '\n\n'.join(block_map[i] for i in unit['source_blocks'])
         refs = set(unit['citekeys']) | citekeys(material)
         local = {**clean_payload, 'unit_id': unit_id, 'unit_heading': unit['heading'],
