@@ -5,6 +5,43 @@ from reviewforge import atomic_json
 from assembly_review import verified_units,cross_unit_review,review_assembly
 
 class AssemblyReviewTests(unittest.TestCase):
+ def test_oversize_retrieval_is_partitioned_and_child_rejection_still_blocks(self):
+  from paragraph_review import paragraph_options
+  with tempfile.TemporaryDirectory() as t:
+   root=Path(t);candidate,folder=self.fixture(root)
+   row=json.loads((folder/'u2.json').read_text());row['candidate']['latex']+=r' \cite{B}.'
+   row['candidate_sha256']=signature(row['candidate']);atomic_json(folder/'u2.json',row)
+   candidate['latex']+=r' \cite{B}.'
+   studies=[{'citekey':k,'facts':{'n':{'value':'x'*45000,'qualification':'only this experiment'}}} for k in ('A','B')]
+   sizes=[]
+   def ask(system,packet,required,role):
+    from efficient_payload import encoded_size,project_payload
+    sizes.append(len(system)+encoded_size(project_payload(packet)))
+    if required=='examined_unit_ids':return {'examined_unit_ids':['u1','u2'],'status':'pass','reason':'Checked','conflicts':[]}
+    if required=='fields_by_study':return {'fields_by_study':[{'citekey':k,'fields':['n'],'paragraph_ids':[p['id'] for p in packet['paragraphs'] if k in p['citekeys']]} for k in ('A','B')]}
+    supplied=bool(packet.get('canonical_studies'));reject=not supplied or any(s['citekey']=='B' for s in packet['canonical_studies'])
+    rows=[{'paragraph_id':p['id'],'function':'evidence','message':'Claim','adds':'Result','decision':'revise' if reject else 'keep','destination':'main','reason':'Still unresolved' if reject else 'Checked','category':'factual'} for p in packet['paragraph_options']]
+    return {'accepted':not reject,'checks':{'nonredundant_argument':True},'issues':['Unresolved'] if reject else [],'scientific_conflicts':[],'paragraph_review':rows}
+   result,_=review_assembly(ask,{'title':'Evidence','canonical_studies':studies},candidate,root,{'facts_consistent','nonredundant_argument'},lambda r:None)
+   self.assertFalse(result['accepted']);self.assertEqual(len(result['paragraph_review']),2)
+   self.assertLess(max(sizes),90000)
+ def test_source_followup_splits_complete_paragraphs_without_losing_evidence(self):
+  from assembly_review import split_source_followup
+  from paragraph_review import paragraph_options
+  from efficient_payload import encoded_size,project_payload
+  body=r'First evidence \cite{A}.'+'\n\n'+r'Second evidence \cite{B}.'
+  studies=[{'citekey':k,'facts':{'data':{'value':'x'*45000,'qualification':'only this experiment'}}} for k in ('A','B')]
+  packet={'candidate':{'latex':body},'paragraph_options':paragraph_options(body),'canonical_studies':studies,
+          'source_concerns_for_verification':[{'paragraph_id':p['id'],'reason':'Verify'} for p in paragraph_options(body)]}
+  packet['requested_primary_evidence']=[{'citekey':k,'field':'data','fact':{'anchors':[{'excerpt':'Exact primary '+k}]}} for k in ('A','B')]
+  parts=split_source_followup(packet,90000)
+  self.assertEqual(len(parts),2)
+  self.assertEqual([p for part in parts for p in part['paragraph_options']],packet['paragraph_options'])
+  for part,key in zip(parts,('A','B')):
+   self.assertEqual(part['canonical_studies'],[next(s for s in studies if s['citekey']==key)])
+   self.assertLess(encoded_size(project_payload(part)),90000)
+   self.assertEqual(len(part['source_concerns_for_verification']),1)
+   self.assertEqual(part['requested_primary_evidence'],[q for q in packet['requested_primary_evidence'] if q['citekey']==key])
  def test_global_findings_sent_once_without_mutating_approval_manifest(self):
   with tempfile.TemporaryDirectory() as t:
    root=Path(t);candidate,_=self.fixture(root)

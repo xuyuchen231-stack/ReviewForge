@@ -92,6 +92,10 @@ def review_assembly(ask,payload,candidate,root,checks,save,pending=None):
     for packet in packets:
         quotes_supplied=False
         for attempt in range(3):
+            from efficient_payload import encoded_size,project_payload
+            if len(ASSEMBLY)+encoded_size(project_payload(packet))>limit:
+                packets.extend(split_source_followup(packet,limit))
+                break
             report=ask(ASSEMBLY,packet,'accepted','reviewer')
             try:
                 if (type(report.get('accepted')) is not bool or not isinstance(report.get('issues'),list)
@@ -141,6 +145,31 @@ def review_assembly(ask,payload,candidate,root,checks,save,pending=None):
     if not global_ok:result['issues'].append('Cross-unit consistency: '+global_report['reason'])
     changes=validate_paragraph_review(candidate['latex'],result);save(result)
     return result,changes
+
+def split_source_followup(packet,limit):
+    """Partition expanded evidence; never cut a paragraph or fact."""
+    from efficient_payload import encoded_size,project_payload,InputBudgetExceeded
+    from manuscript_integrity import citekeys
+    if len(packet.get('paragraph_options',[]))<2:
+        raise InputBudgetExceeded('One intact assembly paragraph with its requested evidence exceeds input budget')
+    excluded={'candidate','paragraph_options','source_concerns_for_verification','requested_primary_evidence'}
+    base={k:v for k,v in packet.items() if k not in excluded}
+    parts=review_batches(ASSEMBLY,base,packet['candidate'],limit,
+                         max_paragraphs=max(1,len(packet['paragraph_options'])//2),followup_reserve=8000)
+    expected=[p['id'] for p in packet['paragraph_options']]
+    if [p['id'] for part in parts for p in part['paragraph_options']]!=expected:
+        raise ValueError('Expanded evidence split changed exact paragraph coverage')
+    allkeys=citekeys(packet['candidate']['latex'])
+    for part in parts:
+        ids={p['id'] for p in part['paragraph_options']};keys=citekeys(part['candidate']['latex'])
+        if 'source_concerns_for_verification' in packet:
+            part['source_concerns_for_verification']=[r for r in packet['source_concerns_for_verification'] if r['paragraph_id'] in ids]
+        if 'requested_primary_evidence' in packet:
+            part['requested_primary_evidence']=[q for q in packet['requested_primary_evidence'] if q['citekey'] in keys or q['citekey'] not in allkeys]
+        if len(part['paragraph_options'])==1 and len(ASSEMBLY)+encoded_size(project_payload(part))>limit:
+            raise InputBudgetExceeded('One complete assembly paragraph and requested quotes exceed input budget; no evidence truncated')
+    return parts
+
 
 def source_followup_context(packet,current_units,global_report):
     """Global consistency already examined all units; retain exact local findings."""
