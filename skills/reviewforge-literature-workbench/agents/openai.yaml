@@ -1,0 +1,4 @@
+interface:
+  display_name: "ReviewForge Literature Workbench"
+  short_description: "Research, synthesize, draft, and audit scientific reviews"
+  default_prompt: "Use $reviewforge-literature-workbench to plan and produce a source-grounded scientific literature review, with an auditable evidence ledger and iterative quality review."
