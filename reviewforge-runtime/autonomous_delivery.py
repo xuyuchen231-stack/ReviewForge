@@ -63,7 +63,7 @@ def deliver_outputs(run,state,report,chat,translate=True,allow_refinement=True,s
             scope=Path(report.get('retention_run',run)).resolve()
             workspace=scope.parent.parent if scope.parent.name=='autonomous_runs' else scope
             source,report['intro_citation_repairs']=apply_verified_patches(source,json.loads(citation_plan.read_text(encoding='utf-8')),workspace)
-        if (run/'publication_figure_plan.json').exists() and r'\label{fig:rf-compact}' not in source:
+        if state.get('include_planned_figures',True) and (run/'publication_figure_plan.json').exists() and r'\label{fig:rf-compact}' not in source:
             import json
             from publication_figures import add_planned_figures
             try:source,report['figures']=add_planned_figures(source,json.loads((run/'publication_figure_plan.json').read_text(encoding='utf-8')),out)

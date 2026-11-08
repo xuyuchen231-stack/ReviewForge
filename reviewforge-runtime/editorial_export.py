@@ -6,7 +6,7 @@ import time
 from reviewforge import atomic_json
 
 
-def finalize_versions(run,result,deadline,chat=None,export_reference=False):
+def finalize_versions(run,result,deadline,chat=None,export_reference=False,include_planned_figures=True):
     from autonomous_delivery import deliver_outputs,copy_project_assets
     run=Path(run).resolve();exports={}
     from editorial_refinement import sha
@@ -40,7 +40,7 @@ def finalize_versions(run,result,deadline,chat=None,export_reference=False):
         report={'accepted_units':0,'editorial_version':stage,'scientific_acceptance_unchanged':True,
                 'editorial':{'citation_audit':result.get('citation_audit',{})},'retention_run':str(run),'source_versions':result.get('versions',{}),'run_started_epoch':result.get('run_started_epoch')}
         def no_model(*args):raise AssertionError('Publication build must not call a model')
-        delivery_state={'deadline':deadline,'phase':'delivery'}
+        delivery_state={'deadline':deadline,'phase':'delivery','include_planned_figures':include_planned_figures}
         def bounded_chat(system,payload,role):
             bound=min(deadline,delivery_state.get('delivery_request_deadline',deadline))
             return (chat or no_model)(system,{**payload,'_delivery_deadline':bound},role)

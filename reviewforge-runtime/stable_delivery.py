@@ -44,7 +44,16 @@ def run_stable(workspace,hours=4):
 def _run_stable_job(ws,run,source,baseline,hours):
     started=time.time();deadline=started+hours*3600
     job=run/'editorial'/('reading_'+time.strftime('%Y%m%dT%H%M%SZ',time.gmtime())+'_'+str(os.getpid()))
-    job.mkdir(parents=True,exist_ok=False)
+    previous=run/'workflow_route.json'
+    resumed=False
+    if previous.exists():
+        saved=json.loads(previous.read_text(encoding='utf-8'));old_job=Path(saved.get('job','')).resolve()
+        if (saved.get('kind')=='stable_delivery' and saved.get('status') in ('RUNNING','NEEDS_ATTENTION')
+            and saved.get('source')==str(source)
+            and old_job.is_relative_to((run/'editorial').resolve()) and (old_job/'refined.tex').is_file()
+            and (old_job/'refined.tex').read_bytes()==source.read_bytes()):
+            job=old_job;started=saved['started_epoch'];deadline=saved['deadline_epoch'];resumed=True
+    if not resumed:job.mkdir(parents=True,exist_ok=False)
     # Never reuse an old PDF or an incomplete reconstructed manuscript.
     snapshot=job/'refined.tex';snapshot.write_bytes(source.read_bytes())
     from editorial_refinement import sha,resilient_request
@@ -62,6 +71,7 @@ def _run_stable_job(ws,run,source,baseline,hours):
            'deadline_epoch':deadline,'source':str(source),'job':str(job),'output':str(job/'short/output/output'),
            'expert_verified':False,'submission_ready':False}
     atomic_json(route,state)
+    if time.time()>=deadline:raise TimeoutError('Original reading-copy delivery budget exhausted; no new time budget created')
     from reviewforge import CompatibleAPI,load_env
     from account_cycles import is_tokenharbor_free
     from freeai_provider import allowed_freeai
@@ -84,7 +94,12 @@ def _run_stable_job(ws,run,source,baseline,hours):
     try:
         from editorial_export import finalize_versions
         print('[stable-delivery] verified complete baseline; skipping seven-section reconstruction and repeated editorial passes',flush=True)
-        result=finalize_versions(run,result,deadline,chat=chat)
+        prior_batch=os.environ.get('RF_TRANSLATION_BATCH_UNITS')
+        os.environ['RF_TRANSLATION_BATCH_UNITS']='1'
+        try:result=finalize_versions(run,result,deadline,chat=chat,include_planned_figures=False)
+        finally:
+            if prior_batch is None:os.environ.pop('RF_TRANSLATION_BATCH_UNITS',None)
+            else:os.environ['RF_TRANSLATION_BATCH_UNITS']=prior_batch
         atomic_json(job/'result.json',result)
         export=result.get('exports',{}).get('condense',{})
         report=export.get('report',{})

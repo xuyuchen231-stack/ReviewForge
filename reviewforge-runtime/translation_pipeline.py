@@ -13,6 +13,15 @@ class TranslationError(ValueError):
     pass
 
 
+def translation_cache_path(directory,digest):
+    directory=Path(directory)
+    legacy=directory/(digest+'.json')
+    path=legacy if legacy.exists() else directory/(digest[:24]+'.json')
+    if path.exists() and json.loads(path.read_text(encoding='utf-8')).get('source_sha256')!=digest:
+        raise TranslationError('Translation cache hash binding mismatch')
+    return path
+
+
 TOKEN = re.compile(r'RFPROTECT\d{6}TOKEN')
 # Keep scientific/programmatic environments opaque. Captions and table prose outside
 # these environments remain translatable. Embedded TikZ labels require separate editing.
@@ -182,7 +191,15 @@ def prose_units(masked, limit=1800):
 
 
 def translate_plain_slots(unit, ask, directory, context, entry, deadline):
-    """Only prose crosses the model boundary; reinsert every protected span locally."""
+    """Validate an opt-in complete unit, otherwise reinsert protected spans locally."""
+    import os
+    if os.environ.get('RF_TRANSLATION_BATCH_UNITS')=='1' and TOKEN.search(unit):
+        if deadline is not None and time.time()>=deadline:raise TranslationError('Translation deadline reached')
+        entry['attempts']+=1
+        candidate=ask(unit,'Translate the complete unit, preserving every RFPROTECT token exactly and in order. Return Chinese prose only, with the tokens in place.')
+        if isinstance(candidate,str):candidate=re.sub(r'\bet\s+al\.', '\u7b49', candidate)
+        if validate_unit(unit,candidate)[0]:return candidate
+        # Malformed batch output cannot pass: retain the established slot path.
     slots=directory/'plain_slots';slots.mkdir(exist_ok=True)
     result=[]
     for part in re.split('('+TOKEN.pattern+')',unit):
@@ -191,7 +208,7 @@ def translate_plain_slots(unit, ask, directory, context, entry, deadline):
         if identifier_fragment(part,part):
             result.append(part);continue
         digest=hashlib.sha256(('plain-slots-v1'+context+'\0'+part).encode()).hexdigest()
-        cache=slots/(digest+'.json');translated=None
+        cache=translation_cache_path(slots,digest);translated=None
         if cache.exists():
             record=json.loads(cache.read_text(encoding='utf-8'))
             if record.get('source_sha256')==digest and validate_unit(part,record.get('text'))[0]:translated=record['text']
@@ -226,7 +243,7 @@ def translate_fragment(text, ask, directory, context, reports, deadline=None):
         if not re.search(r'[A-Za-z]{2}', TOKEN.sub('', unit)):
             output.append(unit); continue
         digest = hashlib.sha256((context + '\0' + unit).encode()).hexdigest()
-        path = directory / (digest + '.json')
+        path = translation_cache_path(directory,digest)
         entry = {'id': digest, 'status': 'FAILED', 'attempts': 0}
         candidate = None
         if path.exists():

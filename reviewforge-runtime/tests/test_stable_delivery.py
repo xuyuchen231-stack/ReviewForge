@@ -4,6 +4,22 @@ from study_registry import signature
 
 
 class StableDeliveryTests(unittest.TestCase):
+ def test_resume_keeps_original_job_and_deadline(self):
+  import types
+  from unittest.mock import patch
+  from stable_delivery import run_stable
+  with tempfile.TemporaryDirectory() as t:
+   ws=Path(t);run=ws/'autonomous_runs/test';run.mkdir(parents=True);self.fixture(run)
+   (ws/'autonomous_active.json').write_text(json.dumps({'run_directory':'autonomous_runs/test'}))
+   def export(run,result,deadline,**kwargs):
+    result['exports']={'condense':{'status':'NEEDS_ATTENTION','report':{}}};return result
+   fake=types.SimpleNamespace(base='https://example.test',model='free',reviewer_model='free',fallback_model='free',providers=[])
+   with patch('reviewforge.load_env'),patch('reviewforge.CompatibleAPI',return_value=fake),patch('account_cycles.is_tokenharbor_free',return_value=True),patch('editorial_export.finalize_versions',side_effect=export):
+    first=run_stable(ws,4);second=run_stable(ws,4)
+   self.assertEqual(first['job'],second['job']);self.assertEqual(first['deadline_epoch'],second['deadline_epoch'])
+   route=run/'workflow_route.json';saved=json.loads(route.read_text());saved['deadline_epoch']=1;route.write_text(json.dumps(saved))
+   with self.assertRaises(TimeoutError):run_stable(ws,4)
+   self.assertEqual(json.loads(route.read_text())['deadline_epoch'],1)
  def test_existing_run_worker_blocks_stable_route(self):
   from stable_delivery import run_stable
   from continuous_revision import claim_worker
@@ -22,7 +38,7 @@ class StableDeliveryTests(unittest.TestCase):
    ws=Path(t);run=ws/'autonomous_runs/test';run.mkdir(parents=True);source=self.fixture(run)
    (ws/'autonomous_active.json').write_text(json.dumps({'run_directory':'autonomous_runs/test'}))
    before=source.read_bytes();captured=[]
-   def export(run,result,deadline,chat=None):
+   def export(run,result,deadline,chat=None,include_planned_figures=True):
     from continuous_revision import claim_worker
     with self.assertRaises(RuntimeError):claim_worker(run)
     captured.append(deadline-result['run_started_epoch'])
