@@ -218,6 +218,31 @@ def translate_plain_slots(unit, ask, directory, context, entry, deadline):
         if validate_unit(unit,candidate)[0]:return candidate
         # Malformed batch output cannot pass: retain the established slot path.
     slots=directory/'plain_slots';slots.mkdir(exist_ok=True)
+    if os.environ.get('RF_TRANSLATION_BATCH_UNITS')=='1':
+        pending=[]
+        for part in re.split('('+TOKEN.pattern+')',unit):
+            if not part or TOKEN.fullmatch(part) or not re.search(r'[A-Za-z]{2}',part) or identifier_fragment(part,part):continue
+            digest=hashlib.sha256(('plain-slots-v1'+context+'\0'+part).encode()).hexdigest()
+            cache=translation_cache_path(slots,digest)
+            if cache.exists() and validate_unit(part,json.loads(cache.read_text(encoding='utf-8')).get('text'))[0]:continue
+            pending.append({'id':str(len(pending)),'text':part.strip(),'source':part,'digest':digest,'cache':cache})
+        if len(pending)>1:
+            if deadline is not None and time.time()>=deadline:raise TranslationError('Translation deadline reached')
+            entry['attempts']+=1
+            raw=ask(json.dumps({'slots':[{'id':r['id'],'text':r['text']} for r in pending]},ensure_ascii=False),
+                    'RF_SLOT_BATCH_V1: Translate each slot independently. IDs are identifiers, not prose. Return all IDs exactly once.')
+            try:
+                from reviewforge import extract_json
+                values=extract_json(raw)['translations']
+                if not isinstance(values,list) or len(values)!=len(pending) or {r['id'] for r in values}!={r['id'] for r in pending}:raise ValueError('Incomplete slot batch')
+                translated={r['id']:r['text'] for r in values}
+                for row in pending:
+                    value=translated[row['id']]
+                    if isinstance(value,str):value=re.sub(r'\bet\s+al\.', '\u7b49', value)
+                    if not validate_unit(row['source'],value)[0]:continue
+                    value=re.match(r'\s*',row['source']).group()+value.strip()+re.search(r'\s*$',row['source']).group()
+                    atomic_json(row['cache'],{'source_sha256':row['digest'],'text':value})
+            except (ValueError,KeyError,TypeError):pass # Exact individual validation/retry below remains authoritative.
     result=[]
     for part in re.split('('+TOKEN.pattern+')',unit):
         if not part or TOKEN.fullmatch(part) or not re.search(r'[A-Za-z]{2}',part):

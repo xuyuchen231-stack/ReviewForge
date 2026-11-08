@@ -3,6 +3,20 @@ from pathlib import Path
 
 
 class TranslationPathTests(unittest.TestCase):
+ def test_invalid_whole_unit_batches_plain_slots_before_individual_fallback(self):
+  from translation_pipeline import translate_plain_slots
+  from unittest.mock import patch
+  import os
+  with tempfile.TemporaryDirectory() as t,patch.dict(os.environ,{'RF_TRANSLATION_BATCH_UNITS':'1'}):
+   calls=[]
+   def ask(text,feedback):
+    calls.append(feedback)
+    if feedback.startswith('RF_SLOT_BATCH_V1'):
+     rows=json.loads(text)['slots']
+     return json.dumps({'translations':[{'id':r['id'],'text':'有效中文。'} for r in rows]})
+    return '不完整的标记输出'
+   result=translate_plain_slots('Growth RFPROTECT000001TOKEN increased.',ask,Path(t),'',{'attempts':0},None)
+   self.assertIn('RFPROTECT000001TOKEN',result);self.assertEqual(len(calls),2)
  def test_author_list_is_not_mistaken_for_untranslated_prose(self):
   from translation_pipeline import validate_unit,DOCUMENT_AUTHOR_NAMES
   source=' study of von Stosch, Hamelink, and Oliveira supplies a more direct operational challenge than an unspecified held-out fit. Its development programme comprised '
