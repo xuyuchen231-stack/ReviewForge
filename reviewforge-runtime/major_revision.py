@@ -374,6 +374,7 @@ def failure_record(exc,root,progress=None):
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('command',choices=['prepare','facts','run','audit']);parser.add_argument('--workspace',type=Path,required=True);parser.add_argument('--source',type=Path)
+    parser.add_argument('--once',action='store_true',help='Exit on a blocker instead of keeping the worker alive')
     args=parser.parse_args();ws=args.workspace.resolve();active=json.loads((ws/'autonomous_active.json').read_text(encoding='utf-8'));run=(ws/active['run_directory']).resolve()
     if not run.is_relative_to(ws):raise ValueError('Active run outside workspace')
     if args.source is None:
@@ -386,6 +387,8 @@ def main():
     root=prepare(args.source,run)
     if args.command=='prepare':print(json.dumps({'status':'PREPARED_ONLY','directory':str(root),'model_calls':0},ensure_ascii=True));return
     if args.command=='audit':print(json.dumps(audit(args.source.read_text(encoding='utf-8'),load_registry(run)),ensure_ascii=True));return
+    from continuous_revision import claim_worker
+    worker_lock=claim_worker(root)
     from reviewforge import CompatibleAPI,load_env,encode_model_payload
     from account_cycles import is_tokenharbor_free
     from autonomous_review import source_packet,indexed_source
@@ -422,7 +425,22 @@ def main():
             def resumed_stages():return export_candidate(build(args.source,run,ask),args.source,run,ask)
             def recovery_note(exc,attempt):
                 atomic_json(root/'recovery.json',{'status':'RECOVERING','attempt':attempt,'error_type':type(exc).__name__,'stage':'reconstruction_or_export','expert_verified':False})
-            result=run_with_recovery(resumed_stages,request_failure,recovery_note)
+            if args.once:
+                result=run_with_recovery(resumed_stages,request_failure,recovery_note)
+            else:
+                from continuous_revision import run_continuously,repair_pending_section,checkpoint_fingerprint,publish_worker_state,saved_cooldown
+                def worker_state(state):
+                    publish_worker_state(root,state,os.getpid())
+                from pipeline_recovery import UnitRevisionsPending
+                def provider_not_before():
+                    return saved_cooldown(root)
+                def repair_scientific_failure(exc):
+                    if time.time()<provider_not_before():return False
+                    if isinstance(exc,UnitRevisionsPending) or (str(exc).startswith('Section ') and 'needs scientific revision' in str(exc)):
+                        return repair_pending_section(root,ask)
+                    return False
+                result=run_continuously(resumed_stages,request_failure,repair_scientific_failure,
+                    lambda:checkpoint_fingerprint(root),worker_state,lambda:(root/'stop_continuous').exists(),not_before=provider_not_before)
         print(json.dumps(result,ensure_ascii=True))
     except Exception as exc:
         progress=json.loads((root/'progress.json').read_text(encoding='utf-8')) if (root/'progress.json').exists() else {}

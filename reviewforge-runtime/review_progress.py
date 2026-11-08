@@ -67,6 +67,10 @@ def major_progress(run):
    phase='export'
  if phase=='facts':completed,total=info.get('studies_processed',0),info.get('studies_total',0)
  else:completed,total=info.get('sections_completed',0),info.get('sections_total',0)
+ worker=read_json(root/'worker_state.json',{})
+ if time.time()-worker.get('updated_at_epoch',0)<60 and worker.get('status') in ('RUNNING','WAITING_FOR_PROVIDER','WAITING_FOR_DIAGNOSIS'):
+  state={'RUNNING':'持续任务正在处理','WAITING_FOR_PROVIDER':'持续任务等待接口重试','WAITING_FOR_DIAGNOSIS':'持续任务等待具体修复，当前无有效进展'}[worker['status']]
+  reason=worker.get('repair_error') or worker.get('reason','')
  out=root/'delivery/output';translation=read_json(out/'reports/translation_progress.json',[])
  if isinstance(translation,dict):translation=translation.get('units',[])
  activity=next((line for line in reversed(lines) if line.startswith('[major-revision]') or line.startswith('[canonical]')),'')

@@ -35,6 +35,26 @@ software control flow only; report real model rejection honestly and repair its
 specific evidence issues rather than promoting a fixture or disabling the gate.
 # Review convergence and reuse
 
+`major_revision.py run` now keeps a single worker alive through reconstruction
+and export. Use `--once` only for finite diagnostics. An exclusive OS lock prevents
+duplicate workers for the same run. `worker_state.json` distinguishes actual work,
+provider waits and unresolved diagnosis; waiting is not manuscript progress.
+Creating `stop_continuous` in the major-revision root stops the loop after the
+current bounded request. Saved cooldowns are respected before dispatch.
+
+After a bound section rejection, a separate structural-repair queue can revise or
+merge the implicated unit without resetting the old 4-write/6-patch counters.
+Its explicit additional allowance is 12 calls per run, persisted in
+`structural_repairs.json`. Each exact issue is tried once; a transport failure may
+resume once, still spending the same cumulative allowance and physical-send caps.
+Original unit/section/review records are archived. Numeric results, mathematics
+and citation sets must survive; changed drafts remain unaccepted pending normal
+independent review. A rejected identical repair is not purchased again.
+Exhausted or unresolved scientific work enters an honest diagnosis wait without
+repeated API calls, and resumes on substantive checkpoint correction. Unresolved
+normal returns such as `NEEDS_REVISION` never mean completion. Final PDF delivery
+still requires scientific, translation and layout checks; shutdown stays revoked.
+
 The unit folder binds source facts and writing/review contracts. If only earlier
 units' discourse findings change, an exact, complete, accepted local unit review
 may be reused. The checkpoint retains its original review-context hash and marks
