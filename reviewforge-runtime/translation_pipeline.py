@@ -5,8 +5,18 @@ import re
 import time
 from collections import Counter
 from pathlib import Path
+from contextvars import ContextVar
 
 from reviewforge import atomic_json
+
+DOCUMENT_AUTHOR_NAMES=ContextVar('document_author_names',default=frozenset())
+
+
+def document_author_names(tex):
+    result=set()
+    for entry in re.split(r'\\bibitem(?:\[[^\]]*\])?\{[^}]+\}',tex)[1:]:
+        result.update(m.group().lower() for m in re.finditer(r'(?:(?:von|van|de|del|da|dos)\s+)?[A-Z][A-Za-z-]+(?=,\s*[A-Z]\.)',entry[:400]))
+    return frozenset(result)
 
 
 class TranslationError(ValueError):
@@ -169,6 +179,13 @@ def validate_unit(source, candidate):
         new_words = re.findall(r'\b[A-Za-z]+\b', after.lower())
         original_case=re.findall(r'\b[A-Za-z]+\b',before)
         triples = {tuple(old_words[i:i+3]) for i in range(len(old_words)-2) if not all(w.isupper() for w in original_case[i:i+3])}
+        # Preserve cited author lists; copied surnames are not untranslated prose.
+        name=r'(?:(?:von|van|de|del|da|dos)\s+)?[A-Z][A-Za-z-]+'
+        for authors in re.finditer(r'\b'+name+r'(?:,\s*'+name+r')+,\s*and\s+'+name+r'\b',before):
+            surnames=[m.group().lower() for m in re.finditer(name,authors.group())]
+            if not surnames or not set(surnames)<=DOCUMENT_AUTHOR_NAMES.get():continue
+            words=re.findall(r'\b[A-Za-z]+\b',authors.group().lower())
+            triples.difference_update(tuple(words[i:i+3]) for i in range(len(words)-2))
         if any(tuple(new_words[i:i+3]) in triples for i in range(len(new_words)-2)):
             return False, 'Untranslated English phrase retained'
     if len(prose.strip()) < max(1, len(re.findall(r'\b[A-Za-z]+\b', original)) // 2):
@@ -281,6 +298,7 @@ def translate_document(tex, workspace, ask, context='', deadline=None):
     reports = []
     report = {'status': 'FAILED', 'source_sha256': hashlib.sha256(tex.encode()).hexdigest(),
               'units': reports, 'limitations': ['Text inside protected TikZ/math/verbatim and external figures is preserved; inspect visually.']}
+    author_token=DOCUMENT_AUTHOR_NAMES.set(document_author_names(tex))
     try:
         start = tex.find(r'\begin{document}')
         end = tex.rfind(r'\end{document}')
@@ -308,4 +326,5 @@ def translate_document(tex, workspace, ask, context='', deadline=None):
         report.update(status='PASS', output_sha256=hashlib.sha256(result.encode()).hexdigest(), completed_units=len(reports))
         return result
     finally:
-        atomic_json(ws/'reports'/'translation_gate.json', report)
+        try:atomic_json(ws/'reports'/'translation_gate.json', report)
+        finally:DOCUMENT_AUTHOR_NAMES.reset(author_token)

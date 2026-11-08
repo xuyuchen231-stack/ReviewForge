@@ -3,6 +3,23 @@ from pathlib import Path
 
 
 class TranslationPathTests(unittest.TestCase):
+ def test_author_list_is_not_mistaken_for_untranslated_prose(self):
+  from translation_pipeline import validate_unit,DOCUMENT_AUTHOR_NAMES
+  source=' study of von Stosch, Hamelink, and Oliveira supplies a more direct operational challenge than an unspecified held-out fit. Its development programme comprised '
+  candidate='von Stosch、Hamelink 与 Oliveira 的研究提供了比未明确界定的留出拟合更直接的操作性挑战。其开发方案包括'
+  token=DOCUMENT_AUTHOR_NAMES.set(frozenset(('von stosch','hamelink','oliveira')))
+  try:self.assertTrue(validate_unit(source,candidate)[0])
+  finally:DOCUMENT_AUTHOR_NAMES.reset(token)
+ def test_capitalized_scientific_list_is_not_an_author_exception(self):
+  from translation_pipeline import validate_unit
+  self.assertFalse(validate_unit('Growth, Yield, and Productivity are measured.', '本文测量 Growth, Yield, and Productivity。')[0])
+ def test_author_names_are_read_from_bibliographic_initials(self):
+  from translation_pipeline import document_author_names
+  text=r'\bibitem{A} von Stosch, M.; Hamelink, J. M.; Oliveira, R.. Study title.'
+  self.assertTrue({'von stosch','hamelink','oliveira'}<=document_author_names(text))
+ def test_author_exception_does_not_allow_untranslated_scientific_phrase(self):
+  from translation_pipeline import validate_unit
+  self.assertFalse(validate_unit('The hybrid model predicts production.', '该 hybrid model predicts 产量。')[0])
  def test_valid_batch_preserves_markers_and_uses_one_request(self):
   from translation_pipeline import translate_plain_slots
   from unittest.mock import patch
