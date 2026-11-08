@@ -93,7 +93,9 @@ def progress(runtime):
   out=Path(route['output']).resolve()
   if not out.is_relative_to((run/'editorial').resolve()):raise ValueError('Stable output outside run')
   states={'RUNNING':'限时中英文交付运行中','READING_COPIES_BUILT':'中英文阅读稿已生成，科学问题另列','NEEDS_ATTENTION':'限时交付有问题，请查看原因'}
-  return {'state':states.get(route.get('status'),route.get('status')),'passed':0,'recorded':0,
+  translated=read_json(out.parent/'reports/translation_progress.json',[])
+  if isinstance(translated,dict):translated=translated.get('units',[])
+  return {'state':states.get(route.get('status'),route.get('status')),'passed':sum(u.get('status')=='PASS' for u in translated),'recorded':len(translated),
           'reason':route.get('reason',''),'english':(out/'review_en.pdf').is_file(),'chinese':(out/'review_zh.pdf').is_file(),
           'output':str(out)}
  major=major_progress(run)
