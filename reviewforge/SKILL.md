@@ -9,6 +9,14 @@ Use this skill for scientific review articles. Preserve scientific meaning and t
 
 ## Current route and autonomous research improvements
 
+When the user prioritizes a few-hour delivery from an existing complete manuscript,
+use `major_revision.py run --workspace <workspace> --hours 4`. The default restores
+the hash-verified COMPLETE editorial baseline and the established bilingual export;
+it does not start seven-section reconstruction. Outputs are fresh reading copies,
+with unresolved scientific reviews preserved separately and no submission approval.
+A time budget cannot guarantee provider availability. Never email these as accepted
+final revisions under an earlier final-only delivery authorization.
+
 Use `references/autonomous-research-adaptation.md` when planning an unattended run,
 reviewing stalled iterations, setting completion criteria or improving synthesis. It
 adapts the relevant ARIS methods to narrative reviews: claim/evidence planning,
@@ -20,7 +28,7 @@ Sources and adaptation boundaries: `references/aris-source-map.json` and
 It does not inspect sources or certify a paper, and is not a live-runtime dependency.
 
 For an existing workspace, resume its actual active workflow and valid checkpoints.
-For scientific major revision, use `major_revision.py run --workspace <workspace>`
+For explicitly requested experimental scientific reconstruction, use `major_revision.py run --research-loop --workspace <workspace>`
 and `references/scientific-major-revision.md`; for an already completed manuscript
 needing only cleaning/condensation, use the editorial route. `synthesis_pipeline.py
 init` creates scaffolding only. Older v3/v4/nine-hour launchers below are compatibility

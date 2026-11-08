@@ -35,7 +35,7 @@ software control flow only; report real model rejection honestly and repair its
 specific evidence issues rather than promoting a fixture or disabling the gate.
 # Review convergence and reuse
 
-`major_revision.py run` now keeps a single worker alive through reconstruction
+`major_revision.py run --research-loop` keeps a single worker alive through reconstruction
 and export. Use `--once` only for finite diagnostics. An exclusive OS lock prevents
 duplicate workers for the same run. `worker_state.json` distinguishes actual work,
 provider waits and unresolved diagnosis; waiting is not manuscript progress.

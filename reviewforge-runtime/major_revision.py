@@ -375,8 +375,13 @@ def failure_record(exc,root,progress=None):
 def main():
     parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('command',choices=['prepare','facts','run','audit']);parser.add_argument('--workspace',type=Path,required=True);parser.add_argument('--source',type=Path)
     parser.add_argument('--once',action='store_true',help='Exit on a blocker instead of keeping the worker alive')
+    parser.add_argument('--research-loop',action='store_true',help='Opt into the experimental seven-section scientific reconstruction')
+    parser.add_argument('--hours',type=float,default=4,help='Stable reading-copy delivery budget')
     args=parser.parse_args();ws=args.workspace.resolve();active=json.loads((ws/'autonomous_active.json').read_text(encoding='utf-8'));run=(ws/active['run_directory']).resolve()
     if not run.is_relative_to(ws):raise ValueError('Active run outside workspace')
+    if args.command=='run' and not args.research_loop and args.source is None:
+        from stable_delivery import run_stable
+        run_stable(ws,args.hours);return
     if args.source is None:
         current=run/'editorial/current.json';candidate=None
         if current.exists():
@@ -388,7 +393,7 @@ def main():
     if args.command=='prepare':print(json.dumps({'status':'PREPARED_ONLY','directory':str(root),'model_calls':0},ensure_ascii=True));return
     if args.command=='audit':print(json.dumps(audit(args.source.read_text(encoding='utf-8'),load_registry(run)),ensure_ascii=True));return
     from continuous_revision import claim_worker
-    worker_lock=claim_worker(root)
+    worker_lock=claim_worker(run)
     from reviewforge import CompatibleAPI,load_env,encode_model_payload
     from account_cycles import is_tokenharbor_free
     from autonomous_review import source_packet,indexed_source

@@ -88,6 +88,14 @@ def progress(runtime):
  active=json.loads((ws/'autonomous_active.json').read_text(encoding='utf-8'))
  run=(ws/active['run_directory']).resolve()
  if not run.is_relative_to(ws.resolve()):raise ValueError('Active run outside workspace')
+ route=read_json(run/'workflow_route.json',{})
+ if route.get('kind')=='stable_delivery':
+  out=Path(route['output']).resolve()
+  if not out.is_relative_to((run/'editorial').resolve()):raise ValueError('Stable output outside run')
+  states={'RUNNING':'限时中英文交付运行中','READING_COPIES_BUILT':'中英文阅读稿已生成，科学问题另列','NEEDS_ATTENTION':'限时交付有问题，请查看原因'}
+  return {'state':states.get(route.get('status'),route.get('status')),'passed':0,'recorded':0,
+          'reason':route.get('reason',''),'english':(out/'review_en.pdf').is_file(),'chinese':(out/'review_zh.pdf').is_file(),
+          'output':str(out)}
  major=major_progress(run)
  if major is not None:return major
  current=json.loads((run/'editorial/current.json').read_text(encoding='utf-8'))
