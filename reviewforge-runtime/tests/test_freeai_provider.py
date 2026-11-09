@@ -13,7 +13,7 @@ class FreeAIProviderTests(unittest.TestCase):
     seen.append((req.headers.get('Authorization'),json.loads(req.data)['model']))
     if len(seen)==1:raise urllib.error.HTTPError(req.full_url,402,'quota',{},BytesIO(b'{}'))
     return BytesIO(b'{"choices":[{"message":{"content":"OK"},"finish_reason":"stop"}]}')
-   with patch('reviewforge.urllib.request.urlopen',side_effect=request):self.assertEqual(api.chat('s','u'),'OK')
+   with patch('reviewforge.open_chat_response',side_effect=request):self.assertEqual(api.chat('s','u'),'OK')
    self.assertEqual(seen,[('Bearer first-secret','qwen7b'),('Bearer second-secret','qwen7b')])
    self.assertIsNone(api.weekly_accounts)
  def config(self):
@@ -26,7 +26,7 @@ class FreeAIProviderTests(unittest.TestCase):
     self.assertEqual(req.full_url,'https://api.free.ai/v1/chat/')
     body=json.loads(req.data);self.assertEqual(body['model'],'qwen7b')
     return BytesIO(json.dumps({'choices':[{'message':{'content':'OK'},'finish_reason':'stop'}],'free_ai_usage':{'tokens_used':12,'tokens_charged':12,'source':'self_hosted','model':'qwen7b'}}).encode())
-   with patch('reviewforge.urllib.request.urlopen',side_effect=request):self.assertEqual(api.chat('s','u'),'OK')
+   with patch('reviewforge.open_chat_response',side_effect=request):self.assertEqual(api.chat('s','u'),'OK')
    self.assertEqual(api.last_free_ai_usage['tokens_charged'],12)
  def test_premium_or_unapproved_freeai_is_rejected_before_request(self):
   for changed in ({'RF_WRITER_MODEL':'openai/gpt-4o'},{'RF_FREEAI_SELF_HOSTED_ONLY':'0'}):

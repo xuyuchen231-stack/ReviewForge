@@ -1,5 +1,6 @@
 """ReviewForge minimal autonomous writing engine (standard library)."""
 from __future__ import annotations
+from collections import deque
 import datetime as dt
 import hashlib
 import http.client
@@ -91,6 +92,32 @@ def extract_json(content):
     return json.loads(content)
 
 
+class APIConnectTimeout(TimeoutError):
+    """The HTTPS connection timed out before the request could be sent."""
+
+
+def open_chat_response(request, timeout):
+    deadline = time.monotonic() + timeout
+
+    class ChatConnection(http.client.HTTPSConnection):
+        def connect(self):
+            self.timeout = max(.001, min(15, deadline - time.monotonic()))
+            try:
+                super().connect()
+            except TimeoutError as exc:
+                raise APIConnectTimeout() from exc
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise APIConnectTimeout()
+            self.sock.settimeout(remaining)
+
+    class ChatHandler(urllib.request.HTTPSHandler):
+        def https_open(self, req):
+            return self.do_open(ChatConnection, req)
+
+    return urllib.request.build_opener(ChatHandler()).open(request, timeout=timeout)
+
+
 def read_response_body(response,deadline,timeout):
     """Read chunks so gateway keepalive bytes cannot reset an overall request budget."""
     chunks=[]
@@ -170,7 +197,7 @@ class CompatibleAPI:
             request=urllib.request.Request(self.base+'/chat/completions',data=json.dumps(body).encode(),headers={'Authorization':'Bearer '+key,'Content-Type':'application/json'})
             started=time.time()
             try:
-                with urllib.request.urlopen(request,timeout=max(.1,min(15,until-time.time()))) as response:data=json.loads(read_response_body(response,until,15))
+                with open_chat_response(request,timeout=max(.1,min(15,until-time.time()))) as response:data=json.loads(read_response_body(response,until,15))
                 if not isinstance(data,dict) or not data.get('choices'):raise ValueError('Activation did not return a model completion')
                 self.weekly_accounts.success(self.base,key,started);result.append({'slot':index+1,'status':'first_success_recorded'})
             except urllib.error.HTTPError as exc:
@@ -255,7 +282,10 @@ class CompatibleAPI:
             allow_rate_failover = os.environ.get('RF_ALLOW_RATE_LIMIT_FAILOVER') == '1'
             key_order = list(range(self.key_index, len(self.keys))) + list(range(0, self.key_index))
             if weekly is not None and is_tokenharbor_free(self.base,model):key_order=weekly.ordered_eligible(self.base,self.keys,self.key_cooldowns)
-            for key_index in key_order:
+            retried_connect = False
+            pending_keys = deque(key_order)
+            while pending_keys:
+                key_index = pending_keys.popleft()
                 if time.time()>=model_deadline:break
                 if self.key_cooldowns.get(key_index, 0) > time.time():
                     continue
@@ -269,7 +299,7 @@ class CompatibleAPI:
                 try:
                     attempt_started=time.time()
                     attempt_deadline=min(model_deadline,time.time()+getattr(self,'request_timeout',150)) if getattr(self,'call_timeout',180)>180 else model_deadline
-                    with urllib.request.urlopen(req, timeout=max(.1,min(getattr(self,'request_timeout',150),model_deadline-time.time()))) as resp:
+                    with open_chat_response(req, timeout=max(.001,min(getattr(self,'request_timeout',150),attempt_deadline-time.time()))) as resp:
                         raw = read_response_body(resp,attempt_deadline,getattr(self,'request_timeout',150))
                         if not raw.strip():raise ValueError('Empty upstream body; bytes='+str(len(raw)))
                         try:data=json.loads(raw)
@@ -300,6 +330,8 @@ class CompatibleAPI:
                     if tracker:tracker.finish(transport_token,'RETURNED',transport_usage)
                     return result
                 except urllib.error.HTTPError as exc:
+                    elapsed = time.time() - attempt_started
+                    print(f'API request failed: {model}: HTTP {exc.code} (provider {self.provider_name}, slot {key_index+1}, {elapsed:.1f}s)',flush=True)
                     if tracker:tracker.finish(transport_token,'REFUSED',transport_usage,http_status=exc.code)
                     if (freeai or beatapi) and exc.code in (402,429):
                         try:delay=max(60,int(exc.headers.get('Retry-After','3600')))
@@ -356,13 +388,24 @@ class CompatibleAPI:
                     failures.append(model + ': HTTP ' + str(exc.code))
                     break
                 except Exception as exc:
-                    if tracker:tracker.finish(transport_token,'FAILED',transport_usage,error_type=type(exc).__name__)
+                    cause = exc.reason if isinstance(exc, urllib.error.URLError) else exc
+                    error_type = type(cause).__name__
+                    if tracker:tracker.finish(transport_token,'FAILED',transport_usage,error_type=error_type)
+                    elapsed = time.time() - attempt_started
+                    attempt_detail = f'{model}: {error_type} (provider {self.provider_name}, slot {key_index+1}, {elapsed:.1f}s)'
+                    print('API request failed: '+attempt_detail,flush=True)
+                    if isinstance(cause, APIConnectTimeout) and not retried_connect and model_deadline-time.time()>1:
+                        failures.append(attempt_detail)
+                        retried_connect = True
+                        pending_keys.appendleft(key_index)
+                        time.sleep(.5)
+                        continue
                     network_error=isinstance(exc,(TimeoutError,ConnectionError,urllib.error.URLError,http.client.HTTPException))
                     if network_error and len(self.keys)>1:
                         self.key_index=(key_index+1)%len(self.keys)
                         print('API network failure on account slot '+str(key_index+1)+'; next route uses another account.',flush=True)
                     detail=('; '+str(exc)) if isinstance(exc,ValueError) and str(exc).startswith(('Empty API response;','Empty upstream body;','Invalid upstream JSON;')) else ''
-                    failures.append(model + ': ' + type(exc).__name__+detail)
+                    failures.append(attempt_detail+detail)
                     # An exhausted model output budget is not an account outage.
                     # Preserve time for another model instead of repeating it per key.
                     if detail.startswith('; Empty API response; finish_reason=length;'):break

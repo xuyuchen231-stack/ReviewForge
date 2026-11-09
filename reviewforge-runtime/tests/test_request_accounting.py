@@ -26,7 +26,7 @@ class RequestAccountingTests(unittest.TestCase):
     calls.append(req)
     if len(calls)==1:raise TimeoutError('fixture')
     return BytesIO(b'{"choices":[{"message":{"content":"OK"}}],"usage":{"prompt_tokens":15,"completion_tokens":2}}')
-   with patch('reviewforge.urllib.request.urlopen',side_effect=request):self.assertEqual(api.chat('s','u'),'OK')
+   with patch('reviewforge.open_chat_response',side_effect=request):self.assertEqual(api.chat('s','u'),'OK')
    rows=[json.loads(s) for s in Path(t,'requests.jsonl').read_text().splitlines()]
    self.assertEqual([r['status'] for r in rows],['STARTED','FAILED','STARTED','RETURNED'])
    self.assertTrue(all(r['scope']=='transport' for r in rows));self.assertEqual(api.transport_tracker.state()['total'],2)

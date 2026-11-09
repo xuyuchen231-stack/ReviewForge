@@ -12,14 +12,14 @@ class RefreshPriorityTests(unittest.TestCase):
    def request(req,timeout):
     seen.append(req.get_header('Authorization'));self.assertEqual(json.loads(req.data)['max_tokens'],32)
     return BytesIO(b'{"choices":[{"message":{"content":"OK"}}]}')
-   with patch('reviewforge.urllib.request.urlopen',side_effect=request):
+   with patch('reviewforge.open_chat_response',side_effect=request):
     api.prime_free_accounts(only_indices={1});api.prime_free_accounts(only_indices={1})
    self.assertEqual(seen,['Bearer new']);self.assertFalse(api.weekly_accounts.entry(api.base,'new')['server_window_confirmed'])
  def test_mixed_weekly_exhaustion_and_cooldown_keeps_retry_time(self):
   from reviewforge import CompatibleAPI
   with tempfile.TemporaryDirectory() as t,patch.dict('os.environ',{'RF_BASE_URL':'https://tokenharbor.ai/v1','RF_API_KEYS':'spent,cooling','RF_WRITER_MODEL':'x:free','RF_FALLBACK_MODEL':'x:free','RF_TOKENHARBOR_CYCLES_FILE':str(Path(t)/'cycles.json'),'RF_ACCOUNT_HEALTH_FILE':str(Path(t)/'health.json'),'RF_PROVIDER_FILE':str(Path(t)/'none')}),patch('reviewforge.time.time',return_value=1000):
    api=CompatibleAPI();api.weekly_accounts.exhausted(api.base,'spent',1000);api.key_cooldowns[1]=1120
-   with patch('reviewforge.urllib.request.urlopen') as request:
+   with patch('reviewforge.open_chat_response') as request:
     with self.assertRaisesRegex(RuntimeError,'Retry-After: 121'):api.chat('s','u')
     request.assert_not_called()
  def test_provider_message_date_is_recorded_without_fabricating_first_use(self):
@@ -57,5 +57,5 @@ class RefreshPriorityTests(unittest.TestCase):
     key=req.get_header('Authorization');seen.append(key)
     if key=='Bearer early':raise urllib.error.HTTPError(req.full_url,429,'quota',{},BytesIO(b'{"error":{"message":"Free allowance used up"}}'))
     return BytesIO(b'{"choices":[{"message":{"content":"OK"}}]}')
-   with patch('reviewforge.urllib.request.urlopen',side_effect=request):self.assertEqual(api.chat('s','u'),'OK')
+   with patch('reviewforge.open_chat_response',side_effect=request):self.assertEqual(api.chat('s','u'),'OK')
    self.assertEqual(seen,['Bearer early','Bearer middle'])
