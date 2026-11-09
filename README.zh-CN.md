@@ -58,6 +58,13 @@ v4 的长文本请求使用最多 900 秒的路由总预算和最多 300 秒的�
 服务商、账号槽位、耗时和错误类型。独立审稿遇到 API 故障时，续跑会重新校验
 原文和证据绑定，并复用已通过本地检查的候选稿。
 
+v4 审稿首次请求默认最多使用 4096 输出 tokens，仍受 `RF_MAX_OUTPUT_TOKENS`
+约束。可通过 `RF_V4_REVIEW_OUTPUT_TOKENS` 调整首次审稿预算。若结果截断或
+JSON 无效，会以简短格式重试一次，预算使用已配置的 `RF_MAX_OUTPUT_TOKENS`。
+两次均无法获得有效结果时，保留待审候选稿并暂停。输入上限
+`RF_V4_MAX_INPUT_CHARS` 默认为 120000 字符，超限会暂停并提示拆分完整论证单元。
+已有 `original_fallback` 的区块通过原有修复队列续跑。
+
 详细参数、输出目录与升级说明见 [Windows 中文操作手册](reviewforge-runtime/README_V4_ZH.md)。
 
 ## 工作流程

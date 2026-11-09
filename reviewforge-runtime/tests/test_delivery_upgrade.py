@@ -138,7 +138,7 @@ class ContextTests(unittest.TestCase):
             (ws/'evidence_ledger.json').write_text(json.dumps({'entries':[{
                 'claim':'Observed result', 'citekey':'k', 'source_id':'paper',
                 'locator':'p.4', 'excerpt':'Exact primary result', 'verification_status':'source_located'}]}))
-            with patch.object(rf, 'client_chat', return_value='{"accept":true}') as chat:
+            with patch.object(rf, 'client_chat', return_value='{"accept":true,"issues":[],"reason":"ok"}') as chat:
                 rf.write_section(None, '', 'Methods', r'Text \cite{k}', [], workspace=ws)
                 writer = chat.call_args.args[2]
                 rf.review_section(None, 'Methods', r'Text \cite{k}', r'New text \cite{k}', workspace=ws)

@@ -60,6 +60,38 @@ class RepairResumeTests(unittest.TestCase):
             writer.assert_not_called()
             self.assertEqual(state['calls'], 2)
 
+    def test_invalid_review_keeps_candidate_pending_after_one_retry(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ws = Path(tmp)
+            state = {'deadline': time.time()+60, 'calls': 0}
+            body = 'A scientifically meaningful explanation. '*8
+            candidate = ('A revised scientifically meaningful explanation. '*8).strip()
+            with patch.object(rf, 'write_section', return_value=candidate) as writer, patch.object(rf, 'client_chat', return_value='{"accept":"false"}') as chat:
+                self.assertIsNone(rf.review_blocks(None,'','Methods',body,[],ws,0,state,ws/'state.json'))
+            self.assertEqual(chat.call_count, 2)
+            writer.assert_called_once()
+            self.assertEqual(state['status'], 'paused_review_response')
+            record = json.loads((ws/'revisions/section_01_blocks/block_001.json').read_text())
+            self.assertEqual(record['mode'], 'pending_review')
+            self.assertEqual(record['candidate'], candidate)
+            self.assertFalse((ws/'reports/repair_queue.json').exists())
+
+    def test_truncated_review_retries_with_configured_output_ceiling(self):
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as tmp:
+            api = SimpleNamespace(max_tokens=18000, thinking_mode='enabled')
+            attempts = []
+            def chat(system, user, role):
+                attempts.append((api.max_tokens, api.thinking_mode))
+                api.last_finish_reason = 'length' if len(attempts)==1 else 'stop'
+                return '\n'.join(('  ```json', '{"accept":true,"issues":[],"reason":"ok"}', '```  '))
+            api.chat = chat
+            with patch.dict('os.environ', {'RF_V4_REVIEW_OUTPUT_TOKENS':'4096'}):
+                verdict = rf.review_section(api,'Methods','Original','Candidate',workspace=tmp)
+            self.assertTrue(verdict['accept'])
+            self.assertEqual(attempts, [(4096,'enabled'),(18000,'disabled')])
+            self.assertEqual((api.max_tokens,api.thinking_mode), (18000,'enabled'))
+
     def test_display_math_block_preserved_without_model_reformatting(self):
         with tempfile.TemporaryDirectory() as tmp:
             ws=Path(tmp); (ws/'reports').mkdir()
