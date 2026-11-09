@@ -267,7 +267,8 @@ class CompatibleAPI:
             # Leave time for configured fallback models instead of letting a
             # stalled first model spend the provider's entire request budget.
             model_deadline=min(call_deadline,time.time()+max(0,call_deadline-time.time())/(len(models)-model_index))
-            request_body={'model': model, 'messages': [{'role': 'system', 'content': system}, {'role': 'user', 'content': user}], 'temperature': 0.2, 'max_tokens': self.max_tokens}
+            request_body={'model': model, 'messages': [{'role': 'system', 'content': system}, {'role': 'user', 'content': user}], 'temperature': 0.2}
+            if self.max_tokens is not None:request_body['max_tokens']=self.max_tokens
             effort=getattr(self,'reasoning_effort',None)
             thinking=getattr(self,'thinking_mode',None)
             supported=('deepseek-v4' in model.lower() or model.lower().split('/')[-1].removesuffix(':free')=='deepseek-flash')
