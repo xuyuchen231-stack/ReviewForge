@@ -36,7 +36,9 @@ routes, not the default for a current major-revision workspace.
 
 For section or block review, load the original evidence for citations in both versions.
 Keep exact excerpts, source locators and qualifications. The v4 runtime can share
-identical excerpts by reference in a request. Keep independent review and use
+identical excerpts by reference in a request. For before/after review, share
+unchanged paragraphs by reference while retaining the full order and exact text
+of both versions. Keep independent review and use
 provider usage records to compare total tokens per accepted block, including retries.
 
 An unattended request authorizes the necessary planning, evidence extraction,

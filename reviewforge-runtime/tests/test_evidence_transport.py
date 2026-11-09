@@ -33,3 +33,20 @@ class EvidenceTransportTests(unittest.TestCase):
    self.assertEqual(row['limitations'],'single batch')
   self.assertEqual(payload['evidence_context']['entries'][0],entry)
   self.assertLess(len(encoded),len(json.dumps(payload,ensure_ascii=False,separators=(',',':'))))
+
+ def test_review_versions_share_only_exact_unchanged_paragraphs(self):
+  import json
+  from evidence_transport import encode_context_payload
+
+  paragraph='An unchanged scientific paragraph with source and qualification. '*20
+  before=paragraph+'\n \nOriginal claim.\n\n'+paragraph
+  after='Corrected claim.\n\n'+paragraph
+  payload={'before':before,'body':after}
+  encoded=encode_context_payload(payload,revised_field='body')
+  wire=json.loads(encoded)
+  for key in ('before','body'):
+   restored=''.join(wire['shared_paragraphs'][str(part)] if isinstance(part,int) else part
+                    for part in wire[key])
+   self.assertEqual(restored,payload[key])
+  self.assertEqual(encoded.count(paragraph),1)
+  self.assertLess(len(encoded),len(json.dumps(payload)))

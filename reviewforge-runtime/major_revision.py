@@ -262,7 +262,12 @@ def provider_request(api,system,payload,required,role,retry=None):
         # Source extraction happens once per immutable document version and must
         # inspect the complete supplied packet. It has its own explicit bound.
         limit=180000
-    wire=project_payload(payload);encoded=encode_model_payload(wire)
+    wire=project_payload(payload)
+    if role=='reviewer' and payload.get('editorial_revision') is True:
+        from evidence_transport import encode_context_payload
+        encoded=encode_context_payload(wire,revised_field='body')
+    else:
+        encoded=encode_model_payload(wire)
     input_size=len(system)+len(encoded)
     if input_size>limit:
         if required=='facts' and isinstance(payload.get('facts'),list):
