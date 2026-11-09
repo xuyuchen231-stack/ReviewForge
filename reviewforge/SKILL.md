@@ -34,6 +34,11 @@ needing only cleaning/condensation, use the editorial route. `synthesis_pipeline
 init` creates scaffolding only. Older v3/v4/nine-hour launchers below are compatibility
 routes, not the default for a current major-revision workspace.
 
+For section or block review, load the original evidence for citations in both versions.
+Keep exact excerpts, source locators and qualifications. The v4 runtime can share
+identical excerpts by reference in a request. Keep independent review and use
+provider usage records to compare total tokens per accepted block, including retries.
+
 An unattended request authorizes the necessary planning, evidence extraction,
 comparison, drafting, provisional review, repair and delivery checks in that scope.
 Run until the agreed workflow completes or a genuine blocker remains; impose a total

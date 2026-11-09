@@ -30,3 +30,38 @@ def expand_evidence(payload):
             if 'anchor_refs' in fact:
                 fact['anchors']=[copy.deepcopy(table[ref]) for ref in fact.pop('anchor_refs')]
     return result
+
+
+def encode_context_payload(payload):
+    """Share exact repeated excerpts across v4 evidence entries and facts."""
+    def encode(value):
+        return json.dumps(value, ensure_ascii=False, separators=(',', ':'))
+
+    original = encode(payload)
+    context = payload.get('evidence_context')
+    if not isinstance(context, dict) or 'shared_excerpts' in context:
+        return original
+    counts = {}
+    for field in ('entries', 'canonical_facts'):
+        for row in context.get(field, []):
+            excerpt = row.get('excerpt')
+            if isinstance(excerpt, str) and excerpt:
+                counts[excerpt] = counts.get(excerpt, 0) + 1
+    ids = {excerpt: str(i) for i, excerpt in enumerate(
+        (excerpt for excerpt, count in counts.items() if count > 1), 1)}
+    if not ids:
+        return original
+    view = {**context, 'shared_excerpts': {ref: excerpt for excerpt, ref in ids.items()},
+            'shared_excerpt_instruction': 'Resolve every excerpt_ref to its exact source text in shared_excerpts. Retain each row’s source, locator and limitations.'}
+    for field in ('entries', 'canonical_facts'):
+        if field not in context:
+            continue
+        view[field] = []
+        for row in context[field]:
+            ref = ids.get(row.get('excerpt'))
+            if ref is not None and 'excerpt_ref' not in row:
+                row = {k: v for k, v in row.items() if k != 'excerpt'}
+                row['excerpt_ref'] = ref
+            view[field].append(row)
+    compact = encode({**payload, 'evidence_context': view})
+    return compact if len(compact) < len(original) else original
