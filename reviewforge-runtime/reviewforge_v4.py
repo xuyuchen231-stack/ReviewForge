@@ -199,7 +199,7 @@ def client_chat(api,system,payload,role='writer',short_retry=False):
  if short_retry:
   api.thinking_mode='disabled'
  else:
-  api.max_tokens=min(output_budget,max(1,int(os.environ.get('RF_V4_REVIEW_OUTPUT_TOKENS','4096'))))
+  api.max_tokens=min(output_budget,max(1,int(os.environ.get('RF_V4_REVIEW_OUTPUT_TOKENS','8192'))))
  try:
   return api.chat(system,user,role=role)
  finally:
@@ -674,6 +674,7 @@ def run_v4(ws=WORK,hours=9,resume=False,minimum=60,skip_search=False,skip_transl
   atomic_json(ws/'reports/blockers.json',{'stage':'literature','required':minimum,'found':len(papers),'reason':'Metadata search insufficient; cannot claim >=60 references'})
   return state
  api=CompatibleAPI()
+ api.max_tokens=int(os.environ.get('RF_MAX_OUTPUT_TOKENS','18000'))
  api.call_timeout=900
  api.request_timeout=300
  api.deadline=state['deadline']
