@@ -29,7 +29,7 @@ class AccountCycleTests(unittest.TestCase):
     self.assertTrue(json.loads(req.data)['model'].endswith(':free'))
     if exhaust[0] and key=='Bearer alpha':raise urllib.error.HTTPError(req.full_url,429,'used',{},BytesIO(b'{"error":{"code":"free_quota_exceeded"}}'))
     return Response()
-   with patch.dict('os.environ',env),patch('reviewforge.time.time',side_effect=lambda:now[0]),patch('reviewforge.urllib.request.urlopen',side_effect=request):
+   with patch.dict('os.environ',env),patch('reviewforge.time.time',side_effect=lambda:now[0]),patch('reviewforge.open_chat_response',side_effect=request):
     api=CompatibleAPI();api.prime_free_accounts(deadline=1060);api.prime_free_accounts(deadline=1060);api.chat('s','u');api.chat('s','u')
     self.assertEqual(seen,['Bearer alpha','Bearer beta','Bearer alpha','Bearer alpha'])
     exhaust[0]=True;api.chat('s','u');self.assertEqual(seen[-2:],['Bearer alpha','Bearer beta'])

@@ -70,7 +70,7 @@ class TestModelRouting(ProviderIsolatedTests):
             def __exit__(self,*args):return False
         def opener(req,timeout):bodies.append(json.loads(req.data));return Response()
         env={'RF_API_KEYS':'mode-test','RF_BASE_URL':'https://mode.invalid','RF_WRITER_MODEL':'writer','RF_REVIEWER_MODEL':'deepseek-v4.1-flash:free'}
-        with patch.dict('os.environ',env),patch('reviewforge.urllib.request.urlopen',side_effect=opener):
+        with patch.dict('os.environ',env),patch('reviewforge.open_chat_response',side_effect=opener):
             api=CompatibleAPI();api.thinking_mode='disabled';api.reasoning_effort='low';api.chat('s','u',role='reviewer');self.assertEqual(api.last_reasoning_chars,0);api.thinking_mode=None;api.reasoning_effort=None;api.chat('s','u',role='reviewer')
         self.assertEqual(bodies[0].get('thinking'),{'type':'disabled'});self.assertNotIn('reasoning_effort',bodies[0]);self.assertNotIn('thinking',bodies[1])
     def test_task_specific_model_override_does_not_change_the_local_reviewer(self):
@@ -83,7 +83,7 @@ class TestModelRouting(ProviderIsolatedTests):
             def __exit__(self,*args):return False
         def opener(req,timeout):models.append(json.loads(req.data)['model']);return Response()
         env={'RF_API_KEYS':'task-route','RF_BASE_URL':'https://task.invalid','RF_WRITER_MODEL':'writer','RF_REVIEWER_MODEL':'critic','RF_FALLBACK_MODEL':'fallback'}
-        with patch.dict('os.environ',env),patch('reviewforge.urllib.request.urlopen',side_effect=opener):
+        with patch.dict('os.environ',env),patch('reviewforge.open_chat_response',side_effect=opener):
             api=CompatibleAPI();api.request_model='writer';api.chat('s','u',role='reviewer');api.request_model=None;api.chat('s','u',role='reviewer')
         self.assertEqual(models,['writer','critic'])
     def test_coherence_effort_is_sent_only_to_supported_deepseek_models(self):
@@ -96,7 +96,7 @@ class TestModelRouting(ProviderIsolatedTests):
             def __exit__(self,*args):return False
         def opener(req,timeout):bodies.append(json.loads(req.data));return Response()
         env={'RF_API_KEYS':'effort-test','RF_BASE_URL':'https://effort.invalid','RF_WRITER_MODEL':'mimo-v2.6-flash:free','RF_REVIEWER_MODEL':'deepseek-v4.1-flash:free'}
-        with patch.dict('os.environ',env),patch('reviewforge.urllib.request.urlopen',side_effect=opener):
+        with patch.dict('os.environ',env),patch('reviewforge.open_chat_response',side_effect=opener):
             api=CompatibleAPI();api.reasoning_effort='low';api.chat('s','u',role='reviewer');api.chat('s','u',role='writer')
         self.assertEqual(bodies[0].get('reasoning_effort'),'low');self.assertNotIn('reasoning_effort',bodies[1])
     def test_timeout_changes_account_for_the_next_model_without_marking_exhaustion(self):
@@ -112,7 +112,7 @@ class TestModelRouting(ProviderIsolatedTests):
             if model=='writer':raise TimeoutError('simulated network timeout')
             return Response()
         env={'RF_API_KEYS':'timeout-key-a,timeout-key-b','RF_BASE_URL':'https://timeout.invalid','RF_WRITER_MODEL':'writer','RF_FALLBACK_MODEL':'fallback'}
-        with patch.dict('os.environ',env),patch('reviewforge.urllib.request.urlopen',side_effect=opener):
+        with patch.dict('os.environ',env),patch('reviewforge.open_chat_response',side_effect=opener):
             api=CompatibleAPI();self.assertEqual(api.chat('s','u'),'ok');self.assertEqual(api.key_cooldowns,{})
         self.assertEqual(seen,[('writer','Bearer timeout-key-a'),('fallback','Bearer timeout-key-b')])
     def test_incomplete_http_response_changes_account_without_cooling_it(self):
@@ -129,7 +129,7 @@ class TestModelRouting(ProviderIsolatedTests):
             if len(seen)==1:raise http.client.IncompleteRead(b'partial')
             return Response()
         env={'RF_API_KEYS':'incomplete-a,incomplete-b','RF_BASE_URL':'https://incomplete.invalid','RF_WRITER_MODEL':'writer','RF_FALLBACK_MODEL':'fallback'}
-        with patch.dict('os.environ',env),patch('reviewforge.urllib.request.urlopen',side_effect=opener):
+        with patch.dict('os.environ',env),patch('reviewforge.open_chat_response',side_effect=opener):
             api=CompatibleAPI();self.assertEqual(api.chat('s','u'),'ok');self.assertEqual(api.key_cooldowns,{})
         self.assertEqual(seen,['Bearer incomplete-a','Bearer incomplete-b'])
     def test_reasoning_only_length_response_switches_model_without_burning_accounts(self):
@@ -144,7 +144,7 @@ class TestModelRouting(ProviderIsolatedTests):
         def opener(req,timeout):
             model=json.loads(req.data)['model'];calls.append(model);return Response(model)
         env={'RF_API_KEYS':'reasoning-test-a,reasoning-test-b,reasoning-test-c','RF_BASE_URL':'https://reasoning.invalid','RF_WRITER_MODEL':'writer','RF_REVIEWER_MODEL':'critic','RF_FALLBACK_MODEL':'critic'}
-        with patch.dict('os.environ',env),patch('reviewforge.urllib.request.urlopen',side_effect=opener):
+        with patch.dict('os.environ',env),patch('reviewforge.open_chat_response',side_effect=opener):
             api=CompatibleAPI();self.assertEqual(api.chat('s','u',role='reviewer'),'ok');self.assertEqual(api.key_cooldowns,{})
         self.assertEqual(calls,['critic','writer'])
     def test_empty_reviewer_response_uses_available_writer_as_labeled_fallback(self):
@@ -160,7 +160,7 @@ class TestModelRouting(ProviderIsolatedTests):
             model=json.loads(req.data)['model'];calls.append(model)
             return Response('' if model=='critic' else 'ok')
         env={'RF_API_KEYS':'test-routing','RF_API_KEY':'test-routing','RF_BASE_URL':'https://routing.invalid','RF_WRITER_MODEL':'writer','RF_REVIEWER_MODEL':'critic','RF_FALLBACK_MODEL':'critic'}
-        with patch.dict('os.environ',env),patch('reviewforge.urllib.request.urlopen',side_effect=opener):
+        with patch.dict('os.environ',env),patch('reviewforge.open_chat_response',side_effect=opener):
             api=CompatibleAPI();self.assertEqual(api.chat('s','u',role='reviewer'),'ok')
             self.assertEqual(api.last_model,'writer')
         self.assertEqual(calls,['critic','writer'])
@@ -176,7 +176,7 @@ class TestModelRouting(ProviderIsolatedTests):
             calls.append(json.loads(req.data.decode())['model'])
             return FakeResponse()
         env={'RF_API_KEY':'test-not-real','RF_BASE_URL':'https://example.invalid/v1','RF_WRITER_MODEL':'mimo-v2.6-flash:free','RF_REVIEWER_MODEL':'deepseek-v4.1-flash:free'}
-        with patch.dict('os.environ',env), patch('reviewforge.urllib.request.urlopen',side_effect=opener):
+        with patch.dict('os.environ',env), patch('reviewforge.open_chat_response',side_effect=opener):
             api=CompatibleAPI()
             self.assertEqual(api.chat('system','user',role='writer'),'ok')
             self.assertEqual(api.chat('system','user',role='reviewer'),'ok')
@@ -191,7 +191,7 @@ class TestEmptyDiagnostics(ProviderIsolatedTests):
    def __enter__(self):return BytesIO(json.dumps({'choices':[{'finish_reason':'length','message':{'content':'','reasoning_content':'private reasoning'}}]}).encode())
    def __exit__(self,*a):pass
   env={'RF_API_KEYS':'diagnostic-test','RF_BASE_URL':'https://example.invalid','RF_WRITER_MODEL':'model','RF_FALLBACK_MODEL':'model'}
-  with patch.dict('os.environ',env),patch('reviewforge.urllib.request.urlopen',return_value=Response()):
+  with patch.dict('os.environ',env),patch('reviewforge.open_chat_response',return_value=Response()):
    with self.assertRaisesRegex(RuntimeError,'finish_reason=length') as caught:CompatibleAPI().chat('s','u')
    self.assertNotIn('private reasoning',str(caught.exception))
 class TestWhitespaceResponse(ProviderIsolatedTests):
@@ -205,7 +205,7 @@ class TestWhitespaceResponse(ProviderIsolatedTests):
    def __exit__(self,*a):pass
   env={'RF_API_KEYS':'whitespace-1,whitespace-2','RF_BASE_URL':'https://example.invalid','RF_WRITER_MODEL':'model','RF_FALLBACK_MODEL':'model'}
   responses=[Response(b'\n'),Response(b'{"choices":[{"message":{"content":"ok"}}]}')]
-  with patch.dict('os.environ',env),patch('reviewforge.urllib.request.urlopen',side_effect=responses):
+  with patch.dict('os.environ',env),patch('reviewforge.open_chat_response',side_effect=responses):
    api=CompatibleAPI();self.assertEqual(api.chat('s','u'),'ok');self.assertEqual(api.last_key_slot,2)
 class TestResponseDeadline(ProviderIsolatedTests):
  def test_periodic_bytes_cannot_extend_total_response_deadline(self):
@@ -231,7 +231,7 @@ class TestWholeUnitRouteBudget(ProviderIsolatedTests):
   env={'RF_API_KEYS':'stage-budget-test','RF_BASE_URL':'https://example.invalid','RF_WRITER_MODEL':'writer','RF_FALLBACK_MODEL':'writer'}
   observed=[]
   def opener(req,timeout):observed.append(timeout);return Response()
-  with patch.dict('os.environ',env),patch('reviewforge.urllib.request.urlopen',side_effect=opener):
+  with patch.dict('os.environ',env),patch('reviewforge.open_chat_response',side_effect=opener):
    api=CompatibleAPI();api.call_timeout=600;api.request_timeout=300;api.deadline=time.time()+600;self.assertEqual(api.chat('s','u'),'ok')
   self.assertGreater(observed[0],299);self.assertLessEqual(observed[0],300)
  def test_short_call_retains_its_full_180_second_response_budget(self):
@@ -244,6 +244,6 @@ class TestWholeUnitRouteBudget(ProviderIsolatedTests):
   env={'RF_API_KEYS':'short-budget-test','RF_BASE_URL':'https://example.invalid','RF_WRITER_MODEL':'writer','RF_FALLBACK_MODEL':'writer'}
   captured=[]
   def body(resp,deadline,timeout):captured.append(deadline-time.time());return b'{"choices":[{"message":{"content":"ok"}}]}'
-  with patch.dict('os.environ',env),patch('reviewforge.urllib.request.urlopen',return_value=Response()),patch('reviewforge.read_response_body',side_effect=body):
+  with patch.dict('os.environ',env),patch('reviewforge.open_chat_response',return_value=Response()),patch('reviewforge.read_response_body',side_effect=body):
    CompatibleAPI().chat('s','u')
   self.assertGreater(captured[0],179)

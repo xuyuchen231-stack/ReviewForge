@@ -18,14 +18,14 @@ class BeatAPIProviderTests(unittest.TestCase):
     self.assertEqual(req.full_url,'https://api.beatapi.io/v1/chat/completions')
     self.assertEqual(json.loads(req.data)['model'],'deepseek-v4.1-flash-free')
     return BytesIO(b'{"choices":[{"message":{"content":"OK"},"finish_reason":"stop"}],"model":"deepseek-v4.1-flash-free"}')
-   with patch('reviewforge.urllib.request.urlopen',side_effect=request):self.assertEqual(api.chat('s','u'),'OK')
+   with patch('reviewforge.open_chat_response',side_effect=request):self.assertEqual(api.chat('s','u'),'OK')
    self.assertGreater(api.key_cooldowns[0],0)
    self.assertTrue(Path(t,'health.json').exists())
  def test_429_uses_server_delay_not_tokenharbor_ten_hours(self):
   with tempfile.TemporaryDirectory() as t,patch.dict('os.environ',{'RF_ACCOUNT_HEALTH_FILE':str(Path(t)/'health.json')}):
    api=CompatibleAPI(self.config())
    error=urllib.error.HTTPError('https://api.beatapi.io/v1/chat/completions',429,'limit',{'Retry-After':'60'},BytesIO(b'{}'))
-   with patch('reviewforge.urllib.request.urlopen',side_effect=error):
+   with patch('reviewforge.open_chat_response',side_effect=error):
     with self.assertRaisesRegex(RuntimeError,'Retry-After: 6[01]'):api.chat('s','u')
  def test_save_keeps_existing_accounts_and_disables_paid_fallback(self):
   from configure_beatapi import save_profile

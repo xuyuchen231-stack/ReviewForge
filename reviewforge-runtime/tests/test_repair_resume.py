@@ -46,6 +46,20 @@ class RepairResumeTests(unittest.TestCase):
             record=json.loads((ws/'revisions/section_01_blocks/block_001.json').read_text())
             self.assertEqual(record['mode'],'api_error')
 
+    def test_reviewer_timeout_resumes_pending_candidate_without_rewriting(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ws = Path(tmp)
+            state = {'deadline': time.time()+60, 'calls': 0}
+            body = 'A scientifically meaningful explanation. '*8
+            candidate = ('A revised scientifically meaningful explanation. '*8).strip()
+            with patch.object(rf, 'write_section', return_value=candidate), patch.object(rf, 'review_section', side_effect=TimeoutError):
+                self.assertIsNone(rf.review_blocks(None,'','Methods',body,[],ws,0,state,ws/'state.json'))
+            self.assertEqual(state['active_request_role'], 'reviewer')
+            with patch.object(rf, 'write_section') as writer, patch.object(rf, 'review_section', return_value={'accept':True}):
+                self.assertEqual(rf.review_blocks(None,'','Methods',body,[],ws,0,state,ws/'state.json'), candidate)
+            writer.assert_not_called()
+            self.assertEqual(state['calls'], 2)
+
     def test_display_math_block_preserved_without_model_reformatting(self):
         with tempfile.TemporaryDirectory() as tmp:
             ws=Path(tmp); (ws/'reports').mkdir()
@@ -90,7 +104,7 @@ class RepairResumeTests(unittest.TestCase):
                 state['section_pending_repairs']={'section':index+1,'items':[]}
                 if index==3:state['deadline']=0
                 return body
-            with patch.object(rf,'CompatibleAPI',return_value=object()),patch.object(rf,'review_blocks',side_effect=repair):
+            with patch.object(rf,'CompatibleAPI'),patch.object(rf,'review_blocks',side_effect=repair):
                 result=rf.run_v4(ws,resume=True,minimum=0)
             self.assertEqual(visited,[1,3])
             self.assertEqual(result['stage'],'translation')

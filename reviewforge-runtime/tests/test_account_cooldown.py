@@ -15,7 +15,7 @@ class AccountCooldownTests(unittest.TestCase):
     key=req.get_header('Authorization');seen.append(key)
     if key=='Bearer used':raise urllib.error.HTTPError(req.full_url,402,'quota depleted',{},None)
     return Response()
-   with patch.dict('os.environ',env),patch('reviewforge.urllib.request.urlopen',side_effect=request):
+   with patch.dict('os.environ',env),patch('reviewforge.open_chat_response',side_effect=request):
     api=CompatibleAPI();api.chat('s','u');api.key_index=0;api.chat('s','u');CompatibleAPI().chat('s','u')
    self.assertEqual(seen,['Bearer used','Bearer available','Bearer available','Bearer available'])
  def setUp(self):
@@ -34,7 +34,7 @@ class AccountCooldownTests(unittest.TestCase):
     calls.append(req.get_header('Authorization'))
     if calls[-1]=='Bearer first-test':raise urllib.error.HTTPError(req.full_url,429,'limited',{'Retry-After':'3600'},None)
     return Response()
-   with patch.dict('os.environ',env),patch('reviewforge.urllib.request.urlopen',side_effect=open_request):
+   with patch.dict('os.environ',env),patch('reviewforge.open_chat_response',side_effect=open_request):
     self.assertEqual(CompatibleAPI().chat('s','u'),'ok')
     self.assertTrue(path.exists())
     data=path.read_text();self.assertNotIn('first-test',data)

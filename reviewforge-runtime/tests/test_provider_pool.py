@@ -15,8 +15,19 @@ class ProviderPoolTests(unittest.TestCase):
     timeouts.append(timeout)
     if len(timeouts)==1:raise TimeoutError('simulated first model stall')
     return Response()
-   with patch('reviewforge.urllib.request.urlopen',side_effect=request):self.assertEqual(api.chat('s','u'),'ok')
+   with patch('reviewforge.open_chat_response',side_effect=request):self.assertEqual(api.chat('s','u'),'ok')
    self.assertLessEqual(timeouts[0],91);self.assertEqual(api.last_model,'second')
+ def test_connection_timeout_retries_same_slot_once_before_model_fallback(self):
+  from reviewforge import APIConnectTimeout
+  from urllib.error import URLError
+  with tempfile.TemporaryDirectory() as t,patch.dict('os.environ',{'RF_BASE_URL':'https://primary.example/v1','RF_API_KEYS':'first,second','RF_PROVIDER_FILE':str(Path(t)/'absent.json'),'RF_ACCOUNT_HEALTH_FILE':str(Path(t)/'health.json'),'RF_WRITER_MODEL':'writer','RF_FALLBACK_MODEL':'writer'}):
+   api=CompatibleAPI()
+   with patch('reviewforge.open_chat_response',side_effect=URLError(APIConnectTimeout())) as send,patch('reviewforge.time.sleep'):
+    with self.assertRaisesRegex(RuntimeError,'APIConnectTimeout'):
+     api.chat('s','u')
+   self.assertEqual(send.call_count,2)
+   self.assertEqual([call.args[0].get_header('Authorization') for call in send.call_args_list],['Bearer first','Bearer first'])
+   self.assertFalse(api.key_cooldowns)
  def test_preferred_provider_is_used_for_writing_but_preparation_can_use_primary(self):
   with tempfile.TemporaryDirectory() as t,patch.dict('os.environ',{'RF_BASE_URL':'https://primary.example/v1','RF_API_KEY':'first-key','RF_API_KEYS':'','RF_PROVIDER_FILE':str(Path(t)/'profiles.json'),'RF_ACCOUNT_HEALTH_FILE':str(Path(t)/'health.json')}):
    Path(t,'profiles.json').write_text(json.dumps({'preferred_provider':'apimaster','providers':[{'name':'apimaster','RF_BASE_URL':'https://apimaster.ai/v1','RF_API_KEY':'second-key'}]}))

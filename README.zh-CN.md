@@ -52,6 +52,12 @@ cd ReviewForge\reviewforge-runtime
 4. `check_review_v4.bat` — 环境预检。
 5. `start_review_v4_9h.bat` — 启动流程；中断后使用 `resume_review_v4.bat`。
 
+v4 的长文本请求使用最多 900 秒的路由总预算和最多 300 秒的单次响应预算，
+实际时限取决于候选服务商、模型和任务剩余时间。HTTPS 建连阶段最多等待 15 秒。
+仅在确认请求尚未发送的建连超时后，同一路由才会重试一次。日志记录模型、
+服务商、账号槽位、耗时和错误类型。独立审稿遇到 API 故障时，续跑会重新校验
+原文和证据绑定，并复用已通过本地检查的候选稿。
+
 详细参数、输出目录与升级说明见 [Windows 中文操作手册](reviewforge-runtime/README_V4_ZH.md)。
 
 ## 工作流程
