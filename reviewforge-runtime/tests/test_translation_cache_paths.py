@@ -3,6 +3,11 @@ from pathlib import Path
 
 
 class TranslationPathTests(unittest.TestCase):
+ def test_translation_must_not_introduce_ellipsis_placeholders(self):
+  from translation_pipeline import validate_unit
+  self.assertFalse(validate_unit('The literature search combined two engines.','关于……的文献检索结合两个引擎。')[0])
+  self.assertFalse(validate_unit('The convex hull evaluated at time t.','在……处求值的凸包。')[0])
+  self.assertTrue(validate_unit('An explicit source omission ... remains quoted.','原文明确的省略……仍保留在引文中。')[0])
  def test_scientific_units_and_training_abbreviations_are_not_untranslated_prose(self):
   from translation_pipeline import validate_unit
   for source,target in [('mL','mL'),('min','min'),('LM+CV+tanh+direct training','LM+CV+tanh+直接训练'),('ADAM+SR+ReLU+semidirect training','ADAM+SR+ReLU+半直接训练'),('Variables X Y Z describe the state.','状态变量为 X+Y+Z。')]:

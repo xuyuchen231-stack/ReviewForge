@@ -163,6 +163,9 @@ def validate_unit(source, candidate):
     if not isinstance(candidate, str) or not candidate.strip():
         return False, 'Empty translation'
     if '\ufffd' in candidate:return False, 'Replacement character in translation'
+    ellipsis=r'\.{3,}|…+|⋯+'
+    if len(re.findall(ellipsis,TOKEN.sub('',candidate)))>len(re.findall(ellipsis,TOKEN.sub('',source))):
+        return False, 'Translation introduced an ellipsis or omission placeholder'
     if TOKEN.findall(source) != TOKEN.findall(candidate):
         return False, 'Protected tokens changed, reordered or omitted'
     prose = TOKEN.sub('', candidate)
