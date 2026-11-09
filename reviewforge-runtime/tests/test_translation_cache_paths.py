@@ -3,6 +3,19 @@ from pathlib import Path
 
 
 class TranslationPathTests(unittest.TestCase):
+ def test_scientific_units_and_training_abbreviations_are_not_untranslated_prose(self):
+  from translation_pipeline import validate_unit
+  for source,target in [('mL','mL'),('min','min'),('LM+CV+tanh+direct training','LM+CV+tanh+直接训练'),('ADAM+SR+ReLU+semidirect training','ADAM+SR+ReLU+半直接训练'),('Variables X Y Z describe the state.','状态变量为 X+Y+Z。')]:
+   with self.subTest(source=source):self.assertTrue(validate_unit(source,target)[0])
+ def test_roman_enumeration_keeps_exact_index_with_chinese_punctuation(self):
+  from translation_pipeline import validate_unit
+  self.assertTrue(validate_unit('; (iv) ','；（iv）')[0])
+  self.assertFalse(validate_unit('; (iv) ','；（v）')[0])
+  self.assertFalse(validate_unit('(civil)','(civil)')[0])
+  self.assertFalse(validate_unit('(mix)','(mix)')[0])
+ def test_replacement_character_cannot_pass_translation_validation(self):
+  from translation_pipeline import validate_unit
+  self.assertFalse(validate_unit('Silica flocculation.','硅�ite絮凝。')[0])
  def test_invalid_whole_unit_batches_plain_slots_before_individual_fallback(self):
   from translation_pipeline import translate_plain_slots
   from unittest.mock import patch

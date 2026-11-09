@@ -92,10 +92,12 @@ def progress(runtime):
  if route.get('kind')=='stable_delivery':
   out=Path(route['output']).resolve()
   if not out.is_relative_to((run/'editorial').resolve()):raise ValueError('Stable output outside run')
-  states={'RUNNING':'限时中英文交付运行中','READING_COPIES_BUILT':'中英文阅读稿已生成，科学问题另列','NEEDS_ATTENTION':'限时交付有问题，请查看原因'}
+  states={'RUNNING':'限时中英文交付运行中','OFFLINE_REPAIR':'正在离线补齐中文稿（原时限已结束，不调用API）','AWAITING_LAYOUT_REVIEW':'中英文已编译，等待版面核查（原时限未达成）','READING_COPIES_BUILT':'中英文阅读稿已生成，科学问题另列','NEEDS_ATTENTION':'限时交付有问题，请查看原因'}
+  state=states.get(route.get('status'),route.get('status'))
+  if route.get('status')=='READING_COPIES_BUILT' and route.get('deadline_met') is False:state+='（原时限未达成，后续离线补齐）'
   translated=read_json(out.parent/'reports/translation_progress.json',[])
   if isinstance(translated,dict):translated=translated.get('units',[])
-  return {'state':states.get(route.get('status'),route.get('status')),'passed':sum(u.get('status')=='PASS' for u in translated),'recorded':len(translated),
+  return {'state':state,'passed':sum(u.get('status')=='PASS' for u in translated),'recorded':len(translated),
           'reason':route.get('reason',''),'english':(out/'review_en.pdf').is_file(),'chinese':(out/'review_zh.pdf').is_file(),
           'output':str(out)}
  major=major_progress(run)

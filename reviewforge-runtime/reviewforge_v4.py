@@ -505,6 +505,7 @@ def generate_chinese_body(api,tex,papers,workspace,deadline=None,context_workspa
    'RFPROTECT tokens are immutable TeX/math/number markers: copy each exactly once in the same order. '
    'Do not add TeX syntax, commentary, markdown or omit text. Keep technical abbreviations where appropriate. '
    'Retain standard scientific abbreviations (such as ODE, PCA, MPC and pH); Chinese academic prose may contain them. '
+   'Translate spelled-out method names into Chinese. Translate month names with Chinese month words, not new Arabic digits. '
    'Do not repeatedly expand abbreviations in separate fragments or invent first-use definitions. '
    'Use the supplied terminology glossary. Return only the translated text.',
    {'text':text,'context':context,'feedback':feedback},role='writer')

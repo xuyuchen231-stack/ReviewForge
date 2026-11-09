@@ -137,7 +137,7 @@ def mask_tex(text):
     return ''.join(out), saved
 
 
-MIXED_ABBREVIATIONS={'pH','pO','pCO','pKa','qPCR','qRT','mRNA','rRNA','tRNA','siRNA','miRNA','scFv','GPo','Mut'}
+MIXED_ABBREVIATIONS={'pH','pO','pCO','pKa','qPCR','qRT','mRNA','rRNA','tRNA','siRNA','miRNA','scFv','GPo','Mut','mL','min','tanh','ReLU'}
 PROSE_HEADINGS={'ABSTRACT','INTRODUCTION','BACKGROUND','METHOD','METHODS','RESULT','RESULTS','DISCUSSION','CONCLUSION','CONCLUSIONS','MODEL','MODELS','DATA','STUDY','STUDIES','TRAINING','VALIDATION','PREDICTION'}
 
 
@@ -148,6 +148,9 @@ def abbreviation_only(text):
 
 
 def identifier_fragment(source,candidate):
+    normalize=lambda value:re.sub(r'\s+','',value.translate(str.maketrans('；，：（）',';,:()'))).lower()
+    roman=re.fullmatch(r'\s*[;,:]?\s*\(([ivxlcdm]+)\)\s*',source,re.I)
+    if roman and roman.group(1).lower() in {'i','ii','iii','iv','v','vi','vii','viii','ix','x','xi','xii','xiii','xiv','xv','xvi','xvii','xviii','xix','xx'} and normalize(source)==normalize(candidate):return True
     # A leading article has no standalone Chinese equivalent before an immutable
     # strain identifier. Restrict this exception to unchanged identifiers.
     before=source.strip().strip('(),.;:')
@@ -159,6 +162,7 @@ def identifier_fragment(source,candidate):
 def validate_unit(source, candidate):
     if not isinstance(candidate, str) or not candidate.strip():
         return False, 'Empty translation'
+    if '\ufffd' in candidate:return False, 'Replacement character in translation'
     if TOKEN.findall(source) != TOKEN.findall(candidate):
         return False, 'Protected tokens changed, reordered or omitted'
     prose = TOKEN.sub('', candidate)
@@ -178,7 +182,7 @@ def validate_unit(source, candidate):
         old_words = re.findall(r'\b[A-Za-z]+\b', before.lower())
         new_words = re.findall(r'\b[A-Za-z]+\b', after.lower())
         original_case=re.findall(r'\b[A-Za-z]+\b',before)
-        triples = {tuple(old_words[i:i+3]) for i in range(len(old_words)-2) if not all(w.isupper() for w in original_case[i:i+3])}
+        triples = {tuple(old_words[i:i+3]) for i in range(len(old_words)-2) if not all(w.isupper() or abbreviation_only(w) for w in original_case[i:i+3])}
         # Preserve cited author lists; copied surnames are not untranslated prose.
         name=r'(?:(?:von|van|de|del|da|dos)\s+)?[A-Z][A-Za-z-]+'
         for authors in re.finditer(r'\b'+name+r'(?:,\s*'+name+r')+,\s*and\s+'+name+r'\b',before):
