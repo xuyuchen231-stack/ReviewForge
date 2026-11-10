@@ -7,6 +7,60 @@ description: Research, critique, and revise scientific review articles through a
 
 Use this skill for scientific review articles. Preserve scientific meaning and trace every important empirical claim to an inspectable primary source. Never invent a citation, DOI, study result, or journal standard.
 
+## Acceptance for final-only manuscript tasks
+
+Record the user's requested layout, compiler, languages, minimum compiled pages,
+minimum reference count and evidence requirements before choosing the runtime route.
+For final-only requests, a reading-copy status, API review verdict, successful
+compile or bilingual parity check is only one stage result. Withhold manuscript
+delivery if any required item fails or remains unverified. Save the checkpoint
+and continue repairing within the authorized execution window.
+
+For XeLaTeX two-column delivery, compile both editable project entry points with
+XeLaTeX and inspect representative body pages in both PDFs for actual two-column
+flow, clipped tables and equations. Count pages only from those compiled PDFs.
+Treat the actual column layout and reference count as explicit pass/fail entries
+in the final verification record. Keep diagnostic builds separate.
+
+Before final acceptance, independently review the actual final English prose
+against primary evidence. For each empirical synthesis subsection, require a
+specific comparison or a documented evidence gap. Identify the organism and
+intervention, the prediction-time inputs, the baseline and evaluation split, and
+what result supports the conclusion, wherever the source establishes them.
+Flag any generality that could be pasted into an unrelated review without
+changing its meaning. Require a precise manuscript location and an actionable
+revision for every blocking finding. Then recheck the corresponding Chinese
+section and compare its scope, values, units and citations.
+
+## Planning and reviewing a scientific synthesis
+
+For a new review or substantive rewrite, build a question-led outline and an
+evidence matrix before drafting. Use descriptive headings from the discipline.
+Compare studies by mechanism, learned operator, observation, operating change
+and validation design. Each empirical comparison should explain what accounts
+for the contrast, what it supports and where the comparison stops. Document
+source access in the evidence ledger or methods and carry material scientific
+limitations into the prose.
+
+For microbial fermentation, check scope-relevant coverage of dynamic training,
+physiology and population dynamics, GSMM/dFBA, observability and identifiability,
+experiment design, scale transfer and online estimation/control. Separate direct
+fermentation evidence from adjacent methods. Keep the two commissioned reviews
+distinct and apply only the branches that answer each review's question.
+Use the user's reference threshold. Prioritize verified representative studies
+over a generic bibliography quota. Normalize and verify bibliography metadata
+and DOI identifiers across both languages.
+
+Plan figures around specific explanatory tasks. Show learned operators, state
+and observation paths, or feedback explicitly. Label data provenance and units
+on quantitative curves. Prefer verified research data for evidence figures.
+Use a conceptual schematic when data are unavailable. Omit isolated toy
+simulations from the main argument unless a reproducible comparison answers a
+stated review question and its synthetic status is clear. Aim for at most 20
+displayed equations per language when requested and retain only equations that
+the argument needs. Review the Chinese prose for discipline-specific usage and
+natural sentence structure alongside the bilingual parity checks.
+
 ## Current route and autonomous research improvements
 
 When the user prioritizes a few-hour delivery from an existing complete manuscript,
@@ -33,6 +87,13 @@ and `references/scientific-major-revision.md`; for an already completed manuscri
 needing only cleaning/condensation, use the editorial route. `synthesis_pipeline.py
 init` creates scaffolding only. Older v3/v4/nine-hour launchers below are compatibility
 routes, not the default for a current major-revision workspace.
+
+For section or block review, load the original evidence for citations in both versions.
+Keep exact excerpts, source locators and qualifications. The v4 runtime can share
+identical excerpts by reference in a request. For before/after review, share
+unchanged paragraphs by reference while retaining the full order and exact text
+of both versions. Keep independent review and use
+provider usage records to compare total tokens per accepted block, including retries.
 
 An unattended request authorizes the necessary planning, evidence extraction,
 comparison, drafting, provisional review, repair and delivery checks in that scope.
