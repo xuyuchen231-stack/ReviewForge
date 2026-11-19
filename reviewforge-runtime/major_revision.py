@@ -296,7 +296,7 @@ def provider_request(api,system,payload,required,role,retry=None):
     cache=Path(execution)/'responses'/(identity+'.json') if execution else None
     # Response identity follows complete scientific input, prompts and model route,
     # not its lossless wire representation. Physical-attempt ledgers stay untouched.
-    logical_identity=signature(['logical-response-v1',WIRE_POLICY,system,payload,required,role,
+    logical_identity=signature(['logical-response-v1',WIRE_POLICY,system,payload,wire,required,role,
         getattr(api,'base',None),getattr(api,'model',None),getattr(api,'reviewer_model',None),getattr(api,'fallback_model',None)])
     logical_cache=Path(execution)/'semantic_responses'/(logical_identity+'.json') if execution else None
     candidates=[(logical_cache,logical_identity),(cache,identity)]
