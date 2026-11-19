@@ -63,6 +63,10 @@ def resilient_request(request, deadline, clock=time.time, sleep=None, categories
                 delay = max(1, failure.get('retry_after_seconds', 60))
             elif category in ('connection_failure', 'upstream_unavailable', 'invalid_response', 'response_truncated'):
                 transient_failures += 1
+                # Even an until-complete session must not spin indefinitely on
+                # one broken service. Preserve checkpoints and expose the fault.
+                if transient_failures >= 5:
+                    raise
                 if category in ('invalid_response', 'response_truncated') and transient_failures >= 3:
                     raise
                 delay = min(300, 10 * (2 ** min(transient_failures-1, 5)))
@@ -351,6 +355,16 @@ control, transfer or independent validation. Do not treat this sample as a full 
             if record:payload['repair_feedback']={'errors':record.get('errors',[]),'review':record.get('review',{}),'instruction':'One targeted repair; retain already correct material.'}
             candidate=editorial_response(chat,WRITERS[stage]+(' Use citation_context for factual scope; clarify prose definitions without renaming protected mathematical symbols.' if context is not None else ''),payload,'writer',deadline)
             candidate=body[:len(body)-len(body.lstrip())]+candidate.strip()+body[len(body.rstrip()):]
+        # Same text + same hash-bound context cannot resolve the prior rejection.
+        # Retain its verdict and unresolved work rather than paying to ask again.
+        if (record.get('accepted') is False and record.get('pending_review') is False
+                and record.get('candidate')==candidate and isinstance(record.get('review'),dict)
+                and type(record['review'].get('accept')) is bool
+                and all(type(record['review'].get(k)) is bool for k in CHECKS)
+                and bool(record['review'].get('explanation'))):
+            record.update(attempt=attempt,no_progress_reason='identical_rejected_candidate')
+            atomic_json(cache,record)
+            return record
         errors=preservation_errors(body,candidate)
         if len(ACCESS.findall(candidate))>max(1,len(ACCESS.findall(body))):
             errors.append('Repeated access bookkeeping increased; keep the scientific consequence once instead of duplicating retrieval disclaimers')
@@ -509,6 +523,8 @@ def main():
         def chat(system,payload,role):
             bound=payload.get('_delivery_deadline')
             payload={k:v for k,v in payload.items() if k!='_delivery_deadline'}
+            from evidence_transport import encode_context_payload
+            encoded_payload=encode_context_payload(payload,revised_field='body' if 'before' in payload and 'body' in payload else None)
             previous_deadline=api.deadline
             if bound is not None:api.deadline=min(previous_deadline,bound)
             request_stage=payload.get('stage','translation')
@@ -518,10 +534,10 @@ def main():
             def heartbeat():
                 while not stop.wait(20):print('[editorial/request] stage='+request_stage+' role='+role+' waiting='+str(int(time.time()-started))+'s',flush=True)
             thread=threading.Thread(target=heartbeat,daemon=True);thread.start()
-            record={'stage':request_stage,'role':role,'input_chars':len(system)+len(encode_model_payload(payload)),'started_epoch':started}
+            record={'stage':request_stage,'role':role,'input_chars':len(system)+len(encoded_payload),'original_input_chars':len(system)+len(encode_model_payload(payload)),'started_epoch':started}
             print('[editorial/request] stage='+request_stage+' role='+role,flush=True)
             try:
-                response=recover_model_request(api,system,encode_model_payload(payload),role)
+                response=recover_model_request(api,system,encoded_payload,role)
                 record.update(status='RETURNED',provider=getattr(api,'last_provider','unknown'),model=getattr(api,'last_model','unknown'),account_slot=getattr(api,'last_key_slot',None),
                               usage={k:v for k,v in (getattr(api,'last_usage',{}) or {}).items() if k in ('prompt_tokens','completion_tokens','total_tokens','input_tokens','output_tokens') and isinstance(v,(int,float))})
                 return response

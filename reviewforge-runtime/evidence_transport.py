@@ -128,7 +128,7 @@ def _share_evidence_rows(payload):
     return {**payload, 'evidence_context': view}
 
 
-def encode_context_payload(payload, *, revised_field=None):
+def encode_context_payload(payload, *, revised_field=None, use_packet=True):
     """Compact only exact duplicates when the request becomes smaller."""
     def encode(value):
         return json.dumps(value, ensure_ascii=False, separators=(',', ':'))
@@ -150,5 +150,39 @@ def encode_context_payload(payload, *, revised_field=None):
         if version_view is not view:
             version_wire = encode(version_view)
             if len(version_wire) < len(compact):
-                return version_wire
+                view, compact = version_view, version_wire
+    from evidence_packet_runtime import packet_view
+    packet = packet_view(view) if use_packet else view
+    if packet is not view:
+        packet_wire = encode(packet)
+        if len(packet_wire) < len(compact):
+            return packet_wire
     return compact
+
+
+def decode_context_payload(encoded):
+    """Restore every transport layer for offline integrity and regression checks."""
+    from evidence_packet_runtime import expand_packet
+    result = expand_packet(json.loads(encoded))
+    if not isinstance(result, dict): return result
+    if 'shared_paragraphs' in result:
+        table = result.pop('shared_paragraphs')
+        result.pop('version_encoding', None)
+        for field in ('before', 'after', 'body'):
+            if isinstance(result.get(field), list):
+                result[field] = ''.join(table[str(v)] if type(v) is int else v for v in result[field])
+    context = result.get('evidence_context')
+    if isinstance(context, dict):
+        tables = context.pop('evidence_row_tables', None)
+        if tables:
+            for field in ('entries', 'canonical_facts'):
+                if field in context:
+                    context[field] = [{**tables['metadata'][m], **tables['anchors'][a]} for m,a in context[field]]
+        excerpts = context.pop('shared_excerpts', None)
+        if excerpts is not None:
+            context.pop('shared_excerpt_instruction', None)
+            for field in ('entries', 'canonical_facts'):
+                for row in context.get(field, []):
+                    if 'excerpt_ref' in row:
+                        row['excerpt'] = excerpts[row.pop('excerpt_ref')]
+    return result

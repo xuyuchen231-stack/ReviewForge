@@ -360,3 +360,13 @@ Use bounded same-process recovery for transient failures/deferred unit passes,
 without rerunning fact extraction or bypassing scientific rejection. Respect long
 quota cooldowns. Completion-email-shutdown remains conditional on verified new
 bilingual delivery and confirmed send.
+
+## Source-type reading and compact evidence intake
+
+When importing literature or preparing a focused comparison, consult
+`references/source-reading-packets.md`. Distinguish primary-study mechanism and
+validation extraction from review field-map extraction; record text and figure
+capture separately from scientific support. Use exact located evidence on demand
+and reuse hash-bound extracts. The optional offline `scripts/evidence_packet.py`
+builds budgeted source packets without model calls or silent truncation. Integrate
+these checks into the existing synthesis pass, not additional review loops.

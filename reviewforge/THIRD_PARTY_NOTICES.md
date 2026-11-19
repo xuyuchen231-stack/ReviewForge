@@ -29,3 +29,6 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+
+Aut_Sci_Write: https://github.com/ShZhao27208/Aut_Sci_Write, inspected commit 357766f90bd42f4f982d054be55c687c27202f22; MIT, Copyright (c) 2026 Shuo Zhao. Source-type reading and capture-status concepts independently adapted in references/source-reading-packets.md. No upstream executable code copied.

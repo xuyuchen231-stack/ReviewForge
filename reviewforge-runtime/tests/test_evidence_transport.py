@@ -63,7 +63,8 @@ class EvidenceTransportTests(unittest.TestCase):
       'entries':rows,'canonical_facts':[{**row,'canonical_fact_id':'fact1'} for row in rows]}}
   original=copy.deepcopy(payload)
   encoded=encode_context_payload(payload)
-  context=json.loads(encoded)['evidence_context']
+  from evidence_packet_runtime import expand_packet
+  context=expand_packet(json.loads(encoded))['evidence_context']
   self.assertTrue('evidence_row_tables' in context,'Repeated metadata was not factored')
   table=context['evidence_row_tables']
   for field in ('entries','canonical_facts'):

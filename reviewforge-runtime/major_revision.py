@@ -267,7 +267,8 @@ def provider_request(api,system,payload,required,role,retry=None):
         from evidence_transport import encode_context_payload
         encoded=encode_context_payload(wire,revised_field='body')
     else:
-        encoded=encode_model_payload(wire)
+        from evidence_transport import encode_context_payload
+        encoded=encode_context_payload(wire)
     input_size=len(system)+len(encoded)
     if input_size>limit:
         if required=='facts' and isinstance(payload.get('facts'),list):
@@ -293,10 +294,25 @@ def provider_request(api,system,payload,required,role,retry=None):
     identity=signature([WIRE_POLICY,system,payload,signature(encoded),required,role,getattr(api,'base',None),getattr(api,'model',None),getattr(api,'reviewer_model',None),getattr(api,'fallback_model',None)])
     journal=RequestJournal(Path(execution)/'requests.jsonl') if execution else None
     cache=Path(execution)/'responses'/(identity+'.json') if execution else None
-    if cache is not None and cache.exists():
-        saved=json.loads(cache.read_text(encoding='utf-8'))
-        if saved.get('binding')!=identity or saved.get('response_sha256')!=signature(saved.get('response')):raise ValueError('Model response checkpoint hash mismatch')
-        token=journal.start(identity,role,input_size,len(system)+encoded_size(payload));journal.finish(token,'CACHE_HIT',{})
+    # Response identity follows complete scientific input, prompts and model route,
+    # not its lossless wire representation. Physical-attempt ledgers stay untouched.
+    logical_identity=signature(['logical-response-v1',WIRE_POLICY,system,payload,required,role,
+        getattr(api,'base',None),getattr(api,'model',None),getattr(api,'reviewer_model',None),getattr(api,'fallback_model',None)])
+    logical_cache=Path(execution)/'semantic_responses'/(logical_identity+'.json') if execution else None
+    candidates=[(logical_cache,logical_identity),(cache,identity)]
+    if execution and not any(p is not None and p.exists() for p,_ in candidates):
+        from evidence_transport import encode_context_payload
+        legacy_wires={encode_model_payload(wire),encode_context_payload(wire,revised_field='body' if role=='reviewer' and payload.get('editorial_revision') is True else None,use_packet=False)}
+        for legacy_wire in legacy_wires:
+            legacy_identity=signature([WIRE_POLICY,system,payload,signature(legacy_wire),required,role,getattr(api,'base',None),getattr(api,'model',None),getattr(api,'reviewer_model',None),getattr(api,'fallback_model',None)])
+            candidates.append((Path(execution)/'responses'/(legacy_identity+'.json'),legacy_identity))
+    for saved_path,saved_binding in candidates:
+        if saved_path is None or not saved_path.exists():continue
+        saved=json.loads(saved_path.read_text(encoding='utf-8'))
+        if saved.get('binding')!=saved_binding or saved.get('response_sha256')!=signature(saved.get('response')):raise ValueError('Model response checkpoint hash mismatch')
+        if logical_cache is not None and saved_path!=logical_cache:
+            atomic_json(logical_cache,{'binding':logical_identity,'response':saved['response'],'response_sha256':signature(saved['response']),'scientifically_accepted':False,'inherited_from':saved_binding})
+        token=journal.start(identity,role,input_size,len(system)+encoded_size(payload));token['logical_binding']=logical_identity;journal.finish(token,'CACHE_HIT',{})
         return saved['response']
     retry=retry or resilient_request
     request_limit=420 if role=='reviewer' else 360
@@ -315,6 +331,7 @@ def provider_request(api,system,payload,required,role,retry=None):
         if attempts_file is not None:atomic_json(attempts_file,attempts)
         print('[major-revision/input] role='+role+' input_chars='+str(len(system)+len(encoded))+' payload_chars_before='+str(len(encode_model_payload(payload)))+' payload_chars_after='+str(len(encoded)),flush=True)
         token=journal.start(identity,role,input_size,len(system)+encoded_size(payload)) if journal else None
+        if token is not None:token['logical_binding']=logical_identity
         api.last_usage={}
         clients=[api]+getattr(api,'providers',[])
         previous_trackers=[(client,getattr(client,'transport_tracker',None)) for client in clients]
@@ -353,6 +370,7 @@ def provider_request(api,system,payload,required,role,retry=None):
     try:
         result=retry(request,api.deadline)
         if cache is not None:atomic_json(cache,{'binding':identity,'response':result,'response_sha256':signature(result),'scientifically_accepted':False})
+        if logical_cache is not None:atomic_json(logical_cache,{'binding':logical_identity,'response':result,'response_sha256':signature(result),'scientifically_accepted':False})
         return result
     finally:finished.set();thread.join(timeout=1)
 

@@ -254,7 +254,8 @@ def checkpoint_call(api,state,path,system,payload,role):
     api.request_provider=os.environ.get('RF_PREPARATION_PROVIDER','primary') if preparation else (os.environ.get('RF_COHERENCE_PROVIDER','primary') if coherence else None)
     api.request_model=(os.environ.get('RF_COHERENCE_MODEL') or getattr(api,'reviewer_model',getattr(api,'model',None))) if coherence else ((os.environ.get('RF_PREPARATION_MODEL') or getattr(api,'reviewer_model',None)) if preparation else None)
     request_budget=600 if whole_unit else 180
-    encoded_payload=encode_model_payload(payload)
+    from evidence_transport import encode_context_payload
+    encoded_payload=encode_context_payload(payload)
     state['request_budget_seconds']=min(request_budget,int(remaining));state['request_payload_bytes']=len(encoded_payload.encode('utf-8'));state['request_original_bytes']=original_bytes
     state['request_input_bytes_saved']=original_bytes-state['request_payload_bytes']
     state['request_table_bytes_saved']=before_table_bytes-state['request_payload_bytes']
