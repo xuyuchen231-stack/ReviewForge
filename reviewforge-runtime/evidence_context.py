@@ -5,7 +5,7 @@ from pathlib import Path
 from manuscript_integrity import citekeys
 
 
-def load_context(workspace, text, heading=''):
+def load_context(workspace, text, heading='', *, cited_only=False):
     ws = Path(workspace)
     path = ws/'evidence_ledger.json'
     result = {'entries': [], 'status': 'MISSING', 'semantic_verification': False,
@@ -25,7 +25,7 @@ def load_context(workspace, text, heading=''):
         for row in canonical+entries:
             if not isinstance(row, dict): raise ValueError('Invalid evidence entry')
             key = row.get('citekey', '')
-            if key not in citekeys(text) and row.get('section') != heading: continue
+            if key not in relevant_keys and (cited_only or row.get('section') != heading): continue
             item = {'citekey': key, 'claim': row.get('claim') or row.get('supported_claim', ''),
                     'source_id': row.get('source_id') or row.get('doi', ''),
                     'locator': row.get('locator') or row.get('evidence_location', ''),
