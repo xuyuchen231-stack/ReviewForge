@@ -88,3 +88,57 @@ Repeated citations keep their assigned identities; do not renumber on every repe
 
 The compiler timeout covers the entire owned process tree. On Windows create the compiler root
 suspended, assign the kill-on-close job, then resume; no helper should escape before containment.
+
+
+## Joint editing and automatic bounded recovery
+
+Use `editorial_refinement.py refine --run RUN --mode joint` for a single final
+cleaned/condensed candidate. The existing `--mode legacy` keeps two independently
+edited versions and all their checkpoints. `auto` uses legacy for an existing
+legacy current manifest, joint otherwise. Never restart seven-chapter construction
+to run this editor, and never substitute a new source for an in-flight checkpoint.
+Joint produces `versions.condense` and an original snapshot, not a falsely named
+clean intermediate. Compilation, translation and layout gates remain unchanged.
+
+The writer returns adjacent-block patches. Full selected canonical field values,
+source-check qualifications, access scope and relevant primary spans are retained;
+other original fields/spans remain explicitly retrievable. An unclassified claim
+uses full fields. Missing selected support or an unresolved requested anchor cannot
+be treated as verified evidence. Citation sampling is still sampling, not a new
+full-bibliography or expert scientific approval.
+
+The independent reviewer sees current paragraphs once and only replaced baseline
+spans for loss checking. Blocking issues must quote the current or genuinely removed
+text. Targeted repairs use located paragraphs and neighboring context. Invalid
+quote/version ownership gets one reviewer-only correction; exact primary evidence
+requests get bounded source retrieval in that same correction. Do not add a separate
+stylistic approval loop. A scientific rejection is never a format correction.
+
+Duplicate citation checks are consolidated only after every passage binding is
+valid; retain all original rows and the worst status. An invalid passage ID can
+receive one small independent citation-only recheck, bound to the unchanged candidate.
+This inherits only already-positive preservation checks and cannot erase unsupported
+or unresolved scientific findings. Invalid math/data patches are discarded locally;
+valid neighboring edits remain. A historical invalid candidate is retained before
+rollback. Do not pay repeatedly to rewrite a corrupted candidate.
+
+Persist counts before requests, completed responses before processing, all rejected
+reviews, exact source/context identities and repair receipts. Three writer calls and
+six reviewer calls per chunk remain cumulative across restarts; actual HTTP sends
+also use TransportTracker. A no-op after a real rejection stops, never buys another
+review of identical prose. Diagnose the exact unresolved issue without resetting
+budgets or approving it by hand. True unresolved defects can still block completion.
+
+`--route-history JOURNAL` can inspect existing physical-send records, without a
+probe: only failures of the configured preferred free writer on two distinct
+accounts plus a successful configured free fallback writer allow choosing that
+fallback. This changes no allowance and grants no extra send. A later preferred-route
+success supersedes the diagnosis. Free access consent is never changed automatically.
+Joint CLI permits TokenHarbor free and explicitly allowed self-hosted Free.ai routes,
+never APIMaster, premium Free.ai or unapproved paid fallbacks.
+
+Do not claim token savings alone prove equal manuscript quality. Record the actual
+amount changed, preserved math/data/citations, unresolved issues, call history and
+whether a run needed interventions. Include debugging calls in actual totals; mark
+prospective/offline estimates separately. Never overwrite a better reviewed draft
+with an almost unchanged benchmark candidate merely because its model accepted it.

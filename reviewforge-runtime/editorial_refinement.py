@@ -509,6 +509,8 @@ def main():
     location=parser.add_mutually_exclusive_group(required=True)
     location.add_argument('--run', type=Path)
     location.add_argument('--workspace', type=Path)
+    parser.add_argument('--mode', choices=['auto','legacy','joint'], default='auto', help='Joint combines cleaning and condensation; legacy preserves existing two-version checkpoints')
+    parser.add_argument('--route-history', type=Path, action='append', default=[], help='Existing physical request journal for diagnosed configured-free route selection; no probes or budget grants')
     parser.add_argument('--hours', type=float, default=None)
     parser.add_argument('--until-complete', action='store_true', help='No overall time cutoff; keep per-request timeouts and validation gates')
     args = parser.parse_args()
@@ -544,6 +546,9 @@ def main():
             request_stage=payload.get('stage','translation')
             api.thinking_mode='disabled'
             api.max_tokens=2500 if role=='reviewer' else 12000
+            from request_accounting import TransportTracker
+            request_binding=sha(json.dumps([system,payload,role],sort_keys=True,ensure_ascii=False))
+            api.transport_tracker=TransportTracker(folder/'physical_requests',request_binding,role,len(system)+len(encoded_payload))
             started=time.time();stop=threading.Event()
             def heartbeat():
                 while not stop.wait(20):print('[editorial/request] stage='+request_stage+' role='+role+' waiting='+str(int(time.time()-started))+'s',flush=True)
@@ -564,8 +569,21 @@ def main():
                 stop.set();thread.join(timeout=2);record['elapsed_seconds']=round(time.time()-started,2)
                 with (folder/'requests.jsonl').open('a',encoding='utf-8') as stream:stream.write(json.dumps(record,ensure_ascii=False)+'\n')
         from autonomous_review import RunLock
-        with RunLock(folder/'editorial.lock'):
-            result = refine(source, folder, chat, deadline=api.deadline,quality_workspace=args.run)
+        with RunLock(args.run/'worker.lock'),RunLock(folder/'editorial.lock'):
+            if args.mode=='joint' or (args.mode=='auto' and not (folder/'current.json').exists()):
+                from editorial_joint import refine_joint,proven_free_route
+                from account_cycles import is_tokenharbor_free
+                from freeai_provider import allowed_freeai
+                if not all(is_tokenharbor_free(api.base,m) for m in (api.model,api.reviewer_model,api.fallback_model)):
+                    raise ValueError('Joint editorial primary must use configured TokenHarbor free models')
+                api.providers=[p for p in api.providers if all(is_tokenharbor_free(p.base,m) for m in (p.model,p.reviewer_model,p.fallback_model)) or allowed_freeai(p)]
+                route=proven_free_route(api,[folder/'physical_requests/requests.jsonl',*args.route_history])
+                if route:
+                    api.request_model=route['model']
+                    atomic_json(folder/'joint_route_diagnosis.json',route)
+                result=refine_joint(source,folder/'joint',chat,deadline=api.deadline,quality_workspace=args.run)
+            else:
+                result = refine(source, folder, chat, deadline=api.deadline,quality_workspace=args.run)
             if result.get('versions'):
                 from editorial_export import finalize_versions
                 api.deadline=finish_deadline-60
