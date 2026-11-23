@@ -34,4 +34,25 @@ class NetworkRotationTests(unittest.TestCase):
     with self.assertRaises(ConnectionError) as result:api.chat('system','evidence')
     self.assertEqual(request_failure(result.exception)['category'],'connection_failure')
     self.assertEqual(set(api.key_statuses.values()),{'temporary_network_failure'})
+ def test_free_access_disabled_account_is_skipped_without_inventing_quota(self):
+  import urllib.error
+  from editorial_refinement import request_failure
+  with tempfile.TemporaryDirectory() as d:
+   env={'RF_API_KEYS':'disabled,enabled','RF_BASE_URL':'https://tokenharbor.ai/v1','RF_WRITER_MODEL':'writer:free','RF_REVIEWER_MODEL':'writer:free','RF_FALLBACK_MODEL':'writer:free','RF_TOKENHARBOR_CYCLES_FILE':str(Path(d)/'cycles.json'),'RF_ACCOUNT_HEALTH_FILE':str(Path(d)/'health.json'),'RF_PROVIDER_FILE':str(Path(d)/'absent.json')}
+   seen=[]
+   class Response:
+    def __enter__(self):return BytesIO(b'{"choices":[{"message":{"content":"OK"}}]}')
+    def __exit__(self,*a):return False
+   def send(req,timeout):
+    seen.append(req.get_header('Authorization'))
+    if seen[-1]=='Bearer disabled':raise urllib.error.HTTPError(req.full_url,403,'Forbidden',{},BytesIO(b'{"error":{"code":"free_models_disabled","message":"Free models are disabled"}}'))
+    return Response()
+   with patch.dict('os.environ',env),patch('reviewforge.open_chat_response',side_effect=send):
+    api=CompatibleAPI();self.assertEqual(api.chat('s','u'),'OK')
+    self.assertEqual(seen,['Bearer disabled','Bearer enabled'])
+    self.assertEqual(api.key_statuses[0],'free_access_disabled')
+    self.assertFalse(api.weekly_accounts.entry(api.base,api.keys[0]).get('exhausted_until'))
+    self.assertEqual(CompatibleAPI().chat('s','u'),'OK')
+    self.assertEqual(seen[-1],'Bearer enabled')
+   self.assertEqual(request_failure(RuntimeError('TokenHarbor free_models_disabled'))['category'],'free_access_disabled')
 if __name__=='__main__':unittest.main()
