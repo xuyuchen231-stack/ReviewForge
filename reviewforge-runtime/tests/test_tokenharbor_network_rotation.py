@@ -35,4 +35,3 @@ class NetworkRotationTests(unittest.TestCase):
     self.assertEqual(request_failure(result.exception)['category'],'connection_failure')
     self.assertEqual(set(api.key_statuses.values()),{'temporary_network_failure'})
 if __name__=='__main__':unittest.main()
-
