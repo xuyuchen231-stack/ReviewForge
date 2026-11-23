@@ -510,6 +510,8 @@ def main():
     location.add_argument('--run', type=Path)
     location.add_argument('--workspace', type=Path)
     parser.add_argument('--mode', choices=['auto','legacy','joint'], default='auto', help='Joint combines cleaning and condensation; legacy preserves existing two-version checkpoints')
+    parser.add_argument('--source', type=Path, help='Existing completed LaTeX manuscript; scientific master remains untouched')
+    parser.add_argument('--revision-plan', type=Path, help='Source-bound documented issues, required citations and existing cumulative budgets for joint continuation')
     parser.add_argument('--route-history', type=Path, action='append', default=[], help='Existing physical request journal for diagnosed configured-free route selection; no probes or budget grants')
     parser.add_argument('--hours', type=float, default=None)
     parser.add_argument('--until-complete', action='store_true', help='No overall time cutoff; keep per-request timeouts and validation gates')
@@ -520,7 +522,8 @@ def main():
         active=json.loads((workspace/'autonomous_active.json').read_text(encoding='utf-8'))
         args.run=(workspace/active['run_directory']).resolve()
         if not args.run.is_relative_to(workspace):raise ValueError('Active run must stay inside workspace')
-    source = (args.run/'output/review_en.tex').read_text(encoding='utf-8')
+    if args.source is not None and args.source.suffix.lower()!='.tex':parser.error('--source requires a LaTeX .tex manuscript')
+    source = (args.source if args.source is not None else args.run/'output/review_en.tex').read_text(encoding='utf-8')
     folder = args.run/'editorial'; folder.mkdir(exist_ok=True)
     result = audit(source)
     from editorial_quality import notation_audit
@@ -570,7 +573,7 @@ def main():
                 with (folder/'requests.jsonl').open('a',encoding='utf-8') as stream:stream.write(json.dumps(record,ensure_ascii=False)+'\n')
         from autonomous_review import RunLock
         with RunLock(args.run/'worker.lock'),RunLock(folder/'editorial.lock'):
-            if args.mode=='joint' or (args.mode=='auto' and not (folder/'current.json').exists()):
+            if args.mode=='joint' or args.revision_plan is not None or (args.mode=='auto' and not (folder/'current.json').exists()):
                 from editorial_joint import refine_joint,proven_free_route
                 from account_cycles import is_tokenharbor_free
                 from freeai_provider import allowed_freeai
@@ -581,7 +584,8 @@ def main():
                 if route:
                     api.request_model=route['model']
                     atomic_json(folder/'joint_route_diagnosis.json',route)
-                result=refine_joint(source,folder/'joint',chat,deadline=api.deadline,quality_workspace=args.run)
+                plan=json.loads(args.revision_plan.read_text(encoding='utf-8')) if args.revision_plan else None
+                result=refine_joint(source,folder/'joint',chat,deadline=api.deadline,quality_workspace=args.run,revision_plan=plan)
             else:
                 result = refine(source, folder, chat, deadline=api.deadline,quality_workspace=args.run)
             if result.get('versions'):

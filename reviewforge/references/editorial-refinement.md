@@ -142,3 +142,37 @@ amount changed, preserved math/data/citations, unresolved issues, call history a
 whether a run needed interventions. Include debugging calls in actual totals; mark
 prospective/offline estimates separately. Never overwrite a better reviewed draft
 with an almost unchanged benchmark candidate merely because its model accepted it.
+
+
+### Continue a real revision with documented unresolved issues
+
+For validation from a previously revised manuscript use `--source completed.tex`
+with `--mode joint --revision-plan plan.json --run EVIDENCE_RUN`. The original
+scientific master is not overwritten. The plan must bind `source_sha256`, supply
+`requirements_by_chunk`, `required_citekeys`, and existing `shared_budgets` paths.
+Each shared budget starts from recorded spent counts; reserve new calls in the
+same file before sending, even when source/request bindings change. Missing or
+malformed inherited budgets block continuation. An exact `cross_section_context`
+quote must exist in the supplied current manuscript. Review the current draft
+before buying another writing pass; only a located unresolved issue triggers repair.
+
+A generic positive verdict does not resolve a documented issue. Every requirement
+needs a resolved status, an exact current passage and reason; its required sources
+must be supported or qualified rather than uncertain. Prior citation coverage can
+be included via required_citekeys. Keep whole-manuscript assembly/coherence and
+mathematical checks separate from local citation checks; citekey sampling never
+establishes complete bibliography or expert verification.
+
+Prefer current block IDs for review metadata; code copies exact text. Completed
+metadata responses are replayable after interruption without spending another call.
+Conservative normalization of an invalid *negative* issue category preserves the
+negative verdict and original explanation; it never supplies approval.
+
+A table's source-located plain narrative cells can be clarified under independent
+semantic review. Mathematical content, numerical cells (including number words),
+LaTeX structure, commands and citation identities stay exact. Match ownership by
+source span rather than repeated cell text elsewhere. Archive a rejected patch;
+when the only cause is this objectively overbroad table-prose lock, reapply its
+already-saved response as an unaccepted candidate and independently review it.
+The writer count remains unchanged; never convert the old rejection to approval.
+Report such repairs and debugging interventions honestly.
