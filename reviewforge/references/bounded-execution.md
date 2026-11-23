@@ -86,3 +86,35 @@ Optional minor/observation style suggestions use the same predicate in review
 validation and paragraph repair, so they cannot enlarge a necessary repair batch.
 Provider calls remain serial until shared account cooldown/reservation state is
 made concurrency-safe; local deterministic checks require no model call.
+
+
+## Diagnosed operator recovery without counter resets
+
+Default automatic execution still permits at most three chargeable/unknown sends
+and 24 total sends per request. During a user-authorized continuation after an
+identified routing fault, an operator may append a source-bound recovery receipt;
+provider output and retry loops cannot issue receipts. Never use this for a
+scientific rejection or as an automatic workaround for a spending limit.
+
+`authorize_network_recovery` requires the retained three network-failed sends on
+one account, a concrete diagnosis and fixed commit. Its one extra potential-charge
+send excludes that failed account. If the preferred model then fails on another
+account, `authorize_model_recovery` permits at most one final send bound to an
+already configured free fallback with a recorded successful writer response.
+Counters increase cumulatively (3, then at most 4, then at most 5); receipts and
+original failures remain inspectable. Repeated authorization is idempotent, not
+another allowance. A clear HTTP refusal follows the existing non-chargeable retry
+rule, while total sends still increase toward 24; missing network usage stays
+unknown. Original accepted manuscript checks and revision budgets are unchanged.
+
+Treat `free_models_disabled` as account free-access configuration, not weekly quota
+exhaustion. Skip that account temporarily and try another configured eligible free
+account. Do not enable consent settings or substitute paid models automatically.
+
+If an unchanged candidate has already passed scientific preservation checks and
+its citation audit, but an editorial rejection demonstrably confuses baseline and
+current text, an operator may request one focused independent resolution on the
+complete CURRENT candidate and exact diff evidence. Bind inherited checks and the
+new judgment to the same candidate hash; any observed scientific conflict blocks
+acceptance. Preserve the original rejection and all receipts. This is not approval
+by code or a reason to weaken or repeat reviews until one happens to pass.

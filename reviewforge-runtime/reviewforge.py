@@ -349,6 +349,30 @@ class CompatibleAPI:
                     if weekly is not None and is_tokenharbor_free(self.base,model):
                         try:quota_detail=json.loads(exc.read(4096))
                         except (ValueError,OSError):quota_detail={}
+                        detail=quota_detail.get('error',{}) if isinstance(quota_detail,dict) else {}
+                        if not isinstance(detail,dict):detail={}
+                        message=str(detail.get('message','')).lower()
+                        category='provider_refusal'
+                        for label,words in (('invalid_credentials',('invalid api key','invalid key','unauthorized','authentication')),
+                                            ('account_disabled',('suspended','deactivated','account disabled')),
+                                            ('access_restriction',('not allowed','not permitted','permission','access denied','forbidden')),
+                                            ('payment_or_quota',('quota','allowance','billing','payment','balance','credits')),
+                                            ('model_unavailable',('model not found','unsupported model','model unavailable'))):
+                            if any(word in message for word in words):category=label;break
+                        code=detail.get('code')
+                        safe_code=code if isinstance(code,str) and re.fullmatch(r'[A-Za-z0-9_.-]{1,80}',code) and code not in self.keys else None
+                        self.last_refusal={'http_status':exc.code,'category':category,'code':safe_code}
+                        if safe_code=='free_models_disabled':
+                            self.key_cooldowns[key_index]=time.time()+300
+                            self.key_statuses[key_index]='free_access_disabled'
+                            try:health=json.loads(self.health_path.read_text(encoding='utf-8'))
+                            except FileNotFoundError:health={}
+                            slot=hashlib.sha256((self.base+'\0'+key).encode()).hexdigest()
+                            health[slot]={'status':'free_access_disabled','retry_after_epoch':self.key_cooldowns[key_index]}
+                            atomic_json(self.health_path,health)
+                            failures.append('free_models_disabled (key slot '+str(key_index+1)+')')
+                            print('TokenHarbor account slot '+str(key_index+1)+' has not enabled free-model access; trying another configured account without changing consent settings.',flush=True)
+                            continue
                         if is_weekly_quota(exc.code,quota_detail):
                             self.key_cooldowns[key_index]=weekly.exhausted(self.base,key,provider_data=quota_detail);self.key_statuses[key_index]='weekly_free_quota_exhausted'
                             print('TokenHarbor account slot '+str(key_index+1)+' free weekly allowance exhausted; trying the next configured account.',flush=True)
@@ -431,6 +455,8 @@ class CompatibleAPI:
             now=time.time()
             available_at=[max(self.key_cooldowns.get(i,0),weekly.entry(self.base,key).get('exhausted_until',0)) for i,key in enumerate(self.keys)]
             retry=max(1,int(min(available_at)-now)+1)
+            if any(self.key_statuses.get(i)=='free_access_disabled' and self.key_cooldowns.get(i,0)>now for i in range(len(self.keys))):
+                raise RuntimeError('TokenHarbor free_models_disabled: no eligible free-enabled account is available; account opt-in may be required')
             if any(self.key_statuses.get(i)=='temporary_network_failure' and self.key_cooldowns.get(i,0)>now for i in range(len(self.keys))):
                 raise ConnectionError('Configured accounts are temporarily in network cooldown; respect Retry-After: '+str(retry))
             raise RuntimeError('Provider rate limit (429); respect Retry-After: '+str(retry))

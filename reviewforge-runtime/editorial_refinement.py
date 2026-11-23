@@ -24,7 +24,11 @@ def request_failure(exc):
     """Allowlisted diagnostics only: never persist upstream bodies or credentials."""
     message = str(exc)
     category = 'unknown'
-    if 'weekly free allowance exhausted' in message:
+    if 'free_models_disabled' in message:
+        category = 'free_access_disabled'
+    elif type(exc).__name__=='InputBudgetExceeded':
+        category = 'input_budget_exhausted'
+    elif 'weekly free allowance exhausted' in message:
         category = 'weekly_allowance_exhausted'
     elif 'all configured account quotas unavailable (402)' in message:
         category = 'quota_unavailable'
@@ -323,6 +327,15 @@ def preservation_errors(before, after):
     return errors
 
 
+def same_editorial_content(before,after):
+    """Detect redundant empty-line edits, without normalizing TeX tokens or math."""
+    if before==after:return True
+    if not isinstance(before,str) or not isinstance(after,str):return False
+    sensitive=r'\\begin\{(?:verbatim\*?|Verbatim|lstlisting|minted|alltt|filecontents\*?)\}|\\(?:catcode|obeylines|obeyspaces|endlinechar)'
+    if re.search(sensitive,before+after):return False
+    return re.sub(r'\n{3,}','\n\n',before)==re.sub(r'\n{3,}','\n\n',after) and not preservation_errors(before,after)
+
+
 def _process_chunk(body,stage,chat,cache,deadline,context=None,binding=None):
     from editorial_quality import review_citations,citation_passage_options
     record=json.loads(cache.read_text(encoding='utf-8')) if cache.exists() else {}
@@ -358,7 +371,8 @@ control, transfer or independent validation. Do not treat this sample as a full 
         # Same text + same hash-bound context cannot resolve the prior rejection.
         # Retain its verdict and unresolved work rather than paying to ask again.
         if (record.get('accepted') is False and record.get('pending_review') is False
-                and record.get('candidate')==candidate and isinstance(record.get('review'),dict)
+                and isinstance(record.get('review'),dict)
+                and (record.get('candidate')==candidate or (record['review'].get('editorial_goal_met') is False and same_editorial_content(record.get('candidate'),candidate)))
                 and type(record['review'].get('accept')) is bool
                 and all(type(record['review'].get(k)) is bool for k in CHECKS)
                 and bool(record['review'].get('explanation'))):

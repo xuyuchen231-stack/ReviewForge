@@ -94,4 +94,15 @@ class WasteTests(unittest.TestCase):
   with self.assertRaises(ConnectionError):
    resilient_request(fail,float('inf'),sleep=lambda delay:None)
   self.assertEqual(sent[0],5)
+ def test_blankline_only_repair_does_not_buy_same_substantive_review(self):
+  roles=[];body='First scientific statement.\n\n\nSecond scientific statement.';writes=[0]
+  def chat(system,payload,role):
+   roles.append(role)
+   if role=='writer':
+    writes[0]+=1
+    return body if writes[0]==1 else body.replace('\n\n\n','\n\n')
+   return json.dumps({'accept':False,**{k:True for k in CHECKS},'editorial_goal_met':False,'explanation':'Duplicated scientific argument remains.'})
+  with tempfile.TemporaryDirectory() as d:
+   result=_process_chunk(body,'condense',chat,Path(d)/'chunk.json',None,binding='bound')
+   self.assertFalse(result['accepted']);self.assertEqual(roles.count('reviewer'),1)
 if __name__=='__main__':unittest.main()
