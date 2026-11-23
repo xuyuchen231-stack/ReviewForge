@@ -69,7 +69,7 @@ def resilient_request(request, deadline, clock=time.time, sleep=None, categories
                     raise
                 if category in ('invalid_response', 'response_truncated') and transient_failures >= 3:
                     raise
-                delay = min(300, 10 * (2 ** min(transient_failures-1, 5)))
+                delay = max(failure.get('retry_after_seconds', 0), min(300, 10 * (2 ** min(transient_failures-1, 5))))
             else:
                 raise
             if clock() + delay + 60 >= deadline:

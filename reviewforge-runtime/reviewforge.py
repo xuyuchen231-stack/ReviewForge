@@ -404,7 +404,19 @@ class CompatibleAPI:
                     network_error=isinstance(exc,(TimeoutError,ConnectionError,urllib.error.URLError,http.client.HTTPException))
                     if network_error and len(self.keys)>1:
                         self.key_index=(key_index+1)%len(self.keys)
-                        print('API network failure on account slot '+str(key_index+1)+'; next route uses another account.',flush=True)
+                        if weekly is not None and is_tokenharbor_free(self.base,model) and not isinstance(cause,APIConnectTimeout):
+                            # Weekly priority is recomputed for every model and can
+                            # otherwise immediately select the same failed key again.
+                            # This is transport health only, never quota exhaustion.
+                            until=time.time()+60
+                            self.key_cooldowns[key_index]=until
+                            self.key_statuses[key_index]='temporary_network_failure'
+                            try:health=json.loads(self.health_path.read_text(encoding='utf-8'))
+                            except FileNotFoundError:health={}
+                            slot=hashlib.sha256((self.base+'\0'+key).encode()).hexdigest()
+                            health[slot]={'status':'temporary_network_failure','retry_after_epoch':until}
+                            atomic_json(self.health_path,health)
+                        print('API network failure on account slot '+str(key_index+1)+'; next route skips that failed account when alternatives are eligible.',flush=True)
                     detail=('; '+str(exc)) if isinstance(exc,ValueError) and str(exc).startswith(('Empty API response;','Empty upstream body;','Invalid upstream JSON;')) else ''
                     failures.append(attempt_detail+detail)
                     # An exhausted model output budget is not an account outage.
@@ -418,7 +430,10 @@ class CompatibleAPI:
         if weekly is not None and not weekly.ordered_eligible(self.base,self.keys,self.key_cooldowns):
             now=time.time()
             available_at=[max(self.key_cooldowns.get(i,0),weekly.entry(self.base,key).get('exhausted_until',0)) for i,key in enumerate(self.keys)]
-            raise RuntimeError('Provider rate limit (429); respect Retry-After: '+str(max(1,int(min(available_at)-now)+1)))
+            retry=max(1,int(min(available_at)-now)+1)
+            if any(self.key_statuses.get(i)=='temporary_network_failure' and self.key_cooldowns.get(i,0)>now for i in range(len(self.keys))):
+                raise ConnectionError('Configured accounts are temporarily in network cooldown; respect Retry-After: '+str(retry))
+            raise RuntimeError('Provider rate limit (429); respect Retry-After: '+str(retry))
         if self.keys and all(self.key_cooldowns.get(i,0)>time.time() and self.key_statuses.get(i)=='quota_unavailable' for i in range(len(self.keys))):
             raise RuntimeError('API attempts failed: all configured account quotas unavailable (402); checkpoint retained.')
         if (failures and all('HTTP 429' in f for f in failures)) or (not failures and self.key_cooldowns and all(self.key_cooldowns.get(i,0)>time.time() for i in range(len(self.keys)))):
