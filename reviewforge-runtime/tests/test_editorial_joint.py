@@ -37,16 +37,18 @@ class JointTests(unittest.TestCase):
    self.assertTrue(process_chunk('Text.',chat,cache,None,None,'bound')['accepted'])
    self.assertEqual(calls,['reviewer'])
  def test_duplicate_citation_schema_never_invokes_writer_repair(self):
-  from unittest.mock import patch
-  calls=[]
+  from editorial_quality import citation_passage_options
+  source=r'An exact hybrid evidence statement \cite{A}. A second related result \cite{A}.'
+  context={'selected_citekeys':['A'],'anchors':[{'citekey':'A'}],'canonical_studies':[]};calls=[]
   def chat(system,payload,role):
    calls.append(role)
    if role=='writer':return json.dumps({'edits':[]})
-   return json.dumps(dict(accept=True,explanation='Preserved',issues=[],**{k:True for k in CHECKS}))
-  audits=[{'complete':False,'unsupported':[],'checks':[]},{'complete':True,'unsupported':[],'checks':[]}]
-  with tempfile.TemporaryDirectory() as d,patch('editorial_joint.repair_citation_metadata',side_effect=lambda review,*a:review),patch('editorial_joint.citation_audit',side_effect=audits):
-   r=process_chunk('Hybrid prose.',chat,Path(d)/'c.json',None,{'selected_citekeys':[],'canonical_studies':[]},'bound')
-   self.assertTrue(r['accepted']);self.assertEqual(calls,['writer','reviewer','reviewer'])
+   rows=[{'citekey':'A','passage_id':p['id'],'status':status,'reason':'Exact source support'} for p,status in zip(citation_passage_options(source,['A']),['supported','qualified'])]
+   return json.dumps(dict(accept=True,explanation='Preserved',issues=[],citation_checks=rows,**{k:True for k in CHECKS}))
+  with tempfile.TemporaryDirectory() as d:
+   r=process_chunk(source,chat,Path(d)/'c.json',None,context,'bound')
+   self.assertTrue(r['accepted']);self.assertEqual(calls,['writer','reviewer']);self.assertEqual(r['citation_audit']['checks'][0]['status'],'qualified')
+
  def test_duplicate_passages_preserve_worst_verdict(self):
   from editorial_joint import citation_audit
   from editorial_quality import citation_passage_options

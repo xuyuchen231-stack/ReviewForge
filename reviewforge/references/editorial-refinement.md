@@ -176,3 +176,45 @@ when the only cause is this objectively overbroad table-prose lock, reapply its
 already-saved response as an unaccepted candidate and independently review it.
 The writer count remains unchanged; never convert the old rejection to approval.
 Report such repairs and debugging interventions honestly.
+
+
+### Avoid paying for already completed scientific checks
+
+Treat review-record format repair as indexing, not another scientific review.
+Prefer supplied block IDs on the first response. An invalid current quote receives
+at most one small option-ID selection request, with no full evidence bundle. Code
+copies the exact existing location and cannot change accept/check booleans, source
+verdicts, resolution statuses, explanations or manuscript prose. If this fails and
+no real located manuscript issue exists, stop with the record error; never send
+correct text to an author for a no-op rewrite.
+
+For an explicit source request, send only the requested exact original fact cells,
+qualifications and primary anchors, affected current passages and necessary exact
+cross-section context. Do not resend unrelated studies or a whole passed unit.
+The four scientific preservation checks must already be positive for this bounded
+source-only path. An existing failed editorial check remains failed; supplementing
+sources does not auto-approve it. Preserve unrelated negative findings and newly
+unresolved tasks, including over-returned model rows outside the requested subset.
+
+After an actual patch, still review the COMPLETE current candidate and real before
+changes under all five criteria. Reuse only citation findings whose exact passages
+remain unchanged, were supported/qualified, and have identical binding/evidence
+context hashes. Conservative change ownership includes affected table rows and
+adjacent citation windows; unknown ownership or changed source context falls back
+to full evidence. General whole-chunk requirements are always freshly judged.
+Original evidence for an inherited source remains retrievable on demand; requesting
+it promotes it to fresh scope. A new negative finding supersedes every inherited
+positive. No scientific or source access qualification is silently upgraded.
+
+Source/candidate/context-bound accepted receipts can recover a partial checkpoint
+or a saved patch already independently approved. Validate the entire receipt and
+normal acceptance gates, preserve all spent counters, and reject a receipt after
+later negative scientific events from any review channel. An old positive receipt
+cannot discard a later negative citation, unresolved task or false preservation
+check merely because text hashes match. Do not reuse approval after context changes.
+
+Freeze code before validation and retain failed freezes. Distinguish historical
+response replay, live location-only checks, cache continuation, offline encoded
+payload estimates and new live scientific review. A small index-repair bill is not
+an equivalent-workload whole-paper token benchmark. Report refusals and unknown
+usage separately and never reset budgets to obtain a pass.
