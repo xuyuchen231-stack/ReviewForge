@@ -31,7 +31,7 @@ All unchanged spans are identical to original locally. Return JSON {"accept":boo
 {"kind":"current|removed","quote":str,"check":str,"fix":str}],
 "evidence_requests":[{"citekey":str,"fields":[str]}],"citation_checks":[
 {"citekey":str,"passage_id":str,"status":"supported|qualified|unsupported|uncertain","reason":str}]}.
-All five checks must be true to accept. Every blocking issue needs an EXACT quote from current
+All five checks must be true to accept. Use current_block_id for current issues and issue_resolutions whenever available; code copies exact text. Every blocking issue needs an EXACT quote from current
 text (kind=current), or from baseline_changes.before for actual lost content (kind=removed).
 Do not flag deleted baseline prose as a current duplicate. Preserve numerical context,
 mechanistic meaning, negative evidence and hedges; access bookkeeping may disappear but
@@ -39,7 +39,7 @@ its scientific consequence must remain. A dense unchanged passage may pass. For 
 citekey return exactly one citation check using supplied passage_id. Request exact canonical
 fields/original anchors when necessary; unresolved requests block acceptance. Do not infer
 absence from an unexpanded field. This is provisional model review, not expert approval.
-Keep explanation brief; put concrete repairs only in issues, not repeated essays.'''
+inherited_source_checks, if present, bind exact unchanged passages to the prior positive checks and unchanged evidence digest. Recheck the COMPLETE current candidate and actual changes under all five checks. Return citation rows only for selected fresh keys; report any newly observed conflict about inherited material and request its original evidence rather than silently approving it. Keep explanation brief; put concrete repairs only in issues, not repeated essays.'''
 
 def proven_free_route(api,journal_paths):
     """No probe: choose only an already configured, demonstrably working free route.
@@ -171,7 +171,7 @@ def repair_review_metadata(review,context,candidate,changes,chat,r,cache,deadlin
     r.setdefault('block_metadata_results',{})[result_key]=merged;atomic_json(cache,r)
     return merged
 
-REQUIREMENT_REVIEW=''' Documented revision_requirements are mandatory review tasks, not presumed defects. Return issue_resolutions:[{id,status:"resolved|unresolved",current_quote:exact current manuscript quote,reason:str}] for EVERY supplied ID. Independently check the original evidence and current prose. Already-correct material can be resolved without cosmetic editing if exact text and sources justify it. A missing or uncertain required citation, genuine defect or unverifiable requirement remains unresolved and blocks acceptance. Also return a located issues entry with a concrete fix for each remaining manuscript defect. Prior author notes never establish approval. Preserve earlier scientific corrections while reviewing the complete current chunk.'''
+REQUIREMENT_REVIEW=''' Documented revision_requirements are mandatory review tasks, not presumed defects. Return issue_resolutions:[{id,status:"resolved|unresolved",current_block_id:exact supplied current block ID,reason:str}] for EVERY supplied ID. Independently check the original evidence and current prose. Already-correct material can be resolved without cosmetic editing if exact text and sources justify it. A missing or uncertain required citation, genuine defect or unverifiable requirement remains unresolved and blocks acceptance. Also return a located issues entry with a concrete fix for each remaining manuscript defect. Prior author notes never establish approval. Preserve earlier scientific corrections while reviewing the complete current chunk.'''
 
 def can_accept(review,candidate,changes,citation):
     return (not issue_errors(review,candidate,changes) and review.get('issues')==[]
@@ -299,6 +299,13 @@ def process_chunk(body,chat,cache,deadline,context,binding,workspace=None):
     r=json.loads(cache.read_text(encoding='utf-8')) if cache.exists() else {}
     if r and (r.get('source_sha256')!=sha(body) or r.get('binding_sha256')!=binding):raise ValueError('Joint checkpoint binding mismatch')
     if not r:r={'source_sha256':sha(body),'binding_sha256':binding,'candidate':body,'writer_calls':0,'review_calls':0,'accepted':False,'pending_review':False,'history':[],'changes':[]}
+    def reuse_known_review():
+        from editorial_reuse import restore_receipt
+        for receipt in r.get('available_review_receipts',[])+([r['accepted_review_receipt']] if r.get('accepted_review_receipt') else []):
+            if not candidate_errors(body,r['candidate'],r) and restore_receipt(r,context,receipt):
+                atomic_json(cache,r);return True
+        return False
+    if not r.get('accepted') and reuse_known_review():return r
     if r.get('accepted'):
         if candidate_errors(body,r['candidate'],r):raise ValueError('Accepted candidate integrity changed')
         return r
@@ -312,9 +319,11 @@ def process_chunk(body,chat,cache,deadline,context,binding,workspace=None):
                 r.setdefault('recovery_receipts',[]).append({'kind':'reapply_saved_located_table_prose_patch','before_sha256':sha(r['candidate']),'after_sha256':sha(proposed),'writer_calls_unchanged':r['writer_calls']})
                 r.update(candidate=proposed,table_prose_quotes=quotes,table_patch_recovery=True,terminal=False,pending_review=True,changes=delta(body,proposed),accepted=False)
                 atomic_json(cache,r)
+    if not r.get('accepted') and reuse_known_review():return r
     if r.get('terminal'):
         previous=r.get('review',{})
-        previous=repair_review_metadata(previous,context,r['candidate'],r.get('changes',[]),chat,r,cache,deadline)
+        from editorial_reuse import repair_locations
+        previous=repair_locations(previous,context,r['candidate'],r.get('changes',[]),chat,r,cache,deadline)
         previous=normalize_blocking_categories(previous)
         r['review']=previous
         if previous.get('accept') is True and all(previous.get(k) is True for k in CHECKS) and not previous.get('issues') and not issue_errors(previous,r['candidate'],r.get('changes',[])) and isinstance(previous.get('explanation'),str) and previous['explanation'].strip():
@@ -345,6 +354,10 @@ def process_chunk(body,chat,cache,deadline,context,binding,workspace=None):
         candidate=r['candidate']
         if not r.get('pending_review'):
             feedback=r.get('review',{});current=blocks(candidate)
+            if feedback:
+                from editorial_reuse import _digest
+                r['recheck_parent']={'binding_sha256':binding,'context_sha256':_digest(context),'candidate':candidate,'review':feedback}
+                r['history'].append({'candidate_sha256':sha(candidate),'source_review':feedback})
             if feedback.get('issues'):
                 # Exact quote ownership selects local repair blocks + immediate context.
                 selected=set()
@@ -381,42 +394,52 @@ def process_chunk(body,chat,cache,deadline,context,binding,workspace=None):
             if errors:
                 r['review']={'issues':[], 'local_errors':errors};continue
             candidate=revised
+        from editorial_reuse import prepare_recheck,merge_recheck
+        recheck=prepare_recheck(r,r.get('recheck_parent'),context,candidate)
+        review_context=recheck['context'] if recheck else context
         payload={'stage':'joint','candidate_sha256':sha(candidate),'current_blocks':[{k:v for k,v in b.items() if k in ('id','text')} for b in blocks(candidate)],'baseline_changes':r['changes']}
         if context is not None:
-            payload['citation_context']=context
-            payload['citation_passage_options']=[{k:v for k,v in p.items() if k!='passage'} for p in citation_passage_options(candidate,context['selected_citekeys'])]
+            payload['citation_context']=review_context
+            if recheck:
+                payload['inherited_source_checks']={k:v for k,v in recheck.items() if k!='context'}
+            payload['citation_passage_options']=[{k:v for k,v in p.items() if k!='passage'} for p in citation_passage_options(candidate,review_context['selected_citekeys'])]
         # Every candidate gets at most one retrieval/schema correction, persisted.
-        review=ask(chat,REVIEW+(REQUIREMENT_REVIEW if context and context.get('revision_requirements') else ''),payload,'reviewer',r,cache,deadline)
+        review=ask(chat,REVIEW+(REQUIREMENT_REVIEW if review_context and review_context.get('revision_requirements') else ''),payload,'reviewer',r,cache,deadline)
+        try:review=decode_block_metadata(review,candidate)
+        except ValueError:pass  # Preserve malformed locator for bounded index-only repair.
         r['history'].append({'candidate_sha256':sha(candidate),'review':review})
         review=normalize_blocking_categories(review)
-        review=repair_review_metadata(review,context,candidate,r['changes'],chat,r,cache,deadline)
-        review=repair_citation_metadata(review,context,candidate,chat,r,cache,deadline)
+        from editorial_reuse import repair_locations
+        review=repair_locations(review,review_context,candidate,r['changes'],chat,r,cache,deadline)
+        review=repair_citation_metadata(review,review_context,candidate,chat,r,cache,deadline)
         requests=review.get('evidence_requests')
         invalid=issue_errors(review,candidate,r['changes'])
-        contract_errors=requirement_errors(review,candidate,context)
+        contract_errors=requirement_errors(review,candidate,review_context)
         if contract_errors and not review.get('issues'):invalid.extend(contract_errors)
-        preliminary=citation_audit(review,context,candidate)
+        preliminary=citation_audit(review,review_context,candidate)
         if not preliminary['complete']:invalid.append('Citation rows must bind valid passage IDs and cover every selected key')
-        metadata_used=r.get('block_metadata_repairs',{}).get(sha(candidate)) or r.get('citation_metadata_repairs',{}).get(sha(candidate))
-        if (requests or (invalid and not metadata_used)) and not r.get('review_correction_hashes',{}).get(sha(candidate)):
-            r.setdefault('review_correction_hashes',{})[sha(candidate)]=True;atomic_json(cache,r)
-            if requests and workspace is not None:
-                from study_registry import load_registry,facts_for_studies
-                from review_evidence import add_requested_evidence
-                full=facts_for_studies(load_registry(workspace),[s['citekey'] for s in context['canonical_studies']])
-                payload=add_requested_evidence(payload,requests,full)
-            elif requests:
-                r.update(terminal=True,pending_review=False,reason='Source retrieval unavailable');atomic_json(cache,r);return r
-            else:payload['review_schema_feedback']={'errors':invalid,'instruction':'Independently reconsider the same candidate. Correct quote/version ownership; do not invent a defect or relax a scientific check.'}
-            review=ask(chat,REVIEW+(REQUIREMENT_REVIEW if context and context.get('revision_requirements') else ''),payload,'reviewer',r,cache,deadline)
-            r['history'].append({'candidate_sha256':sha(candidate),'review':review})
+        if requests and workspace is not None:
+            from editorial_reuse import resolve_requested_evidence
+            if recheck:
+                review=merge_recheck(review,recheck,context,candidate)
+                recheck=None # Requested inherited sources are now fresh in full binding context.
+                review=resolve_requested_evidence(review,context,candidate,chat,r,cache,deadline,workspace)
+            else:
+                review=resolve_requested_evidence(review,review_context,candidate,chat,r,cache,deadline,workspace)
+        # Schema errors never trigger another complete scientific review.
+        if recheck:
+            review=merge_recheck(review,recheck,context,candidate)
+            r['recheck_inheritance']={k:v for k,v in recheck.items() if k!='context'}
         citation=citation_audit(review,context,candidate)
         errors=issue_errors(review,candidate,r['changes'])
         contract_errors=requirement_errors(review,candidate,context)
         accepted=can_accept(review,candidate,r['changes'],citation) and not contract_errors
         r['requirement_errors']=contract_errors
         r.update(review=review,citation_audit=citation,accepted=bool(accepted),pending_review=False,review_errors=errors)
-        if errors or review.get('evidence_requests'):r['terminal']=True
+        if accepted:
+            from editorial_reuse import make_receipt
+            r['accepted_review_receipt']=make_receipt(r,context)
+        if errors or review.get('evidence_requests') or (not accepted and not review.get('issues')):r['terminal']=True
         atomic_json(cache,r)
         if accepted or r.get('terminal'):return r
     r.update(terminal=True,reason='Persisted targeted edit budget exhausted');atomic_json(cache,r);return r
